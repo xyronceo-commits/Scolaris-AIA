@@ -1,0 +1,11 @@
+{
+  "name": "Scolaris AI",
+  "description": "A refined academic workspace for university students featuring AI-powered study planning, collaborative research hubs, and automated lecture synthesizers.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
