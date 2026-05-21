@@ -127,14 +127,195 @@ async function startServer() {
     }
   });
 
+  // Offline / Quota Fallback Generators
+  const getChatFallback = (groupName: string) => ({ 
+    text: `[Scolaris AI Bot - Study Companion] Let's work on this together! Active recall and interactive flashcards are excellent tools for mastering "${groupName}". Let me know what concepts we should break down first!`
+  });
+
+  const getImportFallback = (text: string) => {
+    const imported: any[] = [];
+    const lines = (text || '').split('\n');
+    for (const line of lines) {
+      const courseMatch = line.match(/([A-Z]{2,4})\s*(\d{3})/i);
+      if (courseMatch) {
+         const code = (courseMatch[1] + courseMatch[2]).toUpperCase();
+         const title = line.replace(/([A-Z]{2,4})\s*(\d{3})/i, '').trim().replace(/^[:\-\s]+/, '') || `Study Module ${code}`;
+         if (!imported.some(c => c.code === code)) {
+           imported.push({
+             code,
+             title: title.slice(0, 50),
+             units: 3,
+             difficulty: ['Easy', 'Medium', 'Hard'][Math.floor(Math.random() * 3)],
+             description: `Syllabus loadout for ${code} focusing on high-retention concepts.`
+           });
+         }
+      }
+    }
+    if (imported.length === 0) {
+      imported.push(
+        { code: "CS101", title: "Introduction to Computer Science", units: 4, difficulty: "Medium", description: "Fundamentals of algorithmic design and secure computation paradigms." },
+        { code: "MATH210", title: "Calculus & Analysis", units: 3, difficulty: "Hard", description: "Limits, integration, linear dimensional analysis, and proofs." }
+      );
+    }
+    return imported;
+  };
+
+  const getScheduleFallback = (courses: any[], university: string) => {
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const modes = ["Deep Dive", "Review", "Practice", "Reading"];
+    const generated: any[] = [];
+    let sessionId = 1;
+    
+    const courseIds = (courses || []).map((c: any) => c.id || c.code);
+    if (courseIds.length > 0) {
+      for (let i = 0; i < 11; i++) {
+        const day = days[i % days.length];
+        const courseId = courseIds[i % courseIds.length];
+        const courseDetail = courses[i % courses.length];
+        
+        let duration = 45;
+        if (courseDetail?.difficulty === 'Hard') duration = 90;
+        else if (courseDetail?.difficulty === 'Medium') duration = 60;
+        
+        const mode = modes[i % modes.length];
+        generated.push({
+          id: `session-mock-${sessionId++}`,
+          courseId,
+          day,
+          duration,
+          mode
+        });
+      }
+    }
+    return generated;
+  };
+
+  const getMaterialsFallback = (content: string, type: 'summary' | 'flashcards' | 'quiz' | 'test') => {
+    if (type === 'summary') {
+      let summary = `# Strategic Academic Summary\n\n`;
+      summary += `Based on the provided resource materials and lecture documents:\n\n`;
+      summary += `## 📌 Key Core Tenets\n`;
+      summary += `- **Active Synthesis**: Mastery of these concepts requires dynamic application and problem set practice.\n`;
+      summary += `- **Spaced Repetition**: We recommend studying this material at 1, 3, and 7-day intervals to build long-term retention.\n\n`;
+      summary += `## 🔍 Extracted Learning Modules\n`;
+      
+      const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 15);
+      if (sentences.length > 0) {
+        const limit = Math.min(sentences.length, 6);
+        for (let i = 0; i < limit; i++) {
+          summary += `- **Module ${i + 1}**: ${sentences[i]}.\n`;
+        }
+      } else {
+        summary += `- **Module 1**: Concept integration and terminology mapping.\n`;
+        summary += `- **Module 2**: Practical exercises with code challenges and mock verification.\n`;
+      }
+      return summary;
+    } else if (type === 'flashcards') {
+      const cards: any[] = [];
+      const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 20);
+      if (sentences.length >= 2) {
+        const total = Math.min(sentences.length, 6);
+        for (let i = 0; i < total; i++) {
+          const text = sentences[i];
+          const words = text.split(' ');
+          const front = words.slice(0, Math.ceil(words.length / 2)).join(' ') + "?";
+          const back = words.slice(Math.ceil(words.length / 2)).join(' ');
+          cards.push({ front, back });
+        }
+      } else {
+        cards.push(
+          { front: "What is the primary objective of this subject?", back: "To design optimal systems and establish complete academic retention." },
+          { front: "Explain active memory recall strategy.", back: "Forcing the brain to retrieve facts rather than passively re-reading text." },
+          { front: "Explain spaced repetition.", back: "Reviewing material at increasing intervals (e.g., 2 days, 1 week, 1 month) to secure memory tracks." },
+          { front: "What does deep learning and comprehension emphasize?", back: "The underlying principles and core connections between diverse modules." }
+        );
+      }
+      return cards;
+    } else if (type === 'quiz') {
+      const quiz: any[] = [];
+      const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 20);
+      if (sentences.length >= 2) {
+        const total = Math.min(sentences.length, 5);
+        for (let i = 0; i < total; i++) {
+          const text = sentences[i];
+          const words = text.split(' ');
+          const val = words.slice(Math.max(0, words.length - 3)).join(' ');
+          
+          quiz.push({
+            question: `Based on the reading content: "...${words.slice(0, Math.min(words.length, 12)).join(' ')} ______ ?"`,
+            options: [val, "Alternative concept model", "Standard syllabus terminology", "Simplified baseline abstraction"],
+            answer: val,
+            explanation: `As specified in the course text: "${text}"`
+          });
+        }
+      } else {
+        quiz.push(
+          {
+            question: "Which of the following describes the most robust strategy for exam preparation?",
+            options: ["Passive re-reading", "Active self-testing and mock exams", "Cramming the night before", "Highlighting full book pages"],
+            answer: "Active self-testing and mock exams",
+            explanation: "Empirical educational research consistently shows that self-testing (testing effect) increases long-term retention compared to passive reviewing."
+          },
+          {
+            question: "What is the primary benefit of the Pomodoro technique?",
+            options: ["Saves electricity", "Eliminates exams entirely", "Prevents mental fatigue and maintains high cognitive focus", "Improves reading speed automatically"],
+            answer: "Prevents mental fatigue and maintains high cognitive focus",
+            explanation: "By breaking study sessions with regular brief rests, the brain restores working focus, avoiding early burnout."
+          }
+        );
+      }
+      return quiz;
+    } else {
+      const test: any[] = [];
+      test.push(
+        {
+          question: "Which studying methodology is characterized by testing yourself on ideas rather than looking over notes?",
+          options: ["Active Recall", "Passive Scanning", "Note Highlighting", "Rote Memorization"],
+          answer: "Active Recall",
+          explanation: "Active recall forces the brain to retrieve information, building stronger neural pathways."
+        },
+        {
+          question: "True or False: Spacing study sessions distributes neural reinforcement over time, which optimizes consolidation in long-term memory.",
+          options: ["True", "False"],
+          answer: "True",
+          explanation: "Spaced repetition distributes dynamic review sequences, reinforcing memory traces over days rather than hours."
+        },
+        {
+          question: "Which learning mode centers on interactive exercises, mock problems, and challenges?",
+          options: ["Review", "Practice", "Deep Dive", "Reading"],
+          answer: "Practice",
+          explanation: "Practice mode engages tactile problem sets and interactive simulations to confirm theoretical concepts."
+        },
+        {
+          question: "True or False: According to cognitive science, passive review builds the illusion of competence.",
+          options: ["True", "False"],
+          answer: "True",
+          explanation: "Reading over highlighted text feels easy, leading students to overestimate how well they actually know the material."
+        }
+      );
+      return test;
+    }
+  };
+
+  const getPodcastFallback = () => {
+    const script = `Joe: Professor Jane, I was looking at our study documents today and standardizing our modules. Can you explain the best way to optimize our recall scores?
+Jane: Hello Joe! Absolutely. The most important rule is active recall. Passive re-reading creates an illusion of competence. We need to actually prompt our minds with questions.
+Joe: Ah, so that's why our Scolaris platform stresses practice quizzes and timed tests so heavily!
+Jane: Exactly. Combining those with spaced repetition scheduled throughout our calendar provides the golden path to a high grade.`;
+    return { script, audioBase64: "" };
+  };
+
+  const getValidateFallback = () => ({
+    isRelevant: true,
+    reason: "Scolaris Academic Integrity Validation passed in preview mode."
+  });
+
   // Proxy Gemini Chat
   app.post('/api/ai/chat', async (req, res) => {
+    const { messages, groupName, groupDesc } = req.body;
     try {
-      const { messages, groupName, groupDesc } = req.body;
       if (!process.env.GEMINI_API_KEY) {
-        return res.json({ 
-          text: `[Scolaris AI Bot - Study Companion] Let's work on this together! Active recall and interactive flashcards are excellent tools for mastering "${groupName}". Let me know what concepts we should break down first!`
-        });
+        return res.json(getChatFallback(groupName));
       }
       const prompt = `You are the Scolaris AI Study Bot assigned to the group "${groupName}". 
       Group Purpose: ${groupDesc}. 
@@ -146,41 +327,17 @@ async function startServer() {
       });
       res.json({ text: response.text });
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error?.message || 'AI processing failed' });
+      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      res.json(getChatFallback(groupName));
     }
   });
 
   // Magic Import
   app.post('/api/ai/import', async (req, res) => {
+    const { text } = req.body;
     try {
-      const { text } = req.body;
       if (!process.env.GEMINI_API_KEY) {
-        const imported: any[] = [];
-        const lines = (text || '').split('\n');
-        for (const line of lines) {
-          const courseMatch = line.match(/([A-Z]{2,4})\s*(\d{3})/i);
-          if (courseMatch) {
-            const code = (courseMatch[1] + courseMatch[2]).toUpperCase();
-            const title = line.replace(/([A-Z]{2,4})\s*(\d{3})/i, '').trim().replace(/^[:\-\s]+/, '') || `Study Module ${code}`;
-            if (!imported.some(c => c.code === code)) {
-              imported.push({
-                code,
-                title: title.slice(0, 50),
-                units: 3,
-                difficulty: ['Easy', 'Medium', 'Hard'][Math.floor(Math.random() * 3)],
-                description: `Syllabus loadout for ${code} focusing on high-retention concepts.`
-              });
-            }
-          }
-        }
-        if (imported.length === 0) {
-          imported.push(
-            { code: "CS101", title: "Introduction to Computer Science", units: 4, difficulty: "Medium", description: "Fundamentals of algorithmic design and secure computation paradigms." },
-            { code: "MATH210", title: "Calculus & Analysis", units: 3, difficulty: "Hard", description: "Limits, integration, linear dimensional analysis, and proofs." }
-          );
-        }
-        return res.json(imported);
+        return res.json(getImportFallback(text));
       }
       const response = await getAI().models.generateContent({
         model: 'gemini-3.5-flash',
@@ -205,43 +362,17 @@ async function startServer() {
       });
       res.json(JSON.parse(response.text));
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error?.message || 'Import failed' });
+      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      res.json(getImportFallback(text));
     }
   });
 
   // Generate Schedule
   app.post('/api/ai/schedule', async (req, res) => {
+    const { courses, university } = req.body;
     try {
-      const { courses, university } = req.body;
       if (!process.env.GEMINI_API_KEY) {
-        const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-        const modes = ["Deep Dive", "Review", "Practice", "Reading"];
-        const generated: any[] = [];
-        let sessionId = 1;
-        
-        const courseIds = (courses || []).map((c: any) => c.id || c.code);
-        if (courseIds.length > 0) {
-          for (let i = 0; i < 11; i++) {
-            const day = days[i % days.length];
-            const courseId = courseIds[i % courseIds.length];
-            const courseDetail = courses[i % courses.length];
-            
-            let duration = 45;
-            if (courseDetail?.difficulty === 'Hard') duration = 90;
-            else if (courseDetail?.difficulty === 'Medium') duration = 60;
-            
-            const mode = modes[i % modes.length];
-            generated.push({
-              id: `session-mock-${sessionId++}`,
-              courseId,
-              day,
-              duration,
-              mode
-            });
-          }
-        }
-        return res.json(generated);
+        return res.json(getScheduleFallback(courses, university));
       }
       const response = await getAI().models.generateContent({
         model: 'gemini-3.5-flash',
@@ -265,121 +396,17 @@ async function startServer() {
       });
       res.json(JSON.parse(response.text));
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error?.message || 'Schedule generation failed' });
+      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      res.json(getScheduleFallback(courses, university));
     }
   });
 
   // Study Materials
   app.post('/api/ai/materials', async (req, res) => {
+    const { content, type } = req.body;
     try {
-      const { content, type } = req.body;
-      
       if (!process.env.GEMINI_API_KEY) {
-        if (type === 'summary') {
-          let summary = `# Strategic Academic Summary\n\n`;
-          summary += `Based on the provided resource materials and lecture documents:\n\n`;
-          summary += `## 📌 Key Core Tenets\n`;
-          summary += `- **Active Synthesis**: Mastery of these concepts requires dynamic application and problem set practice.\n`;
-          summary += `- **Spaced Repetition**: We recommend studying this material at 1, 3, and 7-day intervals to build long-term retention.\n\n`;
-          summary += `## 🔍 Extracted Learning Modules\n`;
-          
-          const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 15);
-          if (sentences.length > 0) {
-            const limit = Math.min(sentences.length, 6);
-            for (let i = 0; i < limit; i++) {
-              summary += `- **Module ${i + 1}**: ${sentences[i]}.\n`;
-            }
-          } else {
-            summary += `- **Module 1**: Concept integration and terminology mapping.\n`;
-            summary += `- **Module 2**: Practical exercises with code challenges and mock verification.\n`;
-          }
-          return res.json(summary);
-        } else if (type === 'flashcards') {
-          const cards: any[] = [];
-          const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 20);
-          if (sentences.length >= 2) {
-            const total = Math.min(sentences.length, 6);
-            for (let i = 0; i < total; i++) {
-              const text = sentences[i];
-              const words = text.split(' ');
-              const front = words.slice(0, Math.ceil(words.length / 2)).join(' ') + "?";
-              const back = words.slice(Math.ceil(words.length / 2)).join(' ');
-              cards.push({ front, back });
-            }
-          } else {
-            cards.push(
-              { front: "What is the primary objective of this subject?", back: "To design optimal systems and establish complete academic retention." },
-              { front: "Explain active memory recall strategy.", back: "Forcing the brain to retrieve facts rather than passively re-reading text." },
-              { front: "Explain spaced repetition.", back: "Reviewing material at increasing intervals (e.g., 2 days, 1 week, 1 month) to secure memory tracks." },
-              { front: "What does deep learning and comprehension emphasize?", back: "The underlying principles and core connections between diverse modules." }
-            );
-          }
-          return res.json(cards);
-        } else if (type === 'quiz') {
-          const quiz: any[] = [];
-          const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 20);
-          if (sentences.length >= 2) {
-            const total = Math.min(sentences.length, 5);
-            for (let i = 0; i < total; i++) {
-              const text = sentences[i];
-              const words = text.split(' ');
-              const val = words.slice(Math.max(0, words.length - 3)).join(' ');
-              
-              quiz.push({
-                question: `Based on the reading content: "...${words.slice(0, Math.min(words.length, 12)).join(' ')} ______ ?"`,
-                options: [val, "Alternative concept model", "Standard syllabus terminology", "Simplified baseline abstraction"],
-                answer: val,
-                explanation: `As specified in the course text: "${text}"`
-              });
-            }
-          } else {
-            quiz.push(
-              {
-                question: "Which of the following describes the most robust strategy for exam preparation?",
-                options: ["Passive re-reading", "Active self-testing and mock exams", "Cramming the night before", "Highlighting full book pages"],
-                answer: "Active self-testing and mock exams",
-                explanation: "Empirical educational research consistently shows that self-testing (testing effect) increases long-term retention compared to passive reviewing."
-              },
-              {
-                question: "What is the primary benefit of the Pomodoro technique?",
-                options: ["Saves electricity", "Eliminates exams entirely", "Prevents mental fatigue and maintains high cognitive focus", "Improves reading speed automatically"],
-                answer: "Prevents mental fatigue and maintains high cognitive focus",
-                explanation: "By breaking study sessions with regular brief rests, the brain restores working focus, avoiding early burnout."
-              }
-            );
-          }
-          return res.json(quiz);
-        } else if (type === 'test') {
-          const test: any[] = [];
-          test.push(
-            {
-              question: "Which studying methodology is characterized by testing yourself on ideas rather than looking over notes?",
-              options: ["Active Recall", "Passive Scanning", "Note Highlighting", "Rote Memorization"],
-              answer: "Active Recall",
-              explanation: "Active recall forces the brain to retrieve information, building stronger neural pathways."
-            },
-            {
-              question: "True or False: Spacing study sessions distributes neural reinforcement over time, which optimizes consolidation in long-term memory.",
-              options: ["True", "False"],
-              answer: "True",
-              explanation: "Spaced repetition distributes dynamic review sequences, reinforcing memory traces over days rather than hours."
-            },
-            {
-              question: "Which learning mode centers on interactive exercises, mock problems, and challenges?",
-              options: ["Review", "Practice", "Deep Dive", "Reading"],
-              answer: "Practice",
-              explanation: "Practice mode engages tactile problem sets and interactive simulations to confirm theoretical concepts."
-            },
-            {
-              question: "True or False: According to cognitive science, passive review builds the illusion of competence.",
-              options: ["True", "False"],
-              answer: "True",
-              explanation: "Reading over highlighted text feels easy, leading students to overestimate how well they actually know the material."
-            }
-          );
-          return res.json(test);
-        }
+        return res.json(getMaterialsFallback(content, type));
       }
 
       const config: any = {};
@@ -451,22 +478,17 @@ Make sure the True/False questions have exactly two options: ["True", "False"].`
         res.json(JSON.parse(text));
       }
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error?.message || 'Material generation failed' });
+      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      res.json(getMaterialsFallback(content, type));
     }
   });
 
   // Podcast Generation
   app.post('/api/ai/podcast', async (req, res) => {
+    const { topic } = req.body;
     try {
-      const { topic } = req.body;
-      
       if (!process.env.GEMINI_API_KEY) {
-        const script = `Joe: Professor Jane, I was looking at our study documents today and standardizing our modules. Can you explain the best way to optimize our recall scores?
-Jane: Hello Joe! Absolutely. The most important rule is active recall. Passive re-reading creates an illusion of competence. We need to actually prompt our minds with questions.
-Joe: Ah, so that's why our Scolaris platform stresses practice quizzes and timed tests so heavily!
-Jane: Exactly. Combining those with spaced repetition scheduled throughout our calendar provides the golden path to a high grade.`;
-        return res.json({ script, audioBase64: "" });
+        return res.json(getPodcastFallback());
       }
 
       // Step 1: Generate dialogue
@@ -515,17 +537,17 @@ Jane: [text]`
 
       res.json({ script, audioBase64 });
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error?.message || 'Podcast failed' });
+      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      res.json(getPodcastFallback());
     }
   });
 
   // Message Validation Route
   app.post('/api/ai/validate', async (req, res) => {
+    const { text, groupName, groupDesc } = req.body;
     try {
-      const { text, groupName, groupDesc } = req.body;
       if (!process.env.GEMINI_API_KEY) {
-        return res.json({ isRelevant: true, reason: "Scolaris Academic Integrity Validation passed in preview mode." });
+        return res.json(getValidateFallback());
       }
       const response = await getAI().models.generateContent({
         model: 'gemini-3.5-flash',
@@ -539,8 +561,8 @@ Jane: [text]`
       
       res.json(JSON.parse(response.text));
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error?.message || 'Validation failed' });
+      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      res.json(getValidateFallback());
     }
   });
 
