@@ -33,6 +33,7 @@ const App: React.FC = () => {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [loading, setLoading] = useState(true);
 
   // Supabase Auth and Data Fetching
@@ -256,9 +257,20 @@ const App: React.FC = () => {
 
   if (!profile) {
     if (showAuth) {
-      return <Auth onAuth={(p) => setProfile(p)} />;
+      return <Auth onAuth={(p) => setProfile(p)} initialMode={authMode} />;
     }
-    return <LandingPage onStart={() => setShowAuth(true)} onSignIn={() => setShowAuth(true)} />;
+    return (
+      <LandingPage 
+        onStart={() => {
+          setAuthMode('signup');
+          setShowAuth(true);
+        }} 
+        onSignIn={() => {
+          setAuthMode('signin');
+          setShowAuth(true);
+        }} 
+      />
+    );
   }
 
   if (profile && !profile.onboarded) {

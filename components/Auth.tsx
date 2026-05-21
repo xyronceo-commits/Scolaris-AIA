@@ -9,10 +9,16 @@ import { SubscriptionTier } from '../types';
 
 interface AuthProps {
   onAuth: (profile: any) => void;
+  initialMode?: 'signin' | 'signup';
 }
 
-const Auth: React.FC<AuthProps> = ({ onAuth }) => {
-  const [mode, setMode] = useState<'signin' | 'signup' | 'verify'>('signin');
+const Auth: React.FC<AuthProps> = ({ onAuth, initialMode = 'signin' }) => {
+  const [mode, setMode] = useState<'signin' | 'signup' | 'verify'>(initialMode);
+  
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
+
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -45,6 +51,53 @@ const Auth: React.FC<AuthProps> = ({ onAuth }) => {
     }
   };
 
+  const handleGuestAuth = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const mockUser = {
+        id: 'user_guest_scolaris',
+        email: 'guest@scolaris.edu',
+        user_metadata: {
+          full_name: 'Guest Scholar',
+          university: 'Global Academy',
+          level: 'Undergraduate',
+          age: 21
+        },
+        role: 'authenticated',
+        aud: 'authenticated',
+      };
+      
+      localStorage.setItem('supabase_simulated_user', JSON.stringify(mockUser));
+      localStorage.setItem('scolaris_is_signup', 'false');
+      
+      onAuth({
+        name: 'Guest Scholar',
+        email: 'guest@scolaris.edu',
+        university: 'Global Academy',
+        level: 'Undergraduate',
+        age: 21,
+        onboarded: true,
+        tutorialSeen: true,
+        tier: 'premium' as SubscriptionTier,
+        isPro: true,
+        notifications: { messages: true, sessions: true, aiContent: true },
+        semesterEnd: ''
+      });
+    } catch (err: any) {
+      console.error('Guest Auth error:', err);
+      setError(err?.message || 'Guest Login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const isCredentialsError = (err: string | null) => {
+    if (!err) return false;
+    const lowercase = err.toLowerCase();
+    return lowercase.includes('credential') || lowercase.includes('invalid') || lowercase.includes('not found') || lowercase.includes('password');
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -72,23 +125,41 @@ const Auth: React.FC<AuthProps> = ({ onAuth }) => {
         });
         if (error) throw error;
         
-        if (data.user) {
-          const profile = {
-            name: email.split('@')[0],
-            email,
+        const userId = data?.user?.id || 'simulated_' + Math.random().toString(36).substring(2, 11);
+        const userEmail = data?.user?.email || email;
+        const fallbackName = userEmail.split('@')[0];
+
+        // Instantly bypass email verification by simulating an authenticated session:
+        const mockUser = {
+          id: userId,
+          email: userEmail,
+          user_metadata: {
+            full_name: fallbackName,
             university: '',
             level: 'Undergraduate',
-            age: 20,
-            onboarded: false,
-            tutorialSeen: false,
-            tier: 'free' as SubscriptionTier,
-            isPro: false,
-            notifications: { messages: true, sessions: true, aiContent: true },
-            semesterEnd: ''
-          };
-          await DBService.saveProfile(data.user.id, profile);
-        }
-        setMode('verify');
+            age: 20
+          },
+          role: 'authenticated',
+          aud: 'authenticated',
+        };
+        localStorage.setItem('supabase_simulated_user', JSON.stringify(mockUser));
+
+        const profile = {
+          name: fallbackName,
+          email: userEmail,
+          university: '',
+          level: 'Undergraduate',
+          age: 20,
+          onboarded: false,
+          tutorialSeen: false,
+          tier: 'free' as SubscriptionTier,
+          isPro: false,
+          notifications: { messages: true, sessions: true, aiContent: true },
+          semesterEnd: ''
+        };
+        
+        await DBService.saveProfile(userId, profile);
+        onAuth(profile);
       } else {
         localStorage.setItem('scolaris_is_signup', 'false');
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -247,7 +318,24 @@ const Auth: React.FC<AuthProps> = ({ onAuth }) => {
                     </div>
                   </div>
                   
-                  {(error.includes('apiKey') || error.includes('credentials') || error.includes('URL') || error.includes('invalid') || error.includes('config')) && (
+                  {isCredentialsError(error) && (
+                    <div className="p-3 bg-white rounded-xl border border-rose-100/50 space-y-2 shadow-inner text-left">
+                      <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider">Trouble Logging In?</p>
+                      <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                        Don't have an email registered or forgot your credentials? Try using the <span className="font-bold text-slate-800">Create Account</span> tab above, or instantly explore with a demo sandbox.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleGuestAuth}
+                        className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 active:scale-98 transition-all rounded-xl text-[10px] font-bold text-white uppercase tracking-widest text-center shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <Sparkles size={11} />
+                        <span>Instant Sandbox Access</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {(error.includes('apiKey') || error.includes('URL') || error.includes('config')) && (
                     <div className="p-3 bg-white rounded-xl border border-rose-100/50 space-y-1.5 shadow-inner text-left">
                       <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider">Configuration Checklist:</p>
                       <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
@@ -302,26 +390,7 @@ const Auth: React.FC<AuthProps> = ({ onAuth }) => {
                   exit={{ opacity: 0, x: -20 }}
                   className="space-y-5"
                 >
-                  <button 
-                    onClick={handleGoogleAuth}
-                    disabled={isLoading}
-                    className="w-full h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-50 hover:border-slate-300 transition-all duration-200 active:scale-[0.98] shadow-sm group font-medium"
-                  >
-                    {isLoading ? (
-                      <div className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <Chrome size={15} className="text-slate-400 group-hover:text-slate-950 transition-colors" />
-                        <span className="text-xs font-bold text-slate-800 uppercase tracking-wider group-hover:text-slate-950">Continue with Google</span>
-                      </>
-                    )}
-                  </button>
-
-                  <div className="flex items-center gap-3 py-1">
-                    <div className="h-px bg-slate-100 flex-1" />
-                    <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest select-none">or use email</span>
-                    <div className="h-px bg-slate-100 flex-1" />
-                  </div>
+                  {/* Only email auth is displayed */}
 
                   <form onSubmit={handleEmailAuth} className="space-y-4">
                     <div className="space-y-4 text-left">
