@@ -14,21 +14,17 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Lazy init helpers
-  let aiClient: GoogleGenAI | null = null;
-  const getAI = () => {
-    if (!aiClient) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error('GEMINI_API_KEY is required');
-      aiClient = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          }
+  const getAI = (customKey?: string) => {
+    const apiKey = customKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY is required');
+    return new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
         }
-      });
-    }
-    return aiClient;
+      }
+    });
   };
 
   let s3Client: S3Client | null = null;
@@ -313,15 +309,17 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Proxy Gemini Chat
   app.post('/api/ai/chat', async (req, res) => {
     const { messages, groupName, groupDesc } = req.body;
+    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
         return res.json(getChatFallback(groupName));
       }
       const prompt = `You are the Scolaris AI Study Bot assigned to the group "${groupName}". 
       Group Purpose: ${groupDesc}. 
       Conversation History: ${JSON.stringify(messages)}. 
       Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
-      const response = await getAI().models.generateContent({
+      const response = await getAI(customKey).models.generateContent({
         model: 'gemini-3.5-flash',
         contents: prompt
       });
@@ -335,11 +333,13 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Magic Import
   app.post('/api/ai/import', async (req, res) => {
     const { text } = req.body;
+    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
         return res.json(getImportFallback(text));
       }
-      const response = await getAI().models.generateContent({
+      const response = await getAI(customKey).models.generateContent({
         model: 'gemini-3.5-flash',
         contents: `Extract course metadata from this text: "${text}". If multiple courses exist, return a list.`,
         config: {
@@ -370,11 +370,13 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Generate Schedule
   app.post('/api/ai/schedule', async (req, res) => {
     const { courses, university } = req.body;
+    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
         return res.json(getScheduleFallback(courses, university));
       }
-      const response = await getAI().models.generateContent({
+      const response = await getAI(customKey).models.generateContent({
         model: 'gemini-3.5-flash',
         contents: `Create a weekly study schedule (Mon-Sun) for a student at ${university} taking these courses: ${JSON.stringify(courses)}. Priority should be given to Hard courses and higher units. Allocate at least 10 sessions total across the week.`,
         config: {
@@ -404,8 +406,10 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Study Materials
   app.post('/api/ai/materials', async (req, res) => {
     const { content, type } = req.body;
+    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
         return res.json(getMaterialsFallback(content, type));
       }
 
@@ -464,7 +468,7 @@ Make sure the True/False questions have exactly two options: ["True", "False"].`
         };
       }
       
-      const response = await getAI().models.generateContent({
+      const response = await getAI(customKey).models.generateContent({
         model: 'gemini-3.5-flash',
         contents: prompt,
         config
@@ -486,13 +490,15 @@ Make sure the True/False questions have exactly two options: ["True", "False"].`
   // Podcast Generation
   app.post('/api/ai/podcast', async (req, res) => {
     const { topic } = req.body;
+    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
         return res.json(getPodcastFallback());
       }
 
       // Step 1: Generate dialogue
-      const scriptResponse = await getAI().models.generateContent({
+      const scriptResponse = await getAI(customKey).models.generateContent({
         model: 'gemini-3.5-flash',
         contents: `Create short academic conversation (3-4 exchanges) between Joe (a student) and Jane (a professor) about this content: "${topic?.slice(0, 3000)}".
 Use format:
@@ -505,7 +511,7 @@ Jane: [text]`
       // Step 2: Speech Synthesis in multi-speaker layout
       let audioBase64 = '';
       try {
-        const ttsResponse = await getAI().models.generateContent({
+        const ttsResponse = await getAI(customKey).models.generateContent({
           model: 'gemini-3.1-flash-tts-preview',
           contents: [{ parts: [{ text: `TTS the following conversation: ${script}` }] }],
           config: {
@@ -545,11 +551,13 @@ Jane: [text]`
   // Message Validation Route
   app.post('/api/ai/validate', async (req, res) => {
     const { text, groupName, groupDesc } = req.body;
+    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
         return res.json(getValidateFallback());
       }
-      const response = await getAI().models.generateContent({
+      const response = await getAI(customKey).models.generateContent({
         model: 'gemini-3.5-flash',
         contents: `Evaluate if the following message is relevant to the purpose of the study group "${groupName}".
         Group Description: ${groupDesc}

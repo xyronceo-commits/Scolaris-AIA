@@ -50,7 +50,12 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
 }
 
 const getHeaders = (): HeadersInit => {
-  return { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const customKey = localStorage.getItem('scolaris_custom_gemini_api_key');
+  if (customKey) {
+    headers['X-Gemini-API-Key'] = customKey;
+  }
+  return headers;
 };
 
 export const GeminiService = {
