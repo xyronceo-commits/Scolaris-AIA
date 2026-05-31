@@ -14,14 +14,14 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
   const [isEditing, setIsEditing] = React.useState(false);
   const [editedProfile, setEditedProfile] = React.useState(profile);
   
-  const [apiKeyInput, setApiKeyInput] = React.useState(() => localStorage.getItem('scolaris_custom_gemini_api_key') || '');
+  const [apiKeyInput, setApiKeyInput] = React.useState(() => localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key') || '');
   const [showKey, setShowKey] = React.useState(false);
   const [saveSuccess, setSaveSuccess] = React.useState(false);
 
   const handleSaveKey = () => {
     const trimmed = apiKeyInput.trim();
     if (trimmed) {
-      localStorage.setItem('scolaris_custom_gemini_api_key', trimmed);
+      localStorage.setItem('scolaris_custom_groq_api_key', trimmed);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
     } else {
@@ -30,10 +30,10 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
   };
 
   const handleClearKey = () => {
+    localStorage.removeItem('scolaris_custom_groq_api_key');
     localStorage.removeItem('scolaris_custom_gemini_api_key');
     setApiKeyInput('');
     setSaveSuccess(false);
-    // Trigger window storage/state event if needed, but standard reload or local variable state is perfect
   };
 
   const handleSave = () => {
@@ -145,7 +145,7 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
 
         {/* Scolaris AI Companion Control Panel */}
          <section className="space-y-4">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Scolaris AI Companion</h3>
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Scolaris Groq Companion</h3>
             <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm space-y-6">
                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
@@ -153,12 +153,12 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                         <Key size={20} />
                      </div>
                      <div className="space-y-0.5">
-                        <h4 className="text-sm font-bold text-slate-900">Custom Gemini API Key</h4>
-                        <p className="text-[10px] text-slate-500 font-medium italic">Override system default model keys with your preferred credential</p>
+                        <h4 className="text-sm font-bold text-slate-900">Custom Groq API Key</h4>
+                        <p className="text-[10px] text-slate-500 font-medium italic">Override system default model keys with your preferred Groq credential</p>
                      </div>
                   </div>
                   <div>
-                     {localStorage.getItem('scolaris_custom_gemini_api_key') ? (
+                     {(localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key')) ? (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold uppercase tracking-wider border border-emerald-100">
                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                            Companion Override Active
@@ -178,7 +178,7 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                        type={showKey ? "text" : "password"}
                        value={apiKeyInput}
                        onChange={e => setApiKeyInput(e.target.value)}
-                       placeholder="Enter your Gemini API Key (starts with AIzaSy...)"
+                       placeholder="Enter your Groq API Key (starts with gsk_...)"
                        className="w-full pl-4 pr-12 py-3 bg-slate-50/50 border border-slate-200 focus:border-slate-400 focus:bg-white rounded-xl text-sm font-mono focus:outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
                      />
                      <button 
@@ -195,7 +195,7 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                         Your credential is saved securely in your browser (<b>localStorage</b>) and only utilized programmatically for secure full-stack proxy routing.
                      </p>
                      <div className="flex items-center gap-2">
-                        {localStorage.getItem('scolaris_custom_gemini_api_key') && (
+                        {(localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key')) && (
                            <button 
                              onClick={handleClearKey}
                              className="px-4 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg text-[10px] uppercase font-bold tracking-wider border border-slate-200 transition-all"

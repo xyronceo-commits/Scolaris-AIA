@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -15,15 +15,10 @@ async function startServer() {
 
   // Lazy init helpers
   const getAI = (customKey?: string) => {
-    const apiKey = customKey || process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY is required');
-    return new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
+    const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GROQ_API_KEY is required');
+    return new Groq({
+      apiKey
     });
   };
 
@@ -306,12 +301,12 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
     reason: "Scolaris Academic Integrity Validation passed in preview mode."
   });
 
-  // Proxy Gemini Chat
+  // Proxy Groq Chat
   app.post('/api/ai/chat', async (req, res) => {
     const { messages, groupName, groupDesc } = req.body;
-    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
     try {
-      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.json(getChatFallback(groupName));
       }
@@ -319,13 +314,13 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
       Group Purpose: ${groupDesc}. 
       Conversation History: ${JSON.stringify(messages)}. 
       Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
-      const response = await getAI(customKey).models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: prompt
+      const response = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-specdec',
+        messages: [{ role: 'user', content: prompt }]
       });
-      res.json({ text: response.text });
+      res.json({ text: response.choices[0].message.content });
     } catch (error: any) {
-      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getChatFallback(groupName));
     }
   });
@@ -333,36 +328,30 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Magic Import
   app.post('/api/ai/import', async (req, res) => {
     const { text } = req.body;
-    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
     try {
-      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.json(getImportFallback(text));
       }
-      const response = await getAI(customKey).models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: `Extract course metadata from this text: "${text}". If multiple courses exist, return a list.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                code: { type: "string" },
-                title: { type: "string" },
-                units: { type: "number" },
-                difficulty: { type: "string", description: "One of: Easy, Medium, Hard" },
-                description: { type: "string" }
-              },
-              required: ["code", "title", "units", "difficulty"]
-            }
+      const response = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-specdec',
+        messages: [
+          {
+            role: 'system',
+            content: 'Extract course metadata from the following text. You must return a valid JSON object with a "courses" key containing an array of courses. Each course must have "code", "title", "units" (number), "difficulty" ("Easy", "Medium", "Hard"), and "description".'
+          },
+          {
+            role: 'user',
+            content: text
           }
-        }
+        ],
+        response_format: { type: "json_object" }
       });
-      res.json(JSON.parse(response.text));
+      const parsed = JSON.parse(response.choices[0].message.content || '{}');
+      res.json(parsed.courses || parsed);
     } catch (error: any) {
-      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getImportFallback(text));
     }
   });
@@ -370,35 +359,37 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Generate Schedule
   app.post('/api/ai/schedule', async (req, res) => {
     const { courses, university } = req.body;
-    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
     try {
-      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.json(getScheduleFallback(courses, university));
       }
-      const response = await getAI(customKey).models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: `Create a weekly study schedule (Mon-Sun) for a student at ${university} taking these courses: ${JSON.stringify(courses)}. Priority should be given to Hard courses and higher units. Allocate at least 10 sessions total across the week.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                courseId: { type: "string" },
-                day: { type: "string" },
-                duration: { type: "number" },
-                mode: { type: "string" }
-              },
-              required: ["courseId", "day", "duration", "mode"]
-            }
+      const response = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-specdec',
+        messages: [
+          {
+            role: 'system',
+            content: `Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
+            You must return a valid JSON object with a "schedule" key containing an array of sessions. 
+            Each session object must have:
+            - "courseId": string (id/code of course)
+            - "day": string (e.g., "Monday", "Tuesday", etc.)
+            - "duration": number of minutes (e.g., 45, 60, 90)
+            - "mode": string describing study mode (e.g., "Practice", "Deep Dive", "Review", "Reading")
+            Priority should be given to Hard courses and higher units. Allocate at least 10 sessions total across the week.`
+          },
+          {
+            role: 'user',
+            content: `Courses: ${JSON.stringify(courses)}`
           }
-        }
+        ],
+        response_format: { type: "json_object" }
       });
-      res.json(JSON.parse(response.text));
+      const parsed = JSON.parse(response.choices[0].message.content || '{}');
+      res.json(parsed.schedule || parsed.sessions || parsed);
     } catch (error: any) {
-      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getScheduleFallback(courses, university));
     }
   });
@@ -406,83 +397,98 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Study Materials
   app.post('/api/ai/materials', async (req, res) => {
     const { content, type } = req.body;
-    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
     try {
-      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.json(getMaterialsFallback(content, type));
       }
 
-      const config: any = {};
-      let prompt = "";
+      let messages: any[] = [];
+      let responseFormat: any = undefined;
 
       if (type === 'summary') {
-        prompt = `Generate a structured markdown summary of this content: ${content}`;
+        messages = [
+          {
+            role: 'system',
+            content: 'You are an elite academic tutor. Generate a highly structured, visual, and comprehensive markdown summary of the provided text content.'
+          },
+          {
+            role: 'user',
+            content: content
+          }
+        ];
       } else if (type === 'flashcards') {
-        prompt = `Generate a list of 5-8 high-quality flashcards (Front/Back) from this content: ${content}`;
-        config.responseMimeType = "application/json";
-        config.responseSchema = {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              front: { type: "string" },
-              back: { type: "string" }
-            },
-            required: ["front", "back"]
+        messages = [
+          {
+            role: 'system',
+            content: `You must return a valid JSON object with key "flashcards" containing an array of 5-8 flashcard objects. 
+            Each flashcard has:
+            - "front": string (question or term)
+            - "back": string (informative answer or definition)`
+          },
+          {
+            role: 'user',
+            content: content
           }
-        };
+        ];
+        responseFormat = { type: "json_object" };
       } else if (type === 'quiz') {
-        prompt = `Generate a quiz with 5 multiple-choice questions from this content: ${content}`;
-        config.responseMimeType = "application/json";
-        config.responseSchema = {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              question: { type: "string" },
-              options: { type: "array", items: { type: "string" } },
-              answer: { type: "string" },
-              explanation: { type: "string" }
-            },
-            required: ["question", "options", "answer", "explanation"]
+        messages = [
+          {
+            role: 'system',
+            content: `You must return a valid JSON object with key "quiz" containing an array of 5 multiple-choice questions from the content.
+            Each question has:
+            - "question": string
+            - "options": array of 4 strings
+            - "answer": string (must exactly match one of the options)
+            - "explanation": string explaining why it is correct`
+          },
+          {
+            role: 'user',
+            content: content
           }
-        };
+        ];
+        responseFormat = { type: "json_object" };
       } else if (type === 'test') {
-        prompt = `Generate a comprehensive exam simulation with 8 questions from this content: ${content}.
-Include 4 Multiple-Choice questions and 4 True/False questions.
-Make sure the True/False questions have exactly two options: ["True", "False"].`;
-        config.responseMimeType = "application/json";
-        config.responseSchema = {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              question: { type: "string" },
-              options: { type: "array", items: { type: "string" } },
-              answer: { type: "string" },
-              explanation: { type: "string" }
-            },
-            required: ["question", "options", "answer", "explanation"]
+        messages = [
+          {
+            role: 'system',
+            content: `Generate a comprehensive exam simulation with 8 questions from the provided text content.
+            You must return a valid JSON object with key "test" containing an array of 8 questions.
+            Include 4 Multiple-Choice questions and 4 True/False questions.
+            Make sure the True/False questions have exactly two options: ["True", "False"].
+            Each question has:
+            - "question": string
+            - "options": array of strings
+            - "answer": string (must exactly match one of the options)
+            - "explanation": string explaining why it is correct`
+          },
+          {
+            role: 'user',
+            content: content
           }
-        };
+        ];
+        responseFormat = { type: "json_object" };
       }
       
-      const response = await getAI(customKey).models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: prompt,
-        config
+      const response = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-specdec',
+        messages,
+        response_format: responseFormat
       });
       
-      const text = response.text;
+      const text = response.choices[0].message.content || '';
       
       if (type === 'summary') {
         res.json(text);
       } else {
-        res.json(JSON.parse(text));
+        const parsed = JSON.parse(text);
+        const data = parsed.flashcards || parsed.quiz || parsed.test || parsed;
+        res.json(data);
       }
     } catch (error: any) {
-      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getMaterialsFallback(content, type));
     }
   });
@@ -490,60 +496,38 @@ Make sure the True/False questions have exactly two options: ["True", "False"].`
   // Podcast Generation
   app.post('/api/ai/podcast', async (req, res) => {
     const { topic } = req.body;
-    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
     try {
-      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.json(getPodcastFallback());
       }
 
       // Step 1: Generate dialogue
-      const scriptResponse = await getAI(customKey).models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: `Create short academic conversation (3-4 exchanges) between Joe (a student) and Jane (a professor) about this content: "${topic?.slice(0, 3000)}".
-Use format:
-Joe: [text]
-Jane: [text]`
+      const scriptResponse = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-specdec',
+        messages: [
+          {
+            role: 'system',
+            content: 'Create a short, informative, and engaging academic dialogue conversation (3-4 exchanges) between Joe (a student) and Jane (a professor).'
+          },
+          {
+            role: 'user',
+            content: `Topic: "${topic?.slice(0, 3000)}". Format the dialogue exactly like this:
+            Joe: [text]
+            Jane: [text]`
+          }
+        ]
       });
       
-      const script = scriptResponse.text || '';
+      const script = scriptResponse.choices[0].message.content || '';
       
-      // Step 2: Speech Synthesis in multi-speaker layout
+      // Step 2: Speech Synthesis is unsupported on Groq, fallback to transcript only
       let audioBase64 = '';
-      try {
-        const ttsResponse = await getAI(customKey).models.generateContent({
-          model: 'gemini-3.1-flash-tts-preview',
-          contents: [{ parts: [{ text: `TTS the following conversation: ${script}` }] }],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              multiSpeakerVoiceConfig: {
-                speakerVoiceConfigs: [
-                  {
-                    speaker: 'Joe',
-                    voiceConfig: {
-                      prebuiltVoiceConfig: { voiceName: 'Kore' }
-                    }
-                  },
-                  {
-                    speaker: 'Jane',
-                    voiceConfig: {
-                      prebuiltVoiceConfig: { voiceName: 'Puck' }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        });
-        audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || '';
-      } catch (e) {
-        console.warn('Speech synthesis failed, returning transcript only:', e);
-      }
 
       res.json({ script, audioBase64 });
     } catch (error: any) {
-      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getPodcastFallback());
     }
   });
@@ -551,25 +535,32 @@ Jane: [text]`
   // Message Validation Route
   app.post('/api/ai/validate', async (req, res) => {
     const { text, groupName, groupDesc } = req.body;
-    const customKey = req.headers['x-gemini-api-key'] as string | undefined;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
     try {
-      const apiKey = customKey || process.env.GEMINI_API_KEY;
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.json(getValidateFallback());
       }
-      const response = await getAI(customKey).models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: `Evaluate if the following message is relevant to the purpose of the study group "${groupName}".
-        Group Description: ${groupDesc}
-        Message: "${text}"
-        
-        Respond with a JSON object: { "isRelevant": boolean, "reason": string }`,
-        config: { responseMimeType: 'application/json' }
+      const response = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-specdec',
+        messages: [
+          {
+            role: 'system',
+            content: 'Evaluate if the message is relevant to the purpose of the study group. You must return a valid JSON object: { "isRelevant": boolean, "reason": string }'
+          },
+          {
+            role: 'user',
+            content: `Group Name: "${groupName}"
+            Group Description: ${groupDesc}
+            Message: "${text}"`
+          }
+        ],
+        response_format: { type: "json_object" }
       });
       
-      res.json(JSON.parse(response.text));
+      res.json(JSON.parse(response.choices[0].message.content || '{}'));
     } catch (error: any) {
-      console.warn("Live Gemini API response failed. Falling back to offline fallback. Error details:", error?.message || error);
+      console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getValidateFallback());
     }
   });

@@ -1,5 +1,4 @@
 
-import { Type } from "@google/genai";
 
 // Standard decoding for binary audio
 function decode(base64: string) {
@@ -51,8 +50,9 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
 
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const customKey = localStorage.getItem('scolaris_custom_gemini_api_key');
+  const customKey = localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key');
   if (customKey) {
+    headers['X-Groq-API-Key'] = customKey;
     headers['X-Gemini-API-Key'] = customKey;
   }
   return headers;
