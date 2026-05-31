@@ -49,11 +49,15 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
   return new Blob([header, pcmData], { type: 'audio/wav' });
 }
 
+const getHeaders = (): HeadersInit => {
+  return { 'Content-Type': 'application/json' };
+};
+
 export const GeminiService = {
   async magicImport(text: string) {
     const response = await fetch('/api/ai/import', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ text })
     });
     const data = await response.json();
@@ -66,7 +70,7 @@ export const GeminiService = {
   async urlImport(url: string) {
     const response = await fetch('/api/ai/import', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ text: `Extract from URL: ${url}` })
     });
     const data = await response.json();
@@ -79,7 +83,7 @@ export const GeminiService = {
   async generateSchedule(courses: any[], university: string) {
     const response = await fetch('/api/ai/schedule', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ courses, university })
     });
     const data = await response.json();
@@ -92,7 +96,7 @@ export const GeminiService = {
   async generateStudyMaterials(content: string, type: 'summary' | 'flashcards' | 'quiz' | 'test') {
     const response = await fetch('/api/ai/materials', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ content, type })
     });
     const data = await response.json();
@@ -105,7 +109,7 @@ export const GeminiService = {
   async generatePodcast(topic: string) {
     const response = await fetch('/api/ai/podcast', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ topic })
     });
     const data = await response.json();
@@ -130,7 +134,7 @@ export const GeminiService = {
   async groupChat(messages: any[], groupName: string, groupDesc: string) {
     const response = await fetch('/api/ai/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ messages, groupName, groupDesc })
     });
     const data = await response.json();
@@ -143,7 +147,7 @@ export const GeminiService = {
   async validateGroupMessage(text: string, groupName: string, groupDesc: string) {
     const response = await fetch('/api/ai/validate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ text, groupName, groupDesc })
     });
     const data = await response.json();

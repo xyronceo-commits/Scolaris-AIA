@@ -286,6 +286,7 @@ const App: React.FC = () => {
           schedule={schedule} 
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
           onUpgrade={() => setActiveTab('pro')}
+          onNavigate={(tab) => { setActiveTab(tab); }}
         />;
       case 'courses':
         return <CourseManager 
@@ -348,6 +349,7 @@ const App: React.FC = () => {
           schedule={schedule} 
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }} 
           onUpgrade={() => setActiveTab('pro')}
+          onNavigate={(tab) => { setActiveTab(tab); }}
         />;
     }
   };
@@ -360,7 +362,7 @@ const App: React.FC = () => {
     { id: 'groups', label: 'Circles', icon: ICONS.Groups },
     { id: 'calculator', label: 'GPA Calc', icon: ICONS.Calculator },
     { id: 'analytics', label: 'Analytics', icon: ICONS.Analytics },
-    { id: 'pomodoro', label: 'Library', icon: ICONS.Library },
+    { id: 'pomodoro', label: 'Study Timer', icon: ICONS.Pomodoro },
   ];
 
   return (

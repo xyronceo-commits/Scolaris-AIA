@@ -76,6 +76,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const [isUploadingLibrary, setIsUploadingLibrary] = useState(false);
   const libraryFileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (activeCourseId) {
+      localStorage.setItem('scolaris_last_accessed_course_id', activeCourseId);
+    }
+  }, [activeCourseId]);
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
