@@ -315,7 +315,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
       Conversation History: ${JSON.stringify(messages)}. 
       Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
       const response = await getAI(customKey).chat.completions.create({
-        model: 'llama-3.3-70b-specdec',
+        model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'user', content: prompt }]
       });
       res.json({ text: response.choices[0].message.content });
@@ -335,7 +335,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
         return res.json(getImportFallback(text));
       }
       const response = await getAI(customKey).chat.completions.create({
-        model: 'llama-3.3-70b-specdec',
+        model: 'llama-3.3-70b-versatile',
         messages: [
           {
             role: 'system',
@@ -366,7 +366,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
         return res.json(getScheduleFallback(courses, university));
       }
       const response = await getAI(customKey).chat.completions.create({
-        model: 'llama-3.3-70b-specdec',
+        model: 'llama-3.3-70b-versatile',
         messages: [
           {
             role: 'system',
@@ -391,6 +391,104 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
     } catch (error: any) {
       console.warn("Live Groq API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getScheduleFallback(courses, university));
+    }
+  });
+
+  // Scolaris Generate
+  app.post('/api/scolaris/generate', async (req, res) => {
+    const { studyMaterial, mode } = req.body;
+    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+
+    if (!studyMaterial) {
+      return res.status(400).json({ error: "No study material provided." });
+    }
+
+    try {
+      const apiKey = customKey || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "GROQ_API_KEY is required" });
+      }
+
+      let systemPrompt = "";
+      let userPrompt = "";
+
+      if (mode === "quiz") {
+        systemPrompt = "You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.";
+        
+        userPrompt = `Analyze the following study text and generate a comprehensive multiple-choice quiz containing exactly 5 challenging questions.
+        
+        You MUST strictly return a JSON object containing an array named "quiz" matching this schema format exactly:
+        {
+          "quiz": [
+            {
+              "id": 1,
+              "question": "The explicit question text goes here?",
+              "options": ["Option A", "Option B", "Option C", "Option D"],
+              "correctAnswer": "Option A",
+              "explanation": "Brief explanation of why this answer is correct."
+            }
+          ]
+        }
+
+        Study Text:
+        "${studyMaterial}"`;
+
+      } else if (mode === "flashcards") {
+        systemPrompt = "You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.";
+        
+        userPrompt = `Analyze the following study text and extract key terms, concepts, or formulas to generate exactly 8 high-quality study flashcards.
+        
+        You MUST strictly return a JSON object containing an array named "flashcards" matching this schema format exactly:
+        {
+          "flashcards": [
+            {
+              "id": 1,
+              "front": "The term, concept, question, or key formula",
+              "back": "The concise answer, core definition, or explanation to memorize"
+            }
+          ]
+        }
+
+        Study Text:
+        "${studyMaterial}"`;
+      } else {
+        return res.status(400).json({ error: "Invalid mode. Use 'quiz' or 'flashcards'." });
+      }
+
+      const response = await getAI(customKey).chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        response_format: { type: "json_object" }
+      });
+
+      const rawContent = response.choices[0].message.content || '{}';
+      const parsedData = JSON.parse(rawContent);
+
+      // Perform defensive mapping so both 'answer' and 'correctAnswer' are present
+      if (mode === "quiz" && parsedData && Array.isArray(parsedData.quiz)) {
+        parsedData.quiz = parsedData.quiz.map((item: any) => {
+          if (item) {
+            if (item.correctAnswer && !item.answer) {
+              item.answer = item.correctAnswer;
+            } else if (item.answer && !item.correctAnswer) {
+              item.correctAnswer = item.answer;
+            }
+          }
+          return item;
+        });
+      }
+
+      res.json({ success: true, data: parsedData });
+    } catch (error: any) {
+      console.error("Scolaris AI Generation Error:", error);
+      res.status(500).json({
+        error: "Generation pipeline encountered a critical error.",
+        details: error?.message || String(error)
+      });
     }
   });
 
@@ -422,14 +520,25 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
         messages = [
           {
             role: 'system',
-            content: `You must return a valid JSON object with key "flashcards" containing an array of 5-8 flashcard objects. 
-            Each flashcard has:
-            - "front": string (question or term)
-            - "back": string (informative answer or definition)`
+            content: 'You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.'
           },
           {
             role: 'user',
-            content: content
+            content: `Analyze the following study text and extract key terms, concepts, or formulas to generate exactly 8 high-quality study flashcards.
+      
+      You MUST strictly return a JSON object containing an array named "flashcards" matching this schema format exactly:
+      {
+        "flashcards": [
+          {
+            "id": 1,
+            "front": "The term, concept, question, or key formula",
+            "back": "The concise answer, core definition, or explanation to memorize"
+          }
+        ]
+      }
+
+      Study Text:
+      "${content}"`
           }
         ];
         responseFormat = { type: "json_object" };
@@ -437,16 +546,27 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
         messages = [
           {
             role: 'system',
-            content: `You must return a valid JSON object with key "quiz" containing an array of 5 multiple-choice questions from the content.
-            Each question has:
-            - "question": string
-            - "options": array of 4 strings
-            - "answer": string (must exactly match one of the options)
-            - "explanation": string explaining why it is correct`
+            content: 'You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.'
           },
           {
             role: 'user',
-            content: content
+            content: `Analyze the following study text and generate a comprehensive multiple-choice quiz containing exactly 5 challenging questions.
+      
+      You MUST strictly return a JSON object containing an array named "quiz" matching this schema format exactly:
+      {
+        "quiz": [
+          {
+            "id": 1,
+            "question": "The explicit question text goes here?",
+            "options": ["Option A", "Option B", "Option C", "Option D"],
+            "answer": "Option A",
+            "explanation": "Brief explanation of why this answer is correct."
+          }
+        ]
+      }
+
+      Study Text:
+      "${content}"`
           }
         ];
         responseFormat = { type: "json_object" };
@@ -473,7 +593,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
       }
       
       const response = await getAI(customKey).chat.completions.create({
-        model: 'llama-3.3-70b-specdec',
+        model: 'llama-3.3-70b-versatile',
         messages,
         response_format: responseFormat
       });
@@ -484,7 +604,18 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
         res.json(text);
       } else {
         const parsed = JSON.parse(text);
-        const data = parsed.flashcards || parsed.quiz || parsed.test || parsed;
+        let data = parsed.flashcards || parsed.quiz || parsed.test || parsed;
+        
+        // Defensive mapping to ensure complete compatibility in both answer/correctAnswer keys
+        if (Array.isArray(data)) {
+          data = data.map((item: any) => {
+            if (item && item.correctAnswer && !item.answer) {
+              item.answer = item.correctAnswer;
+            }
+            return item;
+          });
+        }
+        
         res.json(data);
       }
     } catch (error: any) {
@@ -505,7 +636,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
 
       // Step 1: Generate dialogue
       const scriptResponse = await getAI(customKey).chat.completions.create({
-        model: 'llama-3.3-70b-specdec',
+        model: 'llama-3.3-70b-versatile',
         messages: [
           {
             role: 'system',
@@ -542,7 +673,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
         return res.json(getValidateFallback());
       }
       const response = await getAI(customKey).chat.completions.create({
-        model: 'llama-3.3-70b-specdec',
+        model: 'llama-3.3-70b-versatile',
         messages: [
           {
             role: 'system',

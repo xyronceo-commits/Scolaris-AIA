@@ -160,5 +160,18 @@ export const GeminiService = {
       throw new Error(data.error || 'Validation failed');
     }
     return data;
+  },
+
+  async scolarisGenerate(studyMaterial: string, mode: 'quiz' | 'flashcards') {
+    const response = await fetch('/api/scolaris/generate', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ studyMaterial, mode })
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || 'Scolaris generation failed');
+    }
+    return data;
   }
 };
