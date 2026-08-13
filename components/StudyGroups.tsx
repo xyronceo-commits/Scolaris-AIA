@@ -4,7 +4,7 @@ import { ICONS } from '../constants';
 import { Globe, Lock, Link as LinkIcon, Check, Copy, Upload, Download, FileText, LogOut, Share2, Search, Plus, X, ArrowRight, MessageSquare, Files, Bot, Sparkles } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
-import { supabase } from '@/lib/supabase';
+import { auth } from '../lib/firebase';
 
 interface StudyGroupsProps {
   profile: UserProfile;
@@ -72,8 +72,7 @@ const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, h
     if (!newGroupName.trim()) return;
     setIsAiThinking(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || 'anonymous';
+      const userId = auth.currentUser?.uid || 'anonymous';
 
       const newGroup: StudyGroup = {
         id: 'group-' + Math.random().toString(36).substring(2, 11),
@@ -120,11 +119,10 @@ const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, h
         return;
       }
 
-      // Try searching for the group in Supabase
+      // Try searching for the group in Firestore / DB
       const groupFromDb = await DBService.findGroupByCode(code);
       if (groupFromDb) {
-        const { data: { user } } = await supabase.auth.getUser();
-        const userId = user?.id || 'anonymous';
+        const userId = auth.currentUser?.uid || 'anonymous';
 
         const joinedGroup: StudyGroup = {
           ...groupFromDb,
@@ -163,8 +161,7 @@ const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, h
     const newCode = generateInviteCode();
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || 'anonymous';
+      const userId = auth.currentUser?.uid || 'anonymous';
 
       // 1. Update in local State
       const updatedGroups = groups.map(g => g.id === activeGroupId ? { ...g, inviteCode: newCode } : g);
@@ -250,7 +247,7 @@ const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, h
     if (!file || !activeGroupId) return;
 
     setIsUploading(true);
-    addNotification('message', 'S3 Uploading', `Initiating Supabase S3 transfer for ${file.name}...`, 'groups');
+    addNotification('message', 'S3 Uploading', `Initiating cloud transfer for ${file.name}...`, 'groups');
 
     try {
       const base64 = await fileToBase64(file);
@@ -284,12 +281,12 @@ const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, h
         };
 
         setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, sharedMaterials: [newMaterial, ...g.sharedMaterials] } : g));
-        addNotification('message', 'S3 Upload Complete', `${file.name} successfully committed to Supabase S3 storage!`, 'groups');
+        addNotification('message', 'S3 Upload Complete', `${file.name} successfully committed to cloud storage!`, 'groups');
 
         const msg: GroupMessage = {
           id: Math.random().toString(36).substr(2, 9),
           sender: 'Scolaris AI',
-          text: `${profile.name} uploaded a resource to Supabase Storage: ${file.name} (Key: ${uploadResult.key})`,
+          text: `${profile.name} uploaded a resource to Cloud Storage: ${file.name} (Key: ${uploadResult.key})`,
           timestamp: Date.now()
         };
         setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, messages: [...g.messages, msg] } : g));

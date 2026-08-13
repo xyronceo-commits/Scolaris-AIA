@@ -58,69 +58,66 @@ const getHeaders = (): HeadersInit => {
   return headers;
 };
 
+async function safeFetchJson(url: string, options: RequestInit, fallbackErrorMessage: string) {
+  try {
+    const response = await fetch(url, options);
+    let data: any = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = { error: 'Invalid JSON response from server' };
+    }
+    if (!response.ok || data.error) {
+      throw new Error(data.error || fallbackErrorMessage);
+    }
+    return data;
+  } catch (err: any) {
+    if (err.message && err.message.includes('Failed to fetch')) {
+      throw new Error('Network request failed. Please check your internet connection or server state.');
+    }
+    throw err;
+  }
+}
+
 export const GeminiService = {
   async magicImport(text: string) {
-    const response = await fetch('/api/ai/import', {
+    return await safeFetchJson('/api/ai/import', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ text })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Extraction failed');
-    }
-    return data;
+    }, 'Extraction failed');
   },
 
   async urlImport(url: string) {
-    const response = await fetch('/api/ai/import', {
+    return await safeFetchJson('/api/ai/import', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ text: `Extract from URL: ${url}` })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'URL ingestion failed');
-    }
-    return data;
+    }, 'URL ingestion failed');
   },
 
   async generateSchedule(courses: any[], university: string) {
-    const response = await fetch('/api/ai/schedule', {
+    return await safeFetchJson('/api/ai/schedule', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ courses, university })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Schedule generation failed');
-    }
-    return data;
+    }, 'Schedule generation failed');
   },
 
   async generateStudyMaterials(content: string, type: 'summary' | 'flashcards' | 'quiz' | 'test') {
-    const response = await fetch('/api/ai/materials', {
+    return await safeFetchJson('/api/ai/materials', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ content, type })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Material generation failed');
-    }
-    return data;
+    }, 'Material generation failed');
   },
 
   async generatePodcast(topic: string) {
-    const response = await fetch('/api/ai/podcast', {
+    const data = await safeFetchJson('/api/ai/podcast', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ topic })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Podcast generation failed');
-    }
+    }, 'Podcast generation failed');
 
     let wavUrl = null;
     if (data.audioBase64) {
@@ -137,41 +134,51 @@ export const GeminiService = {
   },
 
   async groupChat(messages: any[], groupName: string, groupDesc: string) {
-    const response = await fetch('/api/ai/chat', {
+    const data = await safeFetchJson('/api/ai/chat', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ messages, groupName, groupDesc })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Group chat failed');
-    }
+    }, 'Group chat failed');
     return data.text;
   },
 
   async validateGroupMessage(text: string, groupName: string, groupDesc: string) {
-    const response = await fetch('/api/ai/validate', {
+    return await safeFetchJson('/api/ai/validate', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ text, groupName, groupDesc })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Validation failed');
-    }
-    return data;
+    }, 'Validation failed');
   },
 
   async scolarisGenerate(studyMaterial: string, mode: 'quiz' | 'flashcards') {
-    const response = await fetch('/api/scolaris/generate', {
+    return await safeFetchJson('/api/scolaris/generate', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ studyMaterial, mode })
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error || 'Scolaris generation failed');
-    }
-    return data;
+    }, 'Scolaris generation failed');
+  },
+
+  async scolarisChat(messages: any[], courseContext?: string, fileContent?: string) {
+    return await safeFetchJson('/api/scolaris/chat', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ messages, courseContext, fileContent })
+    }, 'Scolaris chatbot request failed');
+  },
+
+  async extractFileText(fileName: string, fileType: string, contentBase64: string) {
+    return await safeFetchJson('/api/files/extract', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ fileName, fileType, contentBase64 })
+    }, 'File text extraction failed');
+  },
+
+  async scanDocumentWithVision(fileName: string, fileType: string, contentBase64: string) {
+    return await safeFetchJson('/api/vision/scan', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ fileName, fileType, contentBase64 })
+    }, 'Vision document scan failed');
   }
 };

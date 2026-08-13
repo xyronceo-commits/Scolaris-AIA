@@ -105,9 +105,9 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
     if (!manualCourse.code || !manualCourse.title) return;
     
     // Check limit
-    const limit = profile.tier === 'free' ? 2 : 12;
+    const limit = 12;
     if (courses.length >= limit) {
-      setError(`Course limit reached. You can add up to ${limit} courses on your current tier.`);
+      setError(`Course limit reached. You can add up to ${limit} courses.`);
       return;
     }
 
@@ -176,8 +176,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
         description: 'Analysis of consumer choices, competitive pricing, supply/demand curves, and regulatory systems.'
       }
     ];
-    const limit = profile.tier === 'free' ? 2 : 12;
-    setCourses(demoCourses.slice(0, limit));
+    setCourses(demoCourses);
   };
 
   const handleClearAll = () => {
@@ -188,8 +187,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
     }
   };
 
-  const isFreeTier = profile.tier === 'free';
-  const maxCourses = isFreeTier ? 2 : 12;
+  const maxCourses = 12;
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700">
@@ -201,7 +199,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
             Courses
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-medium font-sans">
-            {courses.length}/{maxCourses} courses ({isFreeTier ? 'Free tier' : 'Pro tier'})
+            {courses.length}/{maxCourses} courses
           </p>
         </div>
         

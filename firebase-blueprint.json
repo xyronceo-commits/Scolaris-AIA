@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "profiles": {
+      "title": "UserProfile",
+      "description": "User profile information and settings",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "institution": { "type": "string" },
+        "level": { "type": "string" },
+        "age": { "type": "number" },
+        "onboarded": { "type": "boolean" },
+        "tutorial_seen": { "type": "boolean" },
+        "is_pro": { "type": "boolean" },
+        "tier": { "type": "string" },
+        "notifications": { "type": "object" }
+      },
+      "required": ["userId", "email"]
+    },
+    "courses": {
+      "title": "Course",
+      "description": "User courses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "credits": { "type": "number" }
+      },
+      "required": ["id", "userId", "code"]
+    },
+    "study_sessions": {
+      "title": "StudySession",
+      "description": "Scheduled study sessions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "day": { "type": "string" },
+        "duration": { "type": "number" },
+        "mode": { "type": "string" }
+      },
+      "required": ["id", "userId", "courseId"]
+    },
+    "study_hubs": {
+      "title": "StudyHub",
+      "description": "Study materials and AI content for courses",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "summary": { "type": "string" },
+        "flashcards": { "type": "array" },
+        "quizzes": { "type": "array" },
+        "podcastUrl": { "type": "string" },
+        "transcript": { "type": "string" }
+      },
+      "required": ["userId", "courseId"]
+    },
+    "study_groups": {
+      "title": "StudyGroup",
+      "description": "Study groups and circles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "visibility": { "type": "string" },
+        "members": { "type": "array" },
+        "messages": { "type": "array" },
+        "sharedMaterials": { "type": "array" }
+      },
+      "required": ["id", "name"]
+    }
+  }
+}

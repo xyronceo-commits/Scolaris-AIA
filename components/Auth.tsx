@@ -1,19 +1,27 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ICONS } from '../constants';
-import { GraduationCap, ArrowRight, Github, Mail, Sparkles, Check, Chrome, X, ArrowLeft, Eye, EyeOff } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
-import { DBService } from '../services/db';
-import { SubscriptionTier } from '../types';
+import { ArrowRight, Mail, AlertCircle, ArrowLeft, Eye, EyeOff, ShieldAlert } from 'lucide-react';
+import { auth, googleProvider } from '../lib/firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  sendEmailVerification,
+  updateProfile 
+} from 'firebase/auth';
 
 interface AuthProps {
-  onAuth: (profile: any) => void;
+  onAuthSuccess: () => void;
   initialMode?: 'signin' | 'signup';
+  sessionExpiredMsg?: string | null;
 }
 
-const Auth: React.FC<AuthProps> = ({ onAuth, initialMode = 'signin' }) => {
-  const [mode, setMode] = useState<'signin' | 'signup' | 'verify'>(initialMode);
+export const Auth: React.FC<AuthProps> = ({ 
+  onAuthSuccess, 
+  initialMode = 'signin',
+  sessionExpiredMsg
+}) => {
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
   
   useEffect(() => {
     setMode(initialMode);
@@ -28,74 +36,56 @@ const Auth: React.FC<AuthProps> = ({ onAuth, initialMode = 'signin' }) => {
   
   const [error, setError] = useState<string | null>(null);
 
+  const formatAuthError = (err: any): string => {
+    if (!err) return 'An error occurred during authentication.';
+    const code = err.code || '';
+    const msg = err.message || '';
+
+    if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+      return 'Email or password is incorrect.';
+    }
+    if (code === 'auth/email-already-in-use') {
+      return 'An account already exists with this email address. Please sign in instead.';
+    }
+    if (code === 'auth/account-exists-with-different-credential') {
+      const existingEmail = err.customData?.email || 'this email';
+      return `An account already exists with ${existingEmail}. Please sign in using your original password or account method.`;
+    }
+    if (code === 'auth/weak-password') {
+      return 'Password should be at least 6 characters long.';
+    }
+    if (code === 'auth/invalid-email') {
+      return 'Please enter a valid email address.';
+    }
+    if (code === 'auth/too-many-requests') {
+      return 'Access temporarily blocked due to many failed attempts. Please try again later.';
+    }
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return 'Sign-in cancelled.';
+    }
+    if (code === 'auth/popup-blocked') {
+      return 'Pop-up window was blocked by your browser. Please enable pop-ups to continue with Google.';
+    }
+
+    return msg.replace('Firebase: ', '') || 'Authentication issue occurred.';
+  };
+
   const handleGoogleAuth = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      if (mode === 'signup') {
-        localStorage.setItem('scolaris_is_signup', 'true');
-      } else {
-        localStorage.setItem('scolaris_is_signup', 'false');
+      const cred = await signInWithPopup(auth, googleProvider);
+      if (cred.user) {
+        onAuthSuccess();
       }
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin
-        }
-      });
-      if (error) throw error;
-    } catch (error: any) {
-      console.error('Auth error:', error);
-      setError(error.message || 'Authentication failed');
-      setIsLoading(false);
-    }
-  };
-
-  const handleGuestAuth = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const mockUser = {
-        id: 'user_guest_scolaris',
-        email: 'guest@scolaris.edu',
-        user_metadata: {
-          full_name: 'Guest Scholar',
-          university: 'Global Academy',
-          level: 'Undergraduate',
-          age: 21
-        },
-        role: 'authenticated',
-        aud: 'authenticated',
-      };
-      
-      localStorage.setItem('supabase_simulated_user', JSON.stringify(mockUser));
-      localStorage.setItem('scolaris_is_signup', 'false');
-      
-      onAuth({
-        name: 'Guest Scholar',
-        email: 'guest@scolaris.edu',
-        university: 'Global Academy',
-        level: 'Undergraduate',
-        age: 21,
-        onboarded: true,
-        tutorialSeen: true,
-        tier: 'premium' as SubscriptionTier,
-        isPro: true,
-        notifications: { messages: true, sessions: true, aiContent: true },
-        semesterEnd: ''
-      });
     } catch (err: any) {
-      console.error('Guest Auth error:', err);
-      setError(err?.message || 'Guest Login failed');
+      console.error('Firebase Google Auth error:', err);
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        setError(formatAuthError(err));
+      }
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const isCredentialsError = (err: string | null) => {
-    if (!err) return false;
-    const lowercase = err.toLowerCase();
-    return lowercase.includes('credential') || lowercase.includes('invalid') || lowercase.includes('not found') || lowercase.includes('password');
   };
 
   const handleEmailAuth = async (e: React.FormEvent) => {
@@ -103,115 +93,51 @@ const Auth: React.FC<AuthProps> = ({ onAuth, initialMode = 'signin' }) => {
     setIsLoading(true);
     setError(null);
 
+    const cleanEmail = email.trim();
+
     try {
       if (mode === 'signup') {
         if (password !== confirmPassword) {
-          throw new Error('Passwords do not match');
+          setError('Passwords do not match.');
+          setIsLoading(false);
+          return;
         }
-        
-        localStorage.setItem('scolaris_is_signup', 'true');
-        
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: email.split('@')[0],
-              university: '',
-              level: 'Undergraduate',
-              age: 20
-            }
-          }
-        });
-        if (error) throw error;
-        
-        const userId = data?.user?.id || 'simulated_' + Math.random().toString(36).substring(2, 11);
-        const userEmail = data?.user?.email || email;
-        const fallbackName = userEmail.split('@')[0];
 
-        // Instantly bypass email verification by simulating an authenticated session:
-        const mockUser = {
-          id: userId,
-          email: userEmail,
-          user_metadata: {
-            full_name: fallbackName,
-            university: '',
-            level: 'Undergraduate',
-            age: 20
-          },
-          role: 'authenticated',
-          aud: 'authenticated',
-        };
-        localStorage.setItem('supabase_simulated_user', JSON.stringify(mockUser));
+        if (password.length < 6) {
+          setError('Password must be at least 6 characters long.');
+          setIsLoading(false);
+          return;
+        }
 
-        const profile = {
-          name: fallbackName,
-          email: userEmail,
-          university: '',
-          level: 'Undergraduate',
-          age: 20,
-          onboarded: false,
-          tutorialSeen: false,
-          tier: 'free' as SubscriptionTier,
-          isPro: false,
-          notifications: { messages: true, sessions: true, aiContent: true },
-          semesterEnd: ''
-        };
-        
-        await DBService.saveProfile(userId, profile);
-        onAuth(profile);
+        // Create Firebase Account
+        const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        if (cred.user) {
+          const fallbackName = cleanEmail.split('@')[0];
+          await updateProfile(cred.user, { displayName: fallbackName }).catch(() => {});
+          
+          // Send Real Firebase Verification Email
+          await sendEmailVerification(cred.user);
+
+          // Signal Auth state resolution (App will render verification view because emailVerified === false)
+          onAuthSuccess();
+        }
       } else {
-        localStorage.setItem('scolaris_is_signup', 'false');
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password
-        });
-        if (error) throw error;
-        
-        if (data.user) {
-          const dbProfile = await DBService.getProfile(data.user.id);
-          onAuth(dbProfile || {
-            name: data.user.user_metadata?.full_name || email.split('@')[0],
-            email: email,
-            university: data.user.user_metadata?.university || '',
-            level: data.user.user_metadata?.level || 'Undergraduate',
-            age: data.user.user_metadata?.age || 18,
-            onboarded: true,
-            tutorialSeen: true,
-            tier: 'free' as SubscriptionTier,
-            isPro: false,
-            notifications: { messages: true, sessions: true, aiContent: true },
-            semesterEnd: ''
-          });
+        // Sign In
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+        if (cred.user) {
+          onAuthSuccess();
         }
       }
-    } catch (error: any) {
-      console.error('Auth error:', error);
-      setError(error.message || 'Verification or credentials issue.');
+    } catch (err: any) {
+      console.error('Email Auth error:', err);
+      setError(formatAuthError(err));
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/50 flex flex-col items-center justify-start md:justify-center py-8 px-4 sm:px-6 md:p-8 relative overflow-y-auto">
-      {/* Custom styles for professional slim scrollbar */}
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
-          border-radius: 9999px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
-        }
-      `}</style>
-
+    <div className="min-h-screen bg-slate-50/50 flex flex-col items-center justify-center py-8 px-4 sm:px-6 md:p-8 relative overflow-y-auto font-sans text-slate-900">
       {/* Background Ornaments */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
         <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-100/30 blur-[120px] rounded-full" />
@@ -225,278 +151,200 @@ const Auth: React.FC<AuthProps> = ({ onAuth, initialMode = 'signin' }) => {
         className="max-w-md w-full relative z-10 my-auto"
       >
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 relative hover:scale-105 transition-transform duration-300">
-             <div className="font-serif font-black text-xl italic selection:bg-slate-800">S</div>
+          <div className="inline-flex items-center justify-center w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 hover:scale-105 transition-transform duration-300">
+             <div className="font-serif font-black text-xl italic">S</div>
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">
-            {mode === 'verify' ? 'Confirm Identity' : mode === 'signin' ? 'Welcome Back' : 'Create Scholarly Space'}
+            {mode === 'signin' ? 'Welcome Back' : 'Create Scholarly Space'}
           </h1>
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">
-            {mode === 'verify' ? 'Verification Code Sent to Email' : 'Global Academic Network'}
+            Global Academic Network
           </p>
         </div>
 
-        {/* Auth Navigation Header Control (Go Back or Quick Switch) */}
-        {mode !== 'verify' && (
-          <div className="flex items-center justify-between px-2 mb-3">
-            <button 
-              onClick={() => {
-                const target = mode === 'signup' ? 'signin' : 'signup';
-                setMode(target);
-                setError(null);
-              }}
-              className="inline-flex items-center gap-2 text-[10px] font-bold text-slate-500 hover:text-slate-900 uppercase tracking-widest transition-colors bg-white/60 hover:bg-white backdrop-blur-md pl-3.5 pr-4 py-2 rounded-full border border-slate-200/80 shadow-sm active:scale-95"
-            >
-              <ArrowLeft size={11} className="text-slate-400" />
-              <span>Go to {mode === 'signup' ? 'Sign In' : 'Sign Up'}</span>
-            </button>
-            <span className="text-[9px] font-mono font-bold text-slate-300 select-none">SECURITY CODES : OK</span>
-          </div>
+        {/* Session Expiry Banner */}
+        {sessionExpiredMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 p-4 bg-amber-50 border border-amber-200/80 rounded-2xl flex items-center gap-3 shadow-sm"
+          >
+            <ShieldAlert size={20} className="text-amber-600 shrink-0" />
+            <p className="text-xs font-semibold text-amber-900 leading-tight">
+              {sessionExpiredMsg}
+            </p>
+          </motion.div>
         )}
 
-        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-xl shadow-slate-200/30 p-6 md:p-8 transition-all duration-300 hover:shadow-2xl hover:shadow-slate-200/40">
+        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-xl shadow-slate-200/30 p-6 md:p-8 transition-all duration-300">
           
-          {/* Header Segmented Tabs */}
-          {mode !== 'verify' && (
-            <div className="flex p-1 bg-slate-100/80 rounded-2xl mb-6 relative">
-              {/* Sliding background indicator */}
-              <div className="absolute inset-1 grid grid-cols-2 pointer-events-none">
-                <motion.div
-                  layout
-                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
-                  className="bg-white rounded-xl shadow-sm h-full w-full"
-                  style={{
-                    gridColumnStart: mode === 'signin' ? 1 : 2
-                  }}
-                />
-              </div>
-              
-              <button
-                type="button"
-                onClick={() => { setMode('signin'); setError(null); }}
-                className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 ${
-                  mode === 'signin' 
-                    ? 'text-slate-900' 
-                    : 'text-slate-400 hover:text-slate-700'
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMode('signup'); setError(null); }}
-                className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 ${
-                  mode === 'signup' 
-                    ? 'text-slate-900' 
-                    : 'text-slate-400 hover:text-slate-700'
-                }`}
-              >
-                Create Account
-              </button>
+          {/* Header Tabs */}
+          <div className="flex p-1 bg-slate-100/80 rounded-2xl mb-6 relative">
+            <div className="absolute inset-1 grid grid-cols-2 pointer-events-none">
+              <motion.div
+                layout
+                transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                className="bg-white rounded-xl shadow-sm h-full w-full"
+                style={{
+                  gridColumnStart: mode === 'signin' ? 1 : 2
+                }}
+              />
             </div>
-          )}
+            
+            <button
+              type="button"
+              onClick={() => { setMode('signin'); setError(null); }}
+              className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 ${
+                mode === 'signin' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('signup'); setError(null); }}
+              className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 ${
+                mode === 'signup' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'
+              }`}
+            >
+              Create Account
+            </button>
+          </div>
 
-          {/* Core Content View */}
-          <div className="custom-scrollbar pr-1">
+          {/* Form Area */}
+          <div className="space-y-4">
             <AnimatePresence mode="wait">
               {error && (
                 <motion.div 
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="mb-4 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex flex-col gap-3"
+                  className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                      <X size={12} />
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <p className="text-[10px] font-bold text-rose-600 uppercase tracking-tight">Authentication Error</p>
-                      <p className="text-xs font-semibold text-slate-700 leading-relaxed text-left">
-                        {error}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {isCredentialsError(error) && (
-                    <div className="p-3 bg-white rounded-xl border border-rose-100/50 space-y-2 shadow-inner text-left">
-                      <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider">Trouble Logging In?</p>
-                      <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
-                        Don't have an email registered or forgot your credentials? Try using the <span className="font-bold text-slate-800">Create Account</span> tab above, or instantly explore with a demo sandbox.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleGuestAuth}
-                        className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 active:scale-98 transition-all rounded-xl text-[10px] font-bold text-white uppercase tracking-widest text-center shadow-md flex items-center justify-center gap-1.5"
-                      >
-                        <Sparkles size={11} />
-                        <span>Instant Sandbox Access</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {(error.includes('apiKey') || error.includes('URL') || error.includes('config')) && (
-                    <div className="p-3 bg-white rounded-xl border border-rose-100/50 space-y-1.5 shadow-inner text-left">
-                      <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider">Configuration Checklist:</p>
-                      <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
-                        Please verify that <span className="font-bold text-slate-800">VITE_SUPABASE_URL</span> and <span className="font-bold text-slate-800">VITE_SUPABASE_ANON_KEY</span> are properly initialized in your environment.
-                      </p>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-              
-              {mode === 'verify' ? (
-                <motion.div 
-                  key="verify"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="space-y-6 text-center py-4"
-                >
-                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 ring-8 ring-blue-50/50">
-                    <Mail size={32} />
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-lg font-serif font-bold text-slate-900">Verify your email</h3>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed px-2">
-                      We've sent a verification link to <span className="text-slate-900 font-bold">{email}</span>. 
-                      Please click the link to activate your account.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-2.5 pt-4">
-                    <button 
-                      onClick={() => setMode('signin')}
-                      className="w-full h-12 bg-slate-900 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-[0.98] shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-                    >
-                      <span>Check completed & Sign In</span>
-                      <ArrowRight size={13} />
-                    </button>
-                    <button 
-                      onClick={() => { setMode('signup'); setError(null); }}
-                      className="inline-flex items-center justify-center gap-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-2"
-                    >
-                      <ArrowLeft size={10} />
-                      <span>Entered wrong email? Go back</span>
-                    </button>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key={mode}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="space-y-5"
-                >
-                  {/* Only email auth is displayed */}
-
-                  <form onSubmit={handleEmailAuth} className="space-y-4">
-                    <div className="space-y-4 text-left">
-                      <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
-                          <input 
-                            type="email" 
-                            required
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl px-4 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
-                            placeholder="name@email.com"
-                          />
-                      </div>
-
-                      <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
-                          <div className="relative">
-                            <input 
-                              type={showPassword ? "text" : "password"} 
-                              required
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                              className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
-                              placeholder="••••••••"
-                            />
-                            <button
-                              type="button"
-                              tabIndex={-1}
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
-                              title={showPassword ? "Hide password" : "Show password"}
-                            >
-                              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                      </div>
-
-                      {mode === 'signup' && (
-                        <motion.div 
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          className="space-y-1.5"
-                        >
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Confirm Password</label>
-                            <div className="relative">
-                              <input 
-                                type={showConfirmPassword ? "text" : "password"} 
-                                required={mode === 'signup'}
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
-                                placeholder="••••••••"
-                              />
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
-                                title={showConfirmPassword ? "Hide password" : "Show password"}
-                              >
-                                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                              </button>
-                            </div>
-                        </motion.div>
-                      )}
-                    </div>
-
-                    <button 
-                        type="submit"
-                        disabled={isLoading}
-                        className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg hover:shadow-indigo-600/20 active:scale-[0.98] flex items-center justify-center gap-2 group mt-5"
-                    >
-                        {isLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : mode === 'signin' ? 'Sign In with Email' : 'Create Account'}
-                        <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                    </button>
-                  </form>
+                  <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                  <p className="text-xs font-semibold text-rose-700 leading-snug">
+                    {error}
+                  </p>
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Google OAuth Button */}
+            <button
+              type="button"
+              onClick={handleGoogleAuth}
+              disabled={isLoading}
+              className="w-full h-12 bg-white border border-slate-200/90 hover:bg-slate-50 hover:border-slate-300 text-slate-800 rounded-xl font-bold text-[11px] uppercase tracking-wider transition-all duration-200 shadow-sm flex items-center justify-center gap-2.5 active:scale-[0.98]"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span>Continue with Google</span>
+            </button>
+
+            <div className="relative py-2 flex items-center justify-center">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100" /></div>
+              <span className="relative bg-white px-3 text-[9px] font-bold uppercase tracking-widest text-slate-300">or with email</span>
+            </div>
+
+            <form onSubmit={handleEmailAuth} className="space-y-4">
+              <div className="space-y-3.5 text-left">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                  <input 
+                    type="email" 
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl px-4 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                    placeholder="name@university.edu"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
+                  <div className="relative">
+                    <input 
+                      type={showPassword ? "text" : "password"} 
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {mode === 'signup' && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="space-y-1"
+                  >
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Confirm Password</label>
+                    <div className="relative">
+                      <input 
+                        type={showConfirmPassword ? "text" : "password"} 
+                        required={mode === 'signup'}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                        placeholder="••••••••"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
+                        title={showConfirmPassword ? "Hide password" : "Show password"}
+                      >
+                        {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              <button 
+                type="submit"
+                disabled={isLoading}
+                className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 group mt-4"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <span>{mode === 'signin' ? 'Sign In' : 'Create Account'}</span>
+                    <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
+              </button>
+            </form>
           </div>
         </div>
 
         <div className="mt-6 text-center">
-           <button 
+          <button 
             onClick={() => {
-              const target = mode === 'signin' ? 'signup' : 'signin';
-              setMode(target);
+              setMode(mode === 'signin' ? 'signup' : 'signin');
               setError(null);
             }}
-            className="text-[10px] font-bold text-slate-500 hover:text-slate-900 uppercase tracking-widest transition-all bg-white/50 hover:bg-white px-5 py-2.5 rounded-full border border-slate-200/80 shadow-sm active:scale-95"
-           >
-             {mode === 'signin' ? "Not a member? Join Scolaris" : "Already registered? Sign In"}
-           </button>
-        </div>
-
-        {/* Status Indicators */}
-        <div className="mt-8 flex items-center justify-center gap-6 opacity-30 hover:opacity-60 transition-opacity duration-300 pointer-events-none select-none">
-          <div className="flex items-center gap-1.5">
-            <Sparkles size={11} className="text-slate-500" />
-            <span className="text-[8px] font-bold uppercase tracking-widest">Privacy First</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Check size={11} className="text-slate-500" />
-            <span className="text-[8px] font-bold uppercase tracking-widest">End-to-End</span>
-          </div>
+            className="text-[10px] font-bold text-slate-500 hover:text-slate-900 uppercase tracking-widest transition-all bg-white/50 hover:bg-white px-5 py-2 rounded-full border border-slate-200/80 shadow-sm active:scale-95"
+          >
+            {mode === 'signin' ? "Not a member? Create an account" : "Already registered? Sign In"}
+          </button>
         </div>
       </motion.div>
     </div>
@@ -504,4 +352,3 @@ const Auth: React.FC<AuthProps> = ({ onAuth, initialMode = 'signin' }) => {
 };
 
 export default Auth;
-

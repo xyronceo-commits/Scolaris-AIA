@@ -66,7 +66,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
 
           <div className="flex items-center justify-center gap-2 text-slate-400 font-bold text-[9px] uppercase tracking-widest animate-in fade-in duration-1000 delay-700">
              <Star size={10} className="fill-blue-500 text-blue-500" />
-             No credit card required <span className="opacity-30 mx-2 text-lg leading-none">•</span> Free plan available
+             Free & Open for Students <span className="opacity-30 mx-2 text-lg leading-none">•</span> Unlimited AI Academic Studio
           </div>
         </div>
 
@@ -104,8 +104,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
                   <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Product</h4>
                   <ul className="space-y-4 text-sm text-slate-500 font-medium">
                      <li><a href="#" className="hover:text-blue-600 transition-colors">Features</a></li>
-                     <li><a href="#" className="hover:text-blue-600 transition-colors">Pricing</a></li>
-                     <li><a href="#" className="hover:text-blue-600 transition-colors">Sage Elite</a></li>
+                     <li><a href="#" className="hover:text-blue-600 transition-colors">Study Circles</a></li>
+                     <li><a href="#" className="hover:text-blue-600 transition-colors">AI Studio</a></li>
                   </ul>
                </div>
                <div className="space-y-6">

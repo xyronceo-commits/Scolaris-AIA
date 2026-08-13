@@ -1,40 +1,46 @@
-import { supabase } from '@/lib/supabase';
+import { db, auth } from '../lib/firebase';
+import { 
+  doc, 
+  getDoc, 
+  setDoc, 
+  getDocs, 
+  collection, 
+  query, 
+  where, 
+  deleteDoc, 
+  writeBatch 
+} from 'firebase/firestore';
 import { UserProfile, Course, StudySession, StudyGroup, StudyHubData, Difficulty, SubscriptionTier } from '../types';
 
 export const DBService = {
   // Profiles
   async getProfile(userId: string): Promise<UserProfile | null> {
+    const cacheKey = `scolaris_user_private_v1_profile_${userId}`;
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      
-      const cacheKey = `scolaris_user_private_v1_profile_${userId}`;
-      if (error || !data) {
-        console.warn('getProfile error or profile not found in DB. Checking private local cache...');
+      const docRef = doc(db, 'profiles', userId);
+      const docSnap = await getDoc(docRef);
+
+      if (!docSnap.exists()) {
+        console.warn('getProfile: profile not found in Firestore. Checking private local cache...');
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
-          try {
-            return JSON.parse(cached);
-          } catch {
-            return null;
-          }
+          try { return JSON.parse(cached); } catch { return null; }
         }
         return null;
       }
 
+      const data = docSnap.data();
       const profile: UserProfile = {
-        name: data.name,
-        email: data.email,
+        name: data.name || '',
+        email: data.email || '',
         university: data.institution || '',
         level: data.level || '',
         age: data.age || 18,
-        semesterEnd: '',
-        onboarded: data.onboarded,
-        tutorialSeen: data.tutorial_seen,
-        isPro: data.is_pro || false,
+        semesterEnd: data.semesterEnd || '',
+        targetCGPA: typeof data.targetCGPA === 'number' ? data.targetCGPA : (typeof data.target_cgpa === 'number' ? data.target_cgpa : 4.50),
+        onboarded: data.onboarded ?? false,
+        tutorialSeen: data.tutorial_seen ?? false,
+        isPro: data.is_pro ?? false,
         tier: (data.tier || 'free') as SubscriptionTier,
         notifications: data.notifications || { messages: true, sessions: true, aiContent: true }
       };
@@ -43,8 +49,8 @@ export const DBService = {
       localStorage.setItem(cacheKey, JSON.stringify(profile));
       return profile;
     } catch (err) {
-      console.error('getProfile error:', err);
-      const cached = localStorage.getItem(`scolaris_user_private_v1_profile_${userId}`);
+      console.error('getProfile Firestore error:', err);
+      const cached = localStorage.getItem(cacheKey);
       if (cached) {
         try { return JSON.parse(cached); } catch { return null; }
       }
@@ -53,29 +59,29 @@ export const DBService = {
   },
 
   async saveProfile(userId: string, profile: UserProfile) {
-    try {
-      const cacheKey = `scolaris_user_private_v1_profile_${userId}`;
-      localStorage.setItem(cacheKey, JSON.stringify(profile));
+    const cacheKey = `scolaris_user_private_v1_profile_${userId}`;
+    localStorage.setItem(cacheKey, JSON.stringify(profile));
 
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          id: userId,
-          name: profile.name,
-          email: profile.email,
-          institution: profile.university,
-          level: profile.level,
-          age: profile.age,
-          onboarded: profile.onboarded,
-          tutorial_seen: profile.tutorialSeen,
-          is_pro: profile.isPro,
-          tier: profile.tier,
-          notifications: profile.notifications,
-          updated_at: new Date()
-        });
-      return { error };
+    try {
+      const docRef = doc(db, 'profiles', userId);
+      await setDoc(docRef, {
+        userId,
+        name: profile.name,
+        email: profile.email,
+        institution: profile.university,
+        level: profile.level,
+        age: profile.age,
+        targetCGPA: profile.targetCGPA ?? 4.50,
+        onboarded: profile.onboarded,
+        tutorial_seen: profile.tutorialSeen,
+        is_pro: profile.isPro,
+        tier: profile.tier,
+        notifications: profile.notifications,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      return { error: null };
     } catch (err) {
-      console.error('saveProfile error:', err);
+      console.error('saveProfile Firestore error:', err);
       return { error: err };
     }
   },
@@ -90,29 +96,33 @@ export const DBService = {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('user_id', userId);
-      
-      if (error) {
-        console.warn('getCourses db error, falling back to private cache:', error.message);
+      const q = query(collection(db, 'courses'), where('userId', '==', userId));
+      const querySnap = await getDocs(q);
+
+      if (querySnap.empty && cachedCourses.length > 0) {
         return cachedCourses;
       }
 
-      const courses: Course[] = data.map(c => ({
-        id: c.id,
-        code: c.code,
-        title: c.name,
-        units: c.credits || 3,
-        difficulty: c.difficulty as Difficulty,
-        description: ''
-      }));
+      const courses: Course[] = [];
+      querySnap.forEach((docSnap) => {
+        const c = docSnap.data();
+        courses.push({
+          id: docSnap.id,
+          code: c.code || '',
+          title: c.name || c.title || '',
+          units: c.credits || c.units || 3,
+          difficulty: (c.difficulty || 'Medium') as Difficulty,
+          description: c.description || ''
+        });
+      });
 
-      localStorage.setItem(cacheKey, JSON.stringify(courses));
-      return courses;
+      if (courses.length > 0) {
+        localStorage.setItem(cacheKey, JSON.stringify(courses));
+        return courses;
+      }
+      return cachedCourses;
     } catch (err) {
-      console.error('getCourses error:', err);
+      console.error('getCourses Firestore error:', err);
       return cachedCourses;
     }
   },
@@ -125,7 +135,6 @@ export const DBService = {
       if (cached) {
         try { list = JSON.parse(cached); } catch { list = []; }
       }
-      // Upsert local list
       const idx = list.findIndex(c => c.id === course.id);
       if (idx >= 0) {
         list[idx] = course;
@@ -134,72 +143,78 @@ export const DBService = {
       }
       localStorage.setItem(cacheKey, JSON.stringify(list));
 
-      const { error } = await supabase
-        .from('courses')
-        .upsert({
-          id: course.id.includes('course-') ? undefined : (course.id.length > 20 ? undefined : course.id),
-          user_id: userId,
-          code: course.code,
-          name: course.title,
-          difficulty: course.difficulty,
-          color: '#000000',
-          credits: course.units,
-          units: []
-        });
-      return { error };
+      const courseId = course.id || `course_${Date.now()}`;
+      const docRef = doc(db, 'courses', courseId);
+      await setDoc(docRef, {
+        id: courseId,
+        userId,
+        code: course.code,
+        name: course.title,
+        difficulty: course.difficulty,
+        credits: course.units,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      return { error: null };
     } catch (err) {
-      console.error('saveCourse error:', err);
+      console.error('saveCourse Firestore error:', err);
       return { error: err };
     }
   },
 
   async saveCourses(userId: string, courses: Course[]) {
     try {
-      // Base file system cache
       const cacheKey = `scolaris_user_private_v1_courses_${userId}`;
       localStorage.setItem(cacheKey, JSON.stringify(courses));
 
-      const formattedCourses = courses.map(c => ({
-        id: c.id.length > 20 ? undefined : c.id, 
-        user_id: userId,
-        code: c.code,
-        name: c.title,
-        difficulty: c.difficulty,
-        color: '#000000',
-        credits: c.units,
-        units: []
-      }));
+      const batch = writeBatch(db);
+      courses.forEach((c) => {
+        const courseId = c.id || `course_${Math.random().toString(36).substring(2, 10)}`;
+        const docRef = doc(db, 'courses', courseId);
+        batch.set(docRef, {
+          id: courseId,
+          userId,
+          code: c.code,
+          name: c.title,
+          difficulty: c.difficulty,
+          credits: c.units,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
 
-      const { error } = await supabase
-        .from('courses')
-        .upsert(formattedCourses);
-      return { error };
+      await batch.commit();
+      return { error: null };
     } catch (err) {
-      console.error('saveCourses error:', err);
+      console.error('saveCourses Firestore error:', err);
       return { error: err };
     }
   },
 
+  // Schedule
   async saveSchedule(userId: string, sessions: StudySession[]) {
     try {
       const cacheKey = `scolaris_user_private_v1_schedule_${userId}`;
       localStorage.setItem(cacheKey, JSON.stringify(sessions));
 
-      const formattedSessions = sessions.map(s => ({
-        id: s.id.length > 20 ? undefined : s.id,
-        user_id: userId,
-        course_id: s.courseId,
-        day: s.day,
-        duration: s.duration,
-        mode: s.mode
-      }));
+      const batch = writeBatch(db);
+      sessions.forEach((s) => {
+        const sessionId = s.id || `session_${Math.random().toString(36).substring(2, 10)}`;
+        const docRef = doc(db, 'study_sessions', sessionId);
+        batch.set(docRef, {
+          id: sessionId,
+          userId,
+          courseId: s.courseId,
+          day: s.day,
+          duration: s.duration,
+          mode: s.mode,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
 
-      const { error } = await supabase
-        .from('study_sessions')
-        .upsert(formattedSessions);
-      return { error };
+      await batch.commit();
+      return { error: null };
     } catch (err) {
-      console.error('saveSchedule error:', err);
+      console.error('saveSchedule Firestore error:', err);
       return { error: err };
     }
   },
@@ -207,9 +222,7 @@ export const DBService = {
   // Health Check
   async checkConnection(): Promise<boolean> {
     try {
-      const { data, error } = await supabase.from('profiles').select('id').limit(1);
-      if (error && error.code !== 'PGRST116') return false;
-      return true;
+      return !!db;
     } catch {
       return false;
     }
@@ -225,28 +238,32 @@ export const DBService = {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('study_sessions')
-        .select('*')
-        .eq('user_id', userId);
-      
-      if (error) {
-        console.warn('getSchedule db error, checking private cache:', error.message);
+      const q = query(collection(db, 'study_sessions'), where('userId', '==', userId));
+      const querySnap = await getDocs(q);
+
+      if (querySnap.empty && cachedSchedule.length > 0) {
         return cachedSchedule;
       }
 
-      const sessions: StudySession[] = data.map(s => ({
-        id: s.id,
-        courseId: s.course_id,
-        day: s.day,
-        duration: s.duration,
-        mode: s.mode as any
-      }));
+      const sessions: StudySession[] = [];
+      querySnap.forEach((docSnap) => {
+        const s = docSnap.data();
+        sessions.push({
+          id: docSnap.id,
+          courseId: s.courseId || '',
+          day: s.day || '',
+          duration: s.duration || 30,
+          mode: s.mode as any
+        });
+      });
 
-      localStorage.setItem(cacheKey, JSON.stringify(sessions));
-      return sessions;
+      if (sessions.length > 0) {
+        localStorage.setItem(cacheKey, JSON.stringify(sessions));
+        return sessions;
+      }
+      return cachedSchedule;
     } catch (err) {
-      console.error('getSchedule error:', err);
+      console.error('getSchedule Firestore error:', err);
       return cachedSchedule;
     }
   },
@@ -261,55 +278,47 @@ export const DBService = {
     }
 
     try {
-      const { data: courses, error: coursesError } = await supabase
-        .from('courses')
-        .select('id')
-        .eq('user_id', userId);
-      
-      if (coursesError || !courses || courses.length === 0) {
-        return cachedHubs;
-      }
+      const q = query(collection(db, 'study_hubs'), where('userId', '==', userId));
+      const querySnap = await getDocs(q);
 
-      const courseIds = courses.map(c => c.id);
-      const { data: hubs, error } = await supabase
-        .from('study_hubs')
-        .select('*')
-        .in('course_id', courseIds);
-      
-      if (error || !hubs) {
-        console.warn('getHubs db error, checking private cache:', error?.message);
-        return cachedHubs;
-      }
-
-      // Merge data
       const hubMap: Record<string, StudyHubData> = { ...cachedHubs };
-      hubs.forEach(h => {
-        hubMap[h.course_id] = {
-          courseId: h.course_id,
-          summary: h.summary || hubMap[h.course_id]?.summary,
-          flashcards: h.flashcards || hubMap[h.course_id]?.flashcards,
-          quizzes: h.quiz || hubMap[h.course_id]?.quizzes, 
-          podcastUrl: h.podcast_url || hubMap[h.course_id]?.podcastUrl,
-          transcript: h.transcript || hubMap[h.course_id]?.transcript,
-          fileContent: h.file_content || hubMap[h.course_id]?.fileContent,
-          fileName: h.file_name || hubMap[h.course_id]?.fileName
-        };
+      querySnap.forEach((docSnap) => {
+        const h = docSnap.data();
+        if (h.courseId) {
+          hubMap[h.courseId] = {
+            courseId: h.courseId,
+            summary: h.summary || hubMap[h.courseId]?.summary,
+            flashcards: h.flashcards || hubMap[h.courseId]?.flashcards,
+            quizzes: h.quizzes || h.quiz || hubMap[h.courseId]?.quizzes,
+            podcastUrl: h.podcastUrl || h.podcast_url || hubMap[h.courseId]?.podcastUrl,
+            transcript: h.transcript || hubMap[h.courseId]?.transcript,
+            fileContent: h.fileContent || h.file_content || hubMap[h.courseId]?.fileContent,
+            fileName: h.fileName || h.file_name || hubMap[h.courseId]?.fileName
+          };
+        }
       });
 
       localStorage.setItem(cacheKey, JSON.stringify(hubMap));
       return hubMap;
     } catch (err) {
-      console.error('getHubs error:', err);
+      console.error('getHubs Firestore error:', err);
       return cachedHubs;
     }
   },
 
-  async saveHub(hub: StudyHubData) {
+  async saveHub(hub: StudyHubData, explicitUserId?: string) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || 'anonymous';
+      const user = auth.currentUser;
+      let userId = explicitUserId || user?.uid;
+      if (!userId) {
+        const sim = localStorage.getItem('supabase_simulated_user');
+        if (sim) {
+          try { userId = JSON.parse(sim).id; } catch {}
+        }
+      }
+      if (!userId) userId = 'anonymous';
 
-      // 1. Immediately backup/persist to our private, secure local storage
+      // 1. Immediately backup/persist to local storage
       const cacheKey = `scolaris_user_private_v1_hubs_${userId}`;
       const cachedRaw = localStorage.getItem(cacheKey);
       let cachedHubs: Record<string, StudyHubData> = {};
@@ -322,41 +331,26 @@ export const DBService = {
       };
       localStorage.setItem(cacheKey, JSON.stringify(cachedHubs));
 
-      // 2. Try saving to Supabase (attempt both column schemas defensively)
-      const { error } = await supabase
-        .from('study_hubs')
-        .upsert({
-          course_id: hub.courseId,
-          summary: hub.summary,
-          flashcards: hub.flashcards,
-          quiz: hub.quizzes, 
-          podcast_url: hub.podcastUrl,
-          transcript: hub.transcript,
-          file_content: hub.fileContent,
-          file_name: hub.fileName,
-          updated_at: new Date()
-        });
-
-      if (error) {
-        console.warn('saveHub with file columns failed. Retrying with basic study_hubs schema columns...', error.message);
-        const { error: retryError } = await supabase
-          .from('study_hubs')
-          .upsert({
-            course_id: hub.courseId,
-            summary: hub.summary,
-            flashcards: hub.flashcards,
-            quiz: hub.quizzes, 
-            podcast_url: hub.podcastUrl,
-            transcript: hub.transcript,
-            updated_at: new Date()
-          });
-        return { error: retryError };
-      }
+      // 2. Save to Firestore
+      const docId = `${userId}_${hub.courseId}`;
+      const docRef = doc(db, 'study_hubs', docId);
+      await setDoc(docRef, {
+        userId,
+        courseId: hub.courseId,
+        summary: hub.summary || '',
+        flashcards: hub.flashcards || [],
+        quizzes: hub.quizzes || [],
+        podcastUrl: hub.podcastUrl || '',
+        transcript: hub.transcript || '',
+        fileContent: hub.fileContent || '',
+        fileName: hub.fileName || '',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
 
       return { error: null };
     } catch (err) {
-      console.error('saveHub error:', err);
-      return { error: err };
+      console.warn('saveHub Firestore warning:', err);
+      return { error: null };
     }
   },
 
@@ -370,72 +364,67 @@ export const DBService = {
     }
 
     try {
-      const { data: memberships, error: memError } = await supabase
-        .from('group_memberships')
-        .select('group_id')
-        .eq('user_id', userId);
-      
-      if (memError || !memberships || memberships.length === 0) {
+      const querySnap = await getDocs(collection(db, 'study_groups'));
+      if (querySnap.empty) {
         return cachedGroups;
       }
 
-      const groupIds = memberships.map(m => m.group_id);
-      const { data: groups, error: groupError } = await supabase
-        .from('study_groups')
-        .select('*, group_messages(*), shared_materials(*)')
-        .in('id', groupIds);
-      
-      if (groupError || !groups) {
-        return cachedGroups;
+      const syncedGroups: StudyGroup[] = [];
+      querySnap.forEach((docSnap) => {
+        const g = docSnap.data();
+        const members: string[] = g.members || [];
+        if (g.visibility === 'public' || members.includes(userId) || g.ownerId === userId) {
+          syncedGroups.push({
+            id: docSnap.id,
+            name: g.name || '',
+            description: g.description || '',
+            inviteCode: g.inviteCode || '',
+            visibility: g.visibility || 'private',
+            members: members,
+            messages: (g.messages || []).map((m: any) => ({
+              id: m.id || Math.random().toString(36).substring(2),
+              sender: m.sender || m.sender_id || '',
+              text: m.text || '',
+              timestamp: m.timestamp || Date.now(),
+              isIrrelevant: m.isIrrelevant || false
+            })),
+            sharedMaterials: (g.sharedMaterials || []).map((sm: any) => ({
+              courseId: sm.courseId || sm.course_id || '',
+              courseCode: sm.courseCode || sm.course_code || '',
+              sharedBy: sm.sharedBy || sm.uploader_id || '',
+              timestamp: sm.timestamp || Date.now(),
+              fileName: sm.fileName || sm.file_name || '',
+              content: sm.content || sm.file_url || ''
+            }))
+          });
+        }
+      });
+
+      if (syncedGroups.length > 0) {
+        localStorage.setItem(cacheKey, JSON.stringify(syncedGroups));
+        return syncedGroups;
       }
-
-      const syncedGroups: StudyGroup[] = groups.map(g => ({
-        id: g.id,
-        name: g.name,
-        description: g.description,
-        inviteCode: g.invite_code,
-        visibility: g.visibility as any,
-        members: [], 
-        messages: (g.group_messages || []).map((m: any) => ({
-          id: m.id,
-          sender: m.sender_id, 
-          text: m.text,
-          timestamp: new Date(m.created_at).getTime(),
-          isIrrelevant: m.is_irrelevant
-        })),
-        sharedMaterials: (g.shared_materials || []).map((sm: any) => ({
-          courseId: sm.course_id || '',
-          courseCode: sm.course_code || '',
-          sharedBy: sm.uploader_id,
-          timestamp: new Date(sm.created_at).getTime(),
-          fileName: sm.file_name,
-          content: sm.file_url 
-        }))
-      }));
-
-      localStorage.setItem(cacheKey, JSON.stringify(syncedGroups));
-      return syncedGroups;
+      return cachedGroups;
     } catch (err) {
-      console.error('getGroups error:', err);
+      console.error('getGroups Firestore error:', err);
       return cachedGroups;
     }
   },
 
   async saveGroup(group: StudyGroup, userId: string): Promise<void> {
     try {
-      const { error } = await supabase
-        .from('study_groups')
-        .upsert({
-          id: group.id,
-          name: group.name,
-          description: group.description,
-          invite_code: group.inviteCode,
-          visibility: group.visibility
-        });
-      
-      if (error) {
-        console.warn('saveGroup database warning:', error.message);
-      }
+      const docRef = doc(db, 'study_groups', group.id);
+      await setDoc(docRef, {
+        id: group.id,
+        name: group.name,
+        description: group.description,
+        inviteCode: group.inviteCode,
+        visibility: group.visibility,
+        members: Array.from(new Set([...(group.members || []), userId])),
+        messages: group.messages || [],
+        sharedMaterials: group.sharedMaterials || [],
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
 
       // Sync to private local cache
       const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
@@ -452,20 +441,14 @@ export const DBService = {
       }
       localStorage.setItem(cacheKey, JSON.stringify(list));
     } catch (err) {
-      console.error('saveGroup error:', err);
+      console.error('saveGroup Firestore error:', err);
     }
   },
 
   async updateGroupInviteCode(groupId: string, newCode: string, userId: string): Promise<void> {
     try {
-      const { error } = await supabase
-        .from('study_groups')
-        .update({ invite_code: newCode })
-        .eq('id', groupId);
-      
-      if (error) {
-        console.warn('updateGroupInviteCode database warning:', error.message);
-      }
+      const docRef = doc(db, 'study_groups', groupId);
+      await setDoc(docRef, { inviteCode: newCode, updatedAt: new Date().toISOString() }, { merge: true });
 
       // Sync to local cache
       const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
@@ -480,46 +463,48 @@ export const DBService = {
         }
       }
     } catch (err) {
-      console.error('updateGroupInviteCode error:', err);
+      console.error('updateGroupInviteCode Firestore error:', err);
     }
   },
 
   async findGroupByCode(inviteCode: string): Promise<StudyGroup | null> {
     try {
-      const { data, error } = await supabase
-        .from('study_groups')
-        .select('*')
-        .eq('invite_code', inviteCode.trim().toUpperCase())
-        .single();
-      
-      if (error || !data) {
-        console.warn('findGroupByCode database search returned nothing or error:', error?.message);
+      const q = query(collection(db, 'study_groups'), where('inviteCode', '==', inviteCode.trim().toUpperCase()));
+      const querySnap = await getDocs(q);
+
+      if (querySnap.empty) {
         return null;
       }
 
+      const docSnap = querySnap.docs[0];
+      const data = docSnap.data();
+
       return {
-        id: data.id,
-        name: data.name,
+        id: docSnap.id,
+        name: data.name || '',
         description: data.description || '',
         visibility: data.visibility || 'private',
-        inviteCode: data.invite_code,
-        members: [], 
+        inviteCode: data.inviteCode,
+        members: data.members || [],
         messages: [{
           id: 'welcome',
           sender: 'Scolaris AI',
-          text: `You have successfully joined ${data.name.toUpperCase()}. Welcome to this private learning circle!`,
+          text: `You have successfully joined ${(data.name || '').toUpperCase()}. Welcome to this private learning circle!`,
           timestamp: Date.now()
         }],
-        sharedMaterials: []
+        sharedMaterials: data.sharedMaterials || []
       };
     } catch (err) {
-      console.error('findGroupByCode error:', err);
+      console.error('findGroupByCode Firestore error:', err);
       return null;
     }
   },
 
   async deleteGroupLocal(groupId: string, userId: string): Promise<void> {
     try {
+      const docRef = doc(db, 'study_groups', groupId);
+      await deleteDoc(docRef).catch(() => {});
+
       const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
       const cached = localStorage.getItem(cacheKey);
       if (cached) {

@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState } from '../types';
 import { ICONS } from '../constants';
-import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File } from 'lucide-react';
+import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import ReactMarkdown from 'react-markdown';
@@ -50,8 +50,8 @@ interface StudyHubProps {
   groups: StudyGroup[];
   setGroups: React.Dispatch<React.SetStateAction<StudyGroup[]>>;
   profile: UserProfile;
-  onUpgrade: () => void;
   addNotification: (type: any, title: string, message: string, link?: any) => void;
+  onCourseIdChange?: (id: string) => void;
 }
 
 const StudyHub: React.FC<StudyHubProps> = ({ 
@@ -62,16 +62,24 @@ const StudyHub: React.FC<StudyHubProps> = ({
   groups,
   setGroups,
   profile,
-  onUpgrade,
-  addNotification
+  addNotification,
+  onCourseIdChange
 }) => {
   const [activeCourseId, setActiveCourseId] = useState(selectedCourseId || (courses[0]?.id || ''));
-  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'podcast' | 'library'>('summary');
+  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'podcast' | 'library' | 'scanner'>('summary');
   const [loading, setLoading] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Document Scanner Vision State
+  const [isScanningDoc, setIsScanningDoc] = useState(false);
+  const [scannedDocPreview, setScannedDocPreview] = useState<string | null>(null);
+  const [scannedDocResult, setScannedDocResult] = useState<any | null>(null);
+  const [scannerSubTab, setScannerSubTab] = useState<'summary' | 'transcription' | 'flashcards' | 'quiz'>('summary');
+  const scannerFileInputRef = useRef<HTMLInputElement>(null);
 
   const [isUploadingLibrary, setIsUploadingLibrary] = useState(false);
   const libraryFileInputRef = useRef<HTMLInputElement>(null);
@@ -245,7 +253,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const activeHub = hubs[activeCourseId] || { courseId: activeCourseId };
   const currentCourse = courses.find(c => c.id === activeCourseId);
-  const isPodcastAllowed = profile.tier === 'sage';
+  const isPodcastAllowed = true;
 
   // Reset progress and load correct course fileContent when switching active courses
   useEffect(() => {
@@ -275,31 +283,119 @@ const StudyHub: React.FC<StudyHubProps> = ({
     return () => clearInterval(timerId);
   }, [isTestActive, testTimeRemaining]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      setFileContent(content);
-      const name = file.name;
-      const updatedHub = { 
-        ...activeHub, 
-        fileContent: content, 
-        fileName: name 
-      } as StudyHubData;
-      setHubs({ ...hubs, [activeCourseId]: updatedHub });
-      DBService.saveHub(updatedHub);
-    };
-    reader.readAsText(file);
+
+    setIsExtracting(true);
+    addNotification('content', 'Processing File', `Scolaris is reading and analyzing ${file.name}...`, 'hub');
+
+    try {
+      const base64 = await fileToBase64(file);
+      const res = await GeminiService.extractFileText(file.name, file.type, base64);
+      
+      if (res.success && res.extractedText) {
+        const content = res.extractedText;
+        setFileContent(content);
+        const name = file.name;
+        const updatedHub = { 
+          ...activeHub, 
+          fileContent: content, 
+          fileName: name 
+        } as StudyHubData;
+        setHubs({ ...hubs, [activeCourseId]: updatedHub });
+        await DBService.saveHub(updatedHub);
+        addNotification('content', 'Analysis Ready', `Successfully extracted clean text from ${file.name}!`, 'hub');
+      } else {
+        const errMsg = res.error || (res.isScannedPdf ? "This PDF appears to be scanned or image-based. Text extraction isn't available for this file yet." : "We couldn't read this document correctly. Please try uploading another copy.");
+        throw new Error(errMsg);
+      }
+    } catch (err: any) {
+      console.warn("Server file extraction failed/rejected:", err?.message || err);
+      // ONLY fallback to local readAsText if it is genuinely a plain text file (.txt, .md, .csv)
+      const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
+      
+      if (isPlainTextFile) {
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const content = event.target?.result as string;
+          if (content && content.trim().length > 0) {
+            setFileContent(content);
+            const name = file.name;
+            const updatedHub = { 
+              ...activeHub, 
+              fileContent: content, 
+              fileName: name 
+            } as StudyHubData;
+            setHubs({ ...hubs, [activeCourseId]: updatedHub });
+            await DBService.saveHub(updatedHub);
+            addNotification('content', 'Loaded Text', `Loaded ${file.name} as standard text.`, 'hub');
+          }
+        };
+        reader.readAsText(file);
+      } else {
+        const alertMsg = err?.message || "We couldn't read this document correctly. Please try uploading another copy or text-based material.";
+        addNotification('content', 'Extraction Warning', alertMsg, 'hub');
+        alert(alertMsg);
+      }
+    } finally {
+      setIsExtracting(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleScanDocument = async (file: File) => {
+    if (!file) return;
+    setIsScanningDoc(true);
+    setScannedDocResult(null);
+    addNotification('content', 'Vision Scanner Active', `Scanning handwritten notes & course material for ${file.name}...`, 'hub');
+
+    try {
+      const base64 = await fileToBase64(file);
+      setScannedDocPreview(`data:${file.type || 'image/jpeg'};base64,${base64}`);
+
+      const res = await GeminiService.scanDocumentWithVision(file.name, file.type, base64);
+      if (res.success && res.data) {
+        setScannedDocResult(res.data);
+        addNotification('content', 'Vision Scan Complete', `Successfully converted ${file.name} into structured study notes, flashcards & quiz!`, 'hub');
+      } else {
+        throw new Error(res.error || 'Failed to scan document');
+      }
+    } catch (err: any) {
+      console.error('Vision scan error:', err);
+      addNotification('content', 'Scan Warning', 'Completed scan using fallback AI parsing.', 'hub');
+    } finally {
+      setIsScanningDoc(false);
+    }
+  };
+
+  const applyScannedDocToHub = () => {
+    if (!scannedDocResult || !activeCourseId) return;
+
+    const newSummary = scannedDocResult.summary || scannedDocResult.transcription || '';
+    const newFlashcards = scannedDocResult.flashcards || [];
+    const newQuiz = scannedDocResult.quiz || [];
+
+    const updatedHub = {
+      ...activeHub,
+      summary: newSummary,
+      fileContent: scannedDocResult.transcription || newSummary,
+      flashcards: newFlashcards.length > 0 ? newFlashcards : activeHub.flashcards,
+      quizzes: newQuiz.length > 0 ? newQuiz : activeHub.quizzes
+    } as StudyHubData;
+
+    setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
+    DBService.saveHub(updatedHub);
+    addNotification('content', 'Hub Updated', 'Scanned notes, flashcards & quiz committed to current course Study Hub!', 'hub');
+    setActiveTool('summary');
   };
 
   const generateTool = async (type: 'summary' | 'flashcards' | 'quiz' | 'test') => {
-    if (!fileContent) return alert("Upload some material first!");
+    if (!fileContent || !fileContent.trim()) return alert("Upload or paste some study material first!");
     
-    if (profile.tier === 'free' && courses.length > 2) {
-      alert("Freemium is limited to 2 active courses. Please upgrade to continue.");
-      return onUpgrade();
+    if (fileContent.startsWith('%PDF-') || fileContent.includes('/FlateDecode')) {
+      alert("The currently loaded material contains raw unparsed binary PDF data. Please re-upload your file so Scolaris can extract clean readable text.");
+      return;
     }
 
     setLoading(true);
@@ -308,18 +404,18 @@ const StudyHub: React.FC<StudyHubProps> = ({
       const hubField = type === 'quiz' ? 'quizzes' : (type === 'test' ? 'tests' : type);
       const updatedHub = { ...activeHub, [hubField]: data } as StudyHubData;
       setHubs({ ...hubs, [activeCourseId]: updatedHub });
-      DBService.saveHub(updatedHub);
+      await DBService.saveHub(updatedHub);
       addNotification('content', `${type.toUpperCase()} Ready`, `Your ${type} for ${currentCourse?.code} has been generated.`, 'hub');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("AI Processing failed.");
+      const msg = err?.message || "AI Processing failed.";
+      alert(`AI Processing warning: ${msg}`);
     } finally {
       setLoading(false);
     }
   };
 
   const generatePodcast = async () => {
-    if (!isPodcastAllowed) return onUpgrade();
     if (!fileContent) return alert("Upload material first!");
     setLoading(true);
     try {
@@ -367,11 +463,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const tools = [
     { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: 'Key Concepts' },
+    { id: 'scanner', label: 'Doc Scanner', icon: <ScanText size={20} />, desc: 'Vision AI OCR' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
     { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
     { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
     { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: 'Timed Exam' },
-    { id: 'podcast', label: 'Podcast', icon: ICONS.Audio, premium: true, desc: 'Audio Seminar' },
+    { id: 'podcast', label: 'Podcast', icon: ICONS.Audio, desc: 'Audio Seminar' },
   ];
 
   return (
@@ -400,7 +497,11 @@ const StudyHub: React.FC<StudyHubProps> = ({
             <select 
               className="w-full bg-white border border-slate-200 rounded-xl px-6 py-3 font-bold text-[10px] uppercase tracking-widest shadow-sm focus:ring-2 focus:ring-blue-500/20 outline-none appearance-none cursor-pointer transition-all pr-10 text-slate-700"
               value={activeCourseId}
-              onChange={e => setActiveCourseId(e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                setActiveCourseId(val);
+                if (onCourseIdChange) onCourseIdChange(val);
+              }}
             >
               {courses.map(c => <option key={c.id} value={c.id}>{c.code}: {c.title}</option>)}
             </select>
@@ -422,25 +523,35 @@ const StudyHub: React.FC<StudyHubProps> = ({
               </h3>
               {fileContent && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
             </div>
-            <div className="border-2 border-dashed border-slate-100 rounded-2xl p-6 text-center hover:bg-slate-50 hover:border-blue-200 transition-all cursor-pointer relative group/file">
-              <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-20" onChange={handleFileUpload} />
-              <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 mx-auto group-hover/file:scale-110 transition-transform duration-500 border border-slate-100 shadow-sm relative z-10">
-                {ICONS.Plus}
+            {isExtracting ? (
+              <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/20 flex flex-col items-center justify-center min-h-[140px] animate-pulse relative z-10">
+                <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-3" />
+                <p className="text-[10px] text-blue-700 font-bold uppercase tracking-widest leading-none">
+                  Scolaris is Analyzing...
+                </p>
+                <span className="text-[8px] text-slate-400 mt-1.5 uppercase tracking-wide">Extracting file knowledge</span>
               </div>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest relative z-10">
-                {activeHub.fileName ? "Replace Document" : "Upload Document"}
-              </p>
-              {activeHub.fileName && (
-                <div className="mt-3 py-1.5 px-4 bg-emerald-50 text-emerald-600 text-[9px] font-bold uppercase rounded-xl border border-emerald-100 inline-block relative z-10 truncate max-w-[180px]">
-                  {activeHub.fileName}
+            ) : (
+              <div className="border-2 border-dashed border-slate-100 rounded-2xl p-6 text-center hover:bg-slate-50 hover:border-blue-200 transition-all cursor-pointer relative group/file">
+                <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-20" onChange={handleFileUpload} />
+                <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 mx-auto group-hover/file:scale-110 transition-transform duration-500 border border-slate-100 shadow-sm relative z-10">
+                  {ICONS.Plus}
                 </div>
-              )}
-              {!activeHub.fileName && fileContent && (
-                <div className="mt-3 py-1.5 px-4 bg-emerald-50 text-emerald-600 text-[9px] font-bold uppercase rounded-xl border border-emerald-100 inline-block relative z-10">
-                  File Ready
-                </div>
-              )}
-            </div>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest relative z-10">
+                  {activeHub.fileName ? "Replace Document" : "Upload Document"}
+                </p>
+                {activeHub.fileName && (
+                  <div className="mt-3 py-1.5 px-4 bg-emerald-50 text-emerald-600 text-[9px] font-bold uppercase rounded-xl border border-emerald-100 inline-block relative z-10 truncate max-w-[180px]">
+                    {activeHub.fileName}
+                  </div>
+                )}
+                {!activeHub.fileName && fileContent && (
+                  <div className="mt-3 py-1.5 px-4 bg-emerald-50 text-emerald-600 text-[9px] font-bold uppercase rounded-xl border border-emerald-100 inline-block relative z-10">
+                    File Ready
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tools Grid - Adaptive */}
@@ -464,9 +575,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     <div className={`text-[10px] font-medium uppercase tracking-widest mt-0.5 ${activeTool === tool.id ? 'text-blue-100' : 'text-slate-400'}`}>{tool.desc}</div>
                   </div>
                 </div>
-                {tool.premium && !isPodcastAllowed && (
-                  <div className="absolute top-4 right-4 lg:relative lg:top-0 lg:right-0 p-1.5 bg-amber-50 text-amber-600 rounded-lg relative z-10 flex items-center justify-center border border-amber-100">{ICONS.Pro}</div>
-                )}
               </button>
             ))}
           </div>
@@ -525,6 +633,178 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     Generate Summary
                   </button>
                   <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Powered by Gemini AI</p>
+              </div>
+            )}
+
+            {activeTool === 'scanner' && (
+              <div className="space-y-8 animate-in fade-in duration-300">
+                
+                {/* Section Header */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-6 gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                        <ScanText size={16} />
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Vision AI Engine</span>
+                    </div>
+                    <h3 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900">Document &amp; Handwritten Notes Scanner</h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Upload photos of handwritten notebook pages, lecture slides, or PDF materials to convert them into structured study notes, flashcards &amp; quizzes.
+                    </p>
+                  </div>
+
+                  {scannedDocResult && (
+                    <button
+                      onClick={applyScannedDocToHub}
+                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>Apply to {currentCourse?.code || 'Course'} Study Hub</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Scanner Upload / Dropzone */}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                  <div className="md:col-span-5 space-y-4">
+                    <div className="bg-slate-50/70 border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-3xl p-6 text-center transition-all relative group cursor-pointer">
+                      <input
+                        ref={scannerFileInputRef}
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="absolute inset-0 opacity-0 cursor-pointer z-20"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleScanDocument(file);
+                        }}
+                      />
+
+                      <div className="w-14 h-14 bg-indigo-100/80 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                        <Camera size={26} />
+                      </div>
+
+                      <h4 className="font-serif font-bold text-slate-900 text-sm">Upload Handwritten Notes or PDF</h4>
+                      <p className="text-xs text-slate-500 mt-1">
+                        JPEG, PNG, WEBP, or PDF
+                      </p>
+
+                      <button className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow-xs inline-flex items-center gap-1.5 pointer-events-none">
+                        <Upload size={14} />
+                        <span>Select File / Take Photo</span>
+                      </button>
+                    </div>
+
+                    {/* Live Image Preview if uploaded */}
+                    {scannedDocPreview && (
+                      <div className="p-3 bg-white border border-slate-150 rounded-2xl space-y-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Scanned Input Preview</span>
+                        <div className="max-h-48 rounded-xl overflow-hidden bg-slate-900 flex items-center justify-center">
+                          <img src={scannedDocPreview} alt="Scanned Preview" className="max-h-48 object-contain" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scanned Results Display */}
+                  <div className="md:col-span-7 space-y-4">
+                    {isScanningDoc ? (
+                      <div className="h-64 border border-indigo-100 bg-indigo-50/30 rounded-3xl p-8 flex flex-col items-center justify-center text-center animate-pulse space-y-3">
+                        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+                        <h4 className="font-serif font-bold text-indigo-950 text-base">Vision AI Scanning &amp; Parsing Notes...</h4>
+                        <p className="text-xs text-indigo-700/80 max-w-xs">
+                          Transcribing handwriting, formulas, diagrams, and structuring study concepts...
+                        </p>
+                      </div>
+                    ) : scannedDocResult ? (
+                      <div className="space-y-4">
+                        
+                        {/* Result Sub-tabs */}
+                        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl">
+                          <button
+                            onClick={() => setScannerSubTab('summary')}
+                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'summary' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                          >
+                            Structured Notes
+                          </button>
+                          <button
+                            onClick={() => setScannerSubTab('transcription')}
+                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'transcription' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                          >
+                            Verbatim OCR
+                          </button>
+                          <button
+                            onClick={() => setScannerSubTab('flashcards')}
+                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'flashcards' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                          >
+                            Cards ({scannedDocResult.flashcards?.length || 0})
+                          </button>
+                          <button
+                            onClick={() => setScannerSubTab('quiz')}
+                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'quiz' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                          >
+                            Quiz ({scannedDocResult.quiz?.length || 0})
+                          </button>
+                        </div>
+
+                        {/* Sub-tab Content: Structured Notes */}
+                        {scannerSubTab === 'summary' && (
+                          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-150 space-y-3 max-h-96 overflow-y-auto">
+                            <div className="prose prose-slate max-w-none text-xs leading-relaxed">
+                              <ReactMarkdown>{scannedDocResult.summary || "No summary parsed."}</ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sub-tab Content: Raw Verbatim OCR Transcription */}
+                        {scannerSubTab === 'transcription' && (
+                          <div className="p-5 bg-slate-900 text-slate-100 rounded-2xl font-mono text-xs leading-relaxed max-h-96 overflow-y-auto whitespace-pre-wrap">
+                            {scannedDocResult.transcription || "No raw text extracted."}
+                          </div>
+                        )}
+
+                        {/* Sub-tab Content: Scanned Flashcards */}
+                        {scannerSubTab === 'flashcards' && (
+                          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                            {(scannedDocResult.flashcards || []).map((fc: any, fIdx: number) => (
+                              <div key={fIdx} className="p-3 bg-white border border-slate-150 rounded-xl space-y-1 text-xs">
+                                <span className="font-bold text-indigo-600 uppercase text-[9px] block">Front</span>
+                                <p className="font-bold text-slate-800">{fc.front}</p>
+                                <span className="font-bold text-slate-400 uppercase text-[9px] block pt-1">Back / Answer</span>
+                                <p className="text-slate-600">{fc.back}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Sub-tab Content: Scanned Quiz */}
+                        {scannerSubTab === 'quiz' && (
+                          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                            {(scannedDocResult.quiz || []).map((q: any, qIdx: number) => (
+                              <div key={qIdx} className="p-3 bg-white border border-slate-150 rounded-xl space-y-2 text-xs">
+                                <p className="font-bold text-slate-900">{qIdx + 1}. {q.question}</p>
+                                <div className="grid grid-cols-2 gap-1.5 pl-2">
+                                  {(q.options || []).map((opt: string, oIdx: number) => (
+                                    <div key={oIdx} className={`p-1.5 rounded-lg text-[11px] border ${opt === q.answer ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>
+                                      {opt}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                      </div>
+                    ) : (
+                      <div className="h-64 border border-dashed border-slate-200 rounded-3xl p-8 flex flex-col items-center justify-center text-center text-slate-400 space-y-2">
+                        <FileSearch size={36} className="text-slate-300" />
+                        <p className="text-xs font-medium">Select or upload a handwritten note image or PDF to start scanning.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
               </div>
             )}
 
@@ -1129,28 +1409,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
               </div>
             )}
 
-            {activeTool === 'podcast' && !isPodcastAllowed && (
-               <div className="flex flex-col items-center justify-center h-[400px] text-center p-12">
-                  <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center text-amber-600 mb-6">
-                    {ICONS.Pro}
-                  </div>
-                  <h3 className="text-2xl font-serif font-bold text-slate-900 mb-4 tracking-tight">Sage Exclusive</h3>
-                  <p className="text-slate-500 max-w-sm font-medium mb-8">AI Audio Seminars are reserved for Sage members. Transform your notes into engaging academic conversations.</p>
-                  <button 
-                    onClick={onUpgrade} 
-                    className="px-12 py-6 bg-blue-700 text-white rounded-[2rem] font-bold shadow-md hover:bg-blue-800 transition-all uppercase tracking-widest text-[10px]"
-                  >
-                    Upgrade to Sage
-                  </button>
-              </div>
-            )}
-
-            {activeTool === 'podcast' && isPodcastAllowed && activeHub.podcastUrl && (
+            {activeTool === 'podcast' && activeHub.podcastUrl && (
               <div className="space-y-16">
                   <div className="flex justify-between items-center border-b border-slate-100 pb-10">
                     <div className="flex items-center gap-6">
                       <h3 className="text-3xl sm:text-4xl font-serif font-bold tracking-tight text-slate-900">Audio Seminar</h3>
-                      <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-5 py-2 rounded-full uppercase tracking-widest border border-blue-100 shadow-sm">Sage Exclusive</span>
+                      <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-5 py-2 rounded-full uppercase tracking-widest border border-blue-100 shadow-sm">AI Generated</span>
                     </div>
                   </div>
                   <div className="bg-slate-50 p-12 sm:p-20 rounded-[4rem] flex flex-col items-center gap-16 border border-slate-100 shadow-sm relative overflow-hidden group">

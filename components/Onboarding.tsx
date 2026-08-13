@@ -18,7 +18,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
     level: 'Freshman',
     age: 20,
     semesterEnd: new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
-    tier: 'free' as SubscriptionTier
+    tier: 'scholar' as SubscriptionTier
   });
 
   const nextStep = () => {
@@ -41,8 +41,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
       semesterEnd: formData.semesterEnd,
       onboarded: true,
       tutorialSeen: false,
-      isPro: formData.tier !== 'free',
-      tier: formData.tier,
+      isPro: true,
+      tier: 'scholar',
       notifications: {
         messages: true,
         sessions: true,
@@ -68,7 +68,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
     })
   };
 
-  const totalSteps = 4;
+  const totalSteps = 3;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 overflow-hidden relative selection:bg-blue-100">
@@ -80,7 +80,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
         <div className="mb-4 text-center space-y-3">
           <div className="flex flex-col items-center gap-2">
             <div className="flex gap-1 max-w-[140px] w-full">
-              {[1, 2, 3, 4].map(i => (
+              {[1, 2, 3].map(i => (
                 <div 
                   key={i} 
                   className={`h-0.5 flex-1 rounded-full transition-all duration-700 ${
@@ -106,8 +106,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
                   semesterEnd: formData.semesterEnd || new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
                   onboarded: true,
                   tutorialSeen: false,
-                  isPro: false,
-                  tier: 'free',
+                  isPro: true,
+                  tier: 'scholar',
                   notifications: { messages: true, sessions: true, aiContent: true }
                 })}
                 className="text-[8px] font-bold text-blue-600 uppercase tracking-widest hover:underline"
@@ -235,52 +235,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
                   <div className="flex gap-4">
                     <button type="button" onClick={prevStep} className="flex-1 bg-white border border-slate-100 py-4 rounded-xl hover:bg-slate-50 transition-all font-bold uppercase tracking-widest text-[9px] text-slate-400">Back</button>
                     <button 
-                      type="button" 
-                      onClick={nextStep} 
+                      type="submit" 
                       disabled={!formData.semesterEnd}
                       className="flex-[2] bg-blue-700 text-white font-bold py-4 rounded-xl hover:bg-blue-800 transition-all disabled:opacity-50 text-xs shadow-md uppercase tracking-widest"
-                    >
-                      Calibrate
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {step === 4 && (
-                <div className="space-y-6">
-                  <div className="text-center space-y-1">
-                    <label className="text-[9px] font-bold text-blue-700 uppercase tracking-widest">Pricing Plan</label>
-                    <h3 className="text-lg font-serif font-bold text-slate-900 tracking-tight">Select Your Academic Tier</h3>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3">
-                    {[
-                      { id: 'free', name: 'Explorer', price: '$0', features: ['2 Courses', 'AI Summaries'], color: 'bg-slate-50' },
-                      { id: 'scholar', name: 'Elite Scholar', price: '$29', features: ['Unlimited Courses', 'AI Exam Prep'], color: 'bg-blue-50' },
-                      { id: 'sage', name: 'Academic Sage', price: '$59', features: ['AI Seminar Podcasts🎙️', 'Study Circles'], color: 'bg-indigo-50' }
-                    ].map(tier => (
-                      <button
-                        key={tier.id}
-                        type="button"
-                        onClick={() => setFormData({...formData, tier: tier.id as SubscriptionTier})}
-                        className={`text-left p-4 rounded-xl border-2 transition-all relative overflow-hidden group ${
-                          formData.tier === tier.id 
-                            ? 'border-blue-600 bg-white' 
-                            : 'border-slate-100 hover:border-slate-200 bg-white/50'
-                        }`}
-                      >
-                        <div className="flex justify-between items-center mb-1 relative z-10">
-                          <span className="font-bold text-sm text-slate-900 tracking-tight">{tier.name}</span>
-                          <span className={`text-lg font-bold ${formData.tier === tier.id ? 'text-blue-700' : 'text-slate-400'}`}>{tier.price}<span className="text-[8px] font-medium tracking-normal opacity-50">/mo</span></span>
-                        </div>
-                        <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest relative z-10">{tier.features.join(' • ')}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-4 pt-2">
-                    <button type="button" onClick={prevStep} className="flex-1 bg-white border border-slate-100 py-4 rounded-xl hover:bg-slate-50 transition-all font-bold uppercase tracking-widest text-[9px] text-slate-400">Back</button>
-                    <button 
-                      type="submit" 
-                      className="flex-[2] bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-black transition-all shadow-md text-xs uppercase tracking-widest"
                     >
                       Complete Setup
                     </button>

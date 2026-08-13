@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
+import { User } from 'firebase/auth';
 import { Course, UserProfile, StudySession, AppState, StudyHubData, StudyGroup, AppNotification } from './types';
 import { ICONS } from './constants';
-import { GraduationCap, Menu, X, ChevronLeft, ChevronRight, Crown } from 'lucide-react';
+import { GraduationCap, Menu, X, ShieldAlert } from 'lucide-react';
 import Onboarding from './components/Onboarding';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
@@ -13,13 +13,14 @@ import StudyGroups from './components/StudyGroups';
 import CGPACalculator from './components/CGPACalculator';
 import PomodoroTimer from './components/PomodoroTimer';
 import TimetableView from './components/TimetableView';
-import ProGate from './components/ProGate';
 import Profile from './components/Profile';
 import Tutorial from './components/Tutorial';
+import { ScolarisChatWidget } from './components/ScolarisChatWidget';
 import Auth from './components/Auth';
-import { supabase } from '@/lib/supabase';
+import { EmailVerification } from './components/EmailVerification';
+import { auth } from './lib/firebase';
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { DBService } from './services/db';
-import { SubscriptionTier } from './types';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
@@ -32,135 +33,114 @@ const App: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  // Auth State Management
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<User | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
-  const [loading, setLoading] = useState(true);
+  const [sessionExpiredMsg, setSessionExpiredMsg] = useState<string | null>(null);
+  const [dbConnected, setDbConnected] = useState<boolean | null>(null);
 
-  // Supabase Auth and Data Fetching
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        handleAuthSuccess(session.user);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        handleAuthSuccess(session.user);
-      } else {
-        setProfile(null);
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleAuthSuccess = async (user: any) => {
-    setLoading(true);
+  // Load User Data & Profile from Firestore
+  const loadUserData = async (user: User) => {
     try {
-      let dbProfile = await DBService.getProfile(user.id);
-      const isSignupFlow = localStorage.getItem('scolaris_is_signup') === 'true';
-      
+      const uid = user.uid;
+      let dbProfile = await DBService.getProfile(uid);
+
       if (dbProfile) {
-        // If they had a profile but onboarded is false, and it is not a signup flow, bypass onboarding
-        if (!dbProfile.onboarded && !isSignupFlow) {
-          dbProfile.onboarded = true;
-          dbProfile.tutorialSeen = true;
-          await DBService.saveProfile(user.id, dbProfile);
-        }
-        
         setProfile(dbProfile);
-        const [dbCourses, dbSchedule, dbHubs, dbGroups] = await Promise.all([
-          DBService.getCourses(user.id),
-          DBService.getSchedule(user.id),
-          DBService.getHubs(user.id),
-          DBService.getGroups(user.id)
-        ]);
-        setCourses(dbCourses);
-        setSchedule(dbSchedule);
-        setHubs(dbHubs);
-        setGroups(dbGroups);
       } else {
-        // New user - profile created in Auth.tsx or initialized here
-        const defaultProfile = {
-          name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Scholar',
+        // Create initial default profile in Firestore for new user
+        const newProfile: UserProfile = {
+          name: user.displayName || user.email?.split('@')[0] || 'Scholar',
           email: user.email || '',
-          university: user.user_metadata?.university || '',
-          level: user.user_metadata?.level || 'Undergraduate',
-          age: user.user_metadata?.age || 18,
-          onboarded: isSignupFlow ? false : true,
-          tutorialSeen: isSignupFlow ? false : true,
-          tier: 'free' as SubscriptionTier,
-          isPro: false,
+          university: '',
+          level: 'Undergraduate',
+          age: 18,
+          onboarded: false,
+          tutorialSeen: false,
+          tier: 'scholar',
+          isPro: true,
           notifications: { messages: true, sessions: true, aiContent: true },
           semesterEnd: ''
         };
-        await DBService.saveProfile(user.id, defaultProfile);
-        setProfile(defaultProfile);
+        await DBService.saveProfile(uid, newProfile);
+        setProfile(newProfile);
       }
+
+      const [dbCourses, dbSchedule, dbHubs, dbGroups] = await Promise.all([
+        DBService.getCourses(uid),
+        DBService.getSchedule(uid),
+        DBService.getHubs(uid),
+        DBService.getGroups(uid)
+      ]);
+      setCourses(dbCourses);
+      setSchedule(dbSchedule);
+      setHubs(dbHubs);
+      setGroups(dbGroups);
     } catch (error) {
       console.error('Failed to load user data:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleOnboardingComplete = async (newProfile: UserProfile) => {
-    localStorage.removeItem('scolaris_is_signup');
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      await DBService.saveProfile(user.id, newProfile);
-    }
-    setProfile(newProfile);
-    setActiveTab('dashboard');
-  };
+  // Firebase Auth Observer
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setAuthLoading(true);
 
-  const [dbConnected, setDbConnected] = useState<boolean | null>(null);
+      if (user) {
+        await user.reload().catch(() => {});
+        const currentUser = auth.currentUser || user;
+        setAuthUser(currentUser);
+        setSessionExpiredMsg(null);
 
+        if (currentUser.emailVerified) {
+          await loadUserData(currentUser);
+        }
+      } else {
+        setAuthUser(null);
+        setProfile(null);
+      }
+
+      setAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // DB Connection Health Checker
   useEffect(() => {
     const checkDb = async () => {
       const isConnected = await DBService.checkConnection();
       setDbConnected(isConnected);
     };
     checkDb();
-    const interval = setInterval(checkDb, 30000); // Check every 30s
+    const interval = setInterval(checkDb, 30000);
     return () => clearInterval(interval);
   }, []);
 
   // Sync state changes to DB
   useEffect(() => {
-    const syncProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !profile?.onboarded) return;
-      DBService.saveProfile(user.id, profile);
-    };
-    if (profile?.onboarded) syncProfile();
-  }, [profile]);
+    if (authUser?.uid && profile?.onboarded) {
+      DBService.saveProfile(authUser.uid, profile);
+    }
+  }, [profile, authUser?.uid]);
 
   useEffect(() => {
-    const syncCourses = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || courses.length === 0) return;
-      DBService.saveCourses(user.id, courses);
-    };
-    if (profile?.onboarded) syncCourses();
-  }, [courses, profile?.onboarded]);
+    if (authUser?.uid && profile?.onboarded && courses.length > 0) {
+      DBService.saveCourses(authUser.uid, courses);
+    }
+  }, [courses, profile?.onboarded, authUser?.uid]);
 
   useEffect(() => {
-    const syncSchedule = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || schedule.length === 0) return;
-      DBService.saveSchedule(user.id, schedule);
-    };
-    if (profile?.onboarded) syncSchedule();
-  }, [schedule, profile?.onboarded]);
+    if (authUser?.uid && profile?.onboarded && schedule.length > 0) {
+      DBService.saveSchedule(authUser.uid, schedule);
+    }
+  }, [schedule, profile?.onboarded, authUser?.uid]);
 
-
+  // Mobile responsiveness
   useEffect(() => {
-    // Handle mobile responsiveness for sidebar
     const handleResize = () => {
       if (window.innerWidth < 1024) {
         setIsSidebarOpen(false);
@@ -170,35 +150,48 @@ const App: React.FC = () => {
     };
 
     window.addEventListener('resize', handleResize);
-    handleResize(); // Initial check
+    handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Notification for Upcoming Sessions
+  // Notifications for Upcoming Sessions
   useEffect(() => {
     if (!profile || !profile.onboarded || schedule.length === 0) return;
 
     const interval = setInterval(() => {
       const now = new Date();
       const currentDay = now.toLocaleDateString('en-US', { weekday: 'long' });
-      
       const todaySessions = schedule.filter(s => s.day === currentDay);
       
       todaySessions.forEach(session => {
         const lastNotifiedKey = `last_notified_session_${session.id}`;
         const lastNotified = localStorage.getItem(lastNotifiedKey);
         
-        // Notify once per day if it's the right day
-        if (!lastNotified || (Date.now() - parseInt(lastNotified)) > 86400000) {
-           const course = courses.find(c => c.id === session.courseId);
-           addNotification('session', 'Upcoming Study Session', `You have a ${session.mode} session for ${course?.code || 'your course'} today.`, 'schedule');
-           localStorage.setItem(lastNotifiedKey, Date.now().toString());
+        if (!lastNotified || (Date.now() - parseInt(lastNotified, 10)) > 86400000) {
+          const course = courses.find(c => c.id === session.courseId);
+          addNotification('session', 'Upcoming Study Session', `You have a ${session.mode} session for ${course?.code || 'your course'} today.`, 'schedule');
+          localStorage.setItem(lastNotifiedKey, Date.now().toString());
         }
       });
-    }, 60000); // Check every minute
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [profile, schedule, courses]);
+
+  const handleSaveProfile = async (updatedProfile: UserProfile) => {
+    setProfile(updatedProfile);
+    if (authUser) {
+      await DBService.saveProfile(authUser.uid, updatedProfile);
+    }
+  };
+
+  const handleOnboardingComplete = async (newProfile: UserProfile) => {
+    if (authUser) {
+      await DBService.saveProfile(authUser.uid, newProfile);
+    }
+    setProfile(newProfile);
+    setActiveTab('dashboard');
+  };
 
   const handleTutorialComplete = () => {
     if (profile) {
@@ -206,29 +199,27 @@ const App: React.FC = () => {
     }
   };
 
-  const logout = async () => {
-    await supabase.auth.signOut();
-    localStorage.clear();
+  const handleSignOut = async () => {
+    await firebaseSignOut(auth).catch(() => {});
+    setAuthUser(null);
     setProfile(null);
     setCourses([]);
     setSchedule([]);
     setHubs({});
     setGroups([]);
     setActiveTab('dashboard');
-    setShowAuth(false);
+    setShowAuth(true);
+    setSessionExpiredMsg(null);
   };
-
 
   const deleteAccount = () => {
     if (window.confirm("Are you absolutely sure you want to delete your account? This action is irreversible.")) {
-      logout();
+      handleSignOut();
     }
   };
 
   const addNotification = (type: AppNotification['type'], title: string, message: string, link?: AppState) => {
     if (!profile) return;
-    
-    // Respect user preferences
     if (type === 'message' && !profile.notifications?.messages) return;
     if (type === 'session' && !profile.notifications?.sessions) return;
     if (type === 'content' && !profile.notifications?.aiContent) return;
@@ -255,9 +246,30 @@ const App: React.FC = () => {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  if (!profile) {
+  // 1. Loading State
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-14 h-14 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-xl mb-4 animate-bounce">
+          <div className="font-serif font-bold text-xl italic">S</div>
+        </div>
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+          Resolving Academic Session...
+        </p>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated State
+  if (!authUser) {
     if (showAuth) {
-      return <Auth onAuth={(p) => setProfile(p)} initialMode={authMode} />;
+      return (
+        <Auth 
+          onAuthSuccess={() => setSessionExpiredMsg(null)} 
+          initialMode={authMode} 
+          sessionExpiredMsg={sessionExpiredMsg}
+        />
+      );
     }
     return (
       <LandingPage 
@@ -273,10 +285,43 @@ const App: React.FC = () => {
     );
   }
 
+  // 3. Email Unverified State (for Email/Password Accounts)
+  if (authUser && !authUser.emailVerified) {
+    return (
+      <EmailVerification
+        userEmail={authUser.email || ''}
+        onVerified={async () => {
+          await authUser.reload();
+          if (auth.currentUser?.emailVerified) {
+            setAuthUser(auth.currentUser);
+            await loadUserData(auth.currentUser);
+          }
+        }}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  // 4. Loading User Data / Profile State
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-xl mb-4 animate-spin">
+          <GraduationCap size={24} />
+        </div>
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
+          Loading Academic Records...
+        </p>
+      </div>
+    );
+  }
+
+  // 5. Onboarding View
   if (profile && !profile.onboarded) {
     return <Onboarding userEmail={profile.email} onComplete={handleOnboardingComplete} />;
   }
 
+  // 6. Main Protected Application View
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -285,7 +330,6 @@ const App: React.FC = () => {
           courses={courses} 
           schedule={schedule} 
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
-          onUpgrade={() => setActiveTab('pro')}
           onNavigate={(tab) => { setActiveTab(tab); }}
         />;
       case 'courses':
@@ -312,8 +356,8 @@ const App: React.FC = () => {
           groups={groups}
           setGroups={setGroups}
           profile={profile}
-          onUpgrade={() => setActiveTab('pro')}
           addNotification={addNotification}
+          onCourseIdChange={setSelectedCourseId}
         />;
       case 'groups':
         return <StudyGroups 
@@ -324,7 +368,7 @@ const App: React.FC = () => {
           addNotification={addNotification}
         />;
       case 'calculator':
-        return <CGPACalculator />;
+        return <CGPACalculator profile={profile} onUpdateProfile={handleSaveProfile} />;
       case 'pomodoro':
       case 'library':
         return <PomodoroTimer />;
@@ -339,16 +383,13 @@ const App: React.FC = () => {
           </p>
         </div>;
       case 'profile':
-        return <Profile profile={profile} setProfile={setProfile} onSignOut={logout} onDelete={deleteAccount} />;
-      case 'pro':
-        return <ProGate profile={profile} setProfile={setProfile} onBack={() => setActiveTab('dashboard')} />;
+        return <Profile profile={profile} setProfile={handleSaveProfile} onSignOut={handleSignOut} onDelete={deleteAccount} />;
       default:
         return <Dashboard 
           profile={profile} 
           courses={courses} 
           schedule={schedule} 
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }} 
-          onUpgrade={() => setActiveTab('pro')}
           onNavigate={(tab) => { setActiveTab(tab); }}
         />;
     }
@@ -408,7 +449,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Sidebar - sliding drawer for mobile/tablet, persistent for desktop */}
+      {/* Sidebar Drawer */}
       <aside className={`
         fixed inset-y-0 left-0 w-60 bg-white z-50 flex flex-col border-r border-slate-100 
         transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0
@@ -487,20 +528,6 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-4 space-y-4">
-           {profile.tier === 'free' && (
-             <button 
-               onClick={() => {
-                 setActiveTab('pro');
-                 if (window.innerWidth < 1024) setIsSidebarOpen(false);
-               }}
-               className="w-full h-14 bg-slate-900 text-white rounded-2xl flex items-center justify-center gap-3 hover:bg-black transition-all shadow-xl group border-t border-white/5 overflow-hidden relative"
-             >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-                <Crown size={16} className="text-amber-400" />
-                <span className="font-bold text-xs uppercase tracking-widest">Go Pro</span>
-             </button>
-           )}
-
            <div className="pt-2 border-t border-slate-50">
               <button 
                 onClick={() => {
@@ -581,6 +608,14 @@ const App: React.FC = () => {
         <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
            {renderContent()}
         </div>
+
+        {profile && profile.onboarded && (
+          <ScolarisChatWidget 
+            courses={courses}
+            activeCourseId={selectedCourseId}
+            activeHub={hubs[selectedCourseId || (courses[0]?.id || '')] || null}
+          />
+        )}
       </main>
 
       {profile && profile.onboarded && !profile.tutorialSeen && (

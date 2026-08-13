@@ -11,7 +11,13 @@ import {
   Sparkles,
   Layers,
   Award,
-  BookMarked
+  BookMarked,
+  Calendar,
+  Download,
+  ExternalLink,
+  Copy,
+  Check,
+  X
 } from 'lucide-react';
 
 interface ScheduleViewProps {
@@ -76,6 +82,8 @@ const getModeMeta = (mode: string) => {
 
 const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHub }) => {
   const [selectedModeFilter, setSelectedModeFilter] = useState<string | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [copiedFeed, setCopiedFeed] = useState(false);
 
   const getCourse = (id: string) => courses.find(c => c.id === id);
 
@@ -89,6 +97,108 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
     ).length;
     return acc;
   }, {} as Record<string, number>);
+
+  // iCal (.ics) file generator
+  const handleExportICS = () => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const distanceToMonday = (dayOfWeek + 6) % 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - distanceToMonday);
+
+    const dayOffsets: Record<string, number> = {
+      'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6
+    };
+    const daySessionCounts: Record<string, number> = {};
+
+    const pad = (n: number) => n < 10 ? '0' + n : '' + n;
+    const formatDateISO = (d: Date) => {
+      return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+    };
+
+    let icsLines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Scolaris AI//Study Schedule//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:Scolaris Study Schedule',
+      'X-WR-TIMEZONE:UTC'
+    ];
+
+    schedule.forEach((session, index) => {
+      const course = getCourse(session.courseId);
+      const dayName = session.day || 'Monday';
+      const offset = dayOffsets[dayName] !== undefined ? dayOffsets[dayName] : 0;
+      
+      const sessionNum = (daySessionCounts[dayName] || 0);
+      daySessionCounts[dayName] = sessionNum + 1;
+
+      const sessionDate = new Date(monday);
+      sessionDate.setDate(monday.getDate() + offset);
+      const startHour = 9 + (sessionNum * 2);
+      sessionDate.setHours(startHour, 0, 0, 0);
+
+      const endDate = new Date(sessionDate.getTime() + (session.duration || 60) * 60 * 1000);
+
+      const title = `${course?.code || 'CS'}: ${course?.title || 'Study Session'} (${session.mode || 'Review'})`;
+      const description = `Scolaris AI Study Session\\nMode: ${session.mode}\\nCourse: ${course?.title || 'Course'}\\nDuration: ${session.duration} minutes.`;
+
+      icsLines.push(
+        'BEGIN:VEVENT',
+        `UID:scolaris-session-${index}-${Date.now()}@scolaris.ai`,
+        `DTSTAMP:${formatDateISO(now)}`,
+        `DTSTART:${formatDateISO(sessionDate)}`,
+        `DTEND:${formatDateISO(endDate)}`,
+        `RRULE:FREQ=WEEKLY;BYDAY=${dayName.substring(0, 2).toUpperCase()}`,
+        `SUMMARY:${title}`,
+        `DESCRIPTION:${description}`,
+        'STATUS:CONFIRMED',
+        'END:VEVENT'
+      );
+    });
+
+    icsLines.push('END:VCALENDAR');
+    const icsContent = icsLines.join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'scolaris_study_schedule.ics';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const createGoogleCalendarUrl = (session: StudySession) => {
+    const course = getCourse(session.courseId);
+    const dayOffsets: Record<string, number> = {
+      'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6
+    };
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const distanceToMonday = (dayOfWeek + 6) % 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - distanceToMonday);
+
+    const offset = dayOffsets[session.day] !== undefined ? dayOffsets[session.day] : 0;
+    const sessionDate = new Date(monday);
+    sessionDate.setDate(monday.getDate() + offset);
+    sessionDate.setHours(10, 0, 0, 0);
+
+    const endDate = new Date(sessionDate.getTime() + (session.duration || 60) * 60 * 1000);
+
+    const pad = (n: number) => n < 10 ? '0' + n : '' + n;
+    const formatGCalDate = (d: Date) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+
+    const title = encodeURIComponent(`${course?.code || 'CS'}: ${course?.title || 'Study Session'} (${session.mode})`);
+    const details = encodeURIComponent(`Scolaris AI Weekly Study Session\nMode: ${session.mode}\nDuration: ${session.duration} mins\nCourse: ${course?.title}`);
+    const dates = `${formatGCalDate(sessionDate)}/${formatGCalDate(endDate)}`;
+
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}&recur=RRULE:FREQ=WEEKLY`;
+  };
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-20">
@@ -113,6 +223,13 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
             <Clock size={13} className="text-slate-400" />
             <span>{(totalStudyMinutes / 60).toFixed(1)} hrs allocated</span>
           </span>
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-bold transition-all shadow-sm cursor-pointer"
+          >
+            <Calendar size={14} />
+            <span>Export Schedule</span>
+          </button>
         </div>
       </div>
 
@@ -283,6 +400,137 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
           );
         })}
       </div>
+
+      {/* Export Schedule Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+            
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                    <Calendar size={18} />
+                  </span>
+                  <h3 className="text-xl font-serif font-bold text-slate-900">Export Study Schedule</h3>
+                </div>
+                <p className="text-xs text-slate-500 font-medium">
+                  Sync your Scolaris AI study plan directly with Apple Calendar, Google Calendar, or Outlook.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Main Export Options */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              
+              {/* Option 1: Download .ics File */}
+              <div className="p-5 rounded-2xl border border-slate-150 bg-slate-50/50 hover:bg-slate-50 space-y-3 flex flex-col justify-between group transition-all">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                    <Download size={18} />
+                  </div>
+                  <h4 className="font-serif font-bold text-slate-900 text-sm">Download iCal (.ics) File</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Standard iCalendar file. Compatible with Apple Calendar, Google Calendar, Outlook, and mobile apps.
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportICS}
+                  className="w-full mt-2 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                >
+                  <Download size={14} />
+                  <span>Download .ics File</span>
+                </button>
+              </div>
+
+              {/* Option 2: Direct Google Calendar Instructions */}
+              <div className="p-5 rounded-2xl border border-slate-150 bg-slate-50/50 hover:bg-slate-50 space-y-3 flex flex-col justify-between transition-all">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                    <ExternalLink size={18} />
+                  </div>
+                  <h4 className="font-serif font-bold text-slate-900 text-sm">Google Calendar Import</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Download the .ics file above, then in Google Calendar go to <strong>Settings &rarr; Import &amp; Export</strong> to batch add all recurring study sessions!
+                  </p>
+                </div>
+                <a
+                  href="https://calendar.google.com/calendar/r/settings/export"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full mt-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer text-center"
+                >
+                  <ExternalLink size={14} />
+                  <span>Open Google Calendar Settings</span>
+                </a>
+              </div>
+
+            </div>
+
+            {/* Quick Add Individual Google Calendar Links */}
+            <div className="space-y-3 pt-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Or Add Individual Sessions to Google Calendar
+              </h4>
+
+              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {schedule.map((session, idx) => {
+                  const course = getCourse(session.courseId);
+                  const gcalUrl = createGoogleCalendarUrl(session);
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-xl border border-slate-100 bg-white flex items-center justify-between text-xs font-sans gap-3 hover:border-slate-200 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-slate-700 uppercase bg-slate-100 px-2 py-0.5 rounded text-[10px]">
+                          {session.day?.substring(0,3)}
+                        </span>
+                        <span className="font-bold text-slate-900 truncate">
+                          {course?.code || 'CS'}: {course?.title || 'Session'}
+                        </span>
+                        <span className="text-slate-400 text-[10px] hidden sm:inline">
+                          ({session.mode})
+                        </span>
+                      </div>
+
+                      <a
+                        href={gcalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-600 hover:text-indigo-800 font-bold text-[11px] flex items-center gap-1 shrink-0 bg-indigo-50 px-2.5 py-1 rounded-lg hover:bg-indigo-100 transition-colors"
+                      >
+                        <span>Add</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -9,11 +9,10 @@ interface DashboardProps {
   courses: Course[];
   schedule: StudySession[];
   onOpenHub: (courseId: string) => void;
-  onUpgrade: () => void;
   onNavigate?: (tab: any) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ profile, courses, schedule, onOpenHub, onUpgrade, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ profile, courses, schedule, onOpenHub, onNavigate }) => {
   const today = DAYS[new Date().getDay() - 1] || 'Monday';
   const todaysTasks = schedule.filter(s => s.day === today);
   
