@@ -5,6 +5,7 @@ import { Globe, Lock, Link as LinkIcon, Check, Copy, Upload, Download, FileText,
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { auth } from '../lib/firebase';
+import { UserAvatar } from './UserAvatar';
 
 interface StudyGroupsProps {
   profile: UserProfile;
@@ -593,7 +594,14 @@ const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, h
                         return (
                           <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} gap-1.5 animate-in slide-in-from-bottom-2 duration-400`}>
                              <div className={`flex items-center gap-2 px-1 ${isMe ? 'flex-row-reverse' : ''}`}>
-                                <span className={`text-[9px] font-bold uppercase tracking-widest ${isMe ? 'text-blue-600' : isSystem ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                {isMe ? (
+                                  <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="xs" />
+                                ) : isSystem ? (
+                                  <UserAvatar avatarIcon="brain" name="Scolaris AI" size="xs" />
+                                ) : (
+                                  <UserAvatar avatarIcon="user-circle" name={msg.sender} size="xs" />
+                                )}
+                                <span className={`text-[9px] font-bold uppercase tracking-widest ${isMe ? 'text-blue-600' : isSystem ? 'text-indigo-600' : 'text-slate-500'}`}>
                                   {isSystem ? 'Scolaris Analysis' : msg.sender}
                                 </span>
                                 {isSystem && <Sparkles size={10} className="text-indigo-500" />}

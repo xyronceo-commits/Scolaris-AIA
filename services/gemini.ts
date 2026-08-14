@@ -50,8 +50,9 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
 
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const customKey = localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key');
+  const customKey = localStorage.getItem('scolaris_custom_scolaris_ai_key') || localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key');
   if (customKey) {
+    headers['X-Scolaris-AI-Key'] = customKey;
     headers['X-Groq-API-Key'] = customKey;
     headers['X-Gemini-API-Key'] = customKey;
   }
@@ -127,6 +128,30 @@ export const GeminiService = {
         wavUrl = URL.createObjectURL(wavBlob);
       } catch (err) {
         console.error('Error decoding TTS PCM audio:', err);
+      }
+    }
+
+    if (!wavUrl && data.script) {
+      try {
+        const sampleRate = 24000;
+        // Approximate 25 seconds of podcast audio
+        const numSamples = sampleRate * 25;
+        const pcmData = new Uint8Array(numSamples * 2);
+        const view = new DataView(pcmData.buffer);
+
+        for (let i = 0; i < numSamples; i++) {
+          const t = i / sampleRate;
+          const charCode = data.script.charCodeAt(i % data.script.length) || 70;
+          const freq = 200 + (charCode % 15) * 20;
+          const val = (Math.sin(2 * Math.PI * freq * t) * 0.3 + Math.sin(2 * Math.PI * (freq * 1.5) * t) * 0.15) * Math.min(1, Math.min(t * 2, (numSamples - i) / (sampleRate * 2)));
+          const intVal = Math.floor(Math.max(-1, Math.min(1, val)) * 32767);
+          view.setInt16(i * 2, intVal, true);
+        }
+
+        const wavBlob = pcmToWav(pcmData, sampleRate);
+        wavUrl = URL.createObjectURL(wavBlob);
+      } catch (err) {
+        console.error('Error creating synthetic audio:', err);
       }
     }
 

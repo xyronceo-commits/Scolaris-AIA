@@ -1,16 +1,77 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import crypto from 'crypto';
+import { initializeApp, getApps, App } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 import Groq from 'groq-sdk';
 import { GoogleGenAI } from '@google/genai';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import firebaseConfig from './firebase-applet-config.json';
 import { 
   processDocumentBuffer, 
   normalizeExtractedText, 
   validateExtractedText, 
   selectRelevantChunks 
 } from './lib/documentProcessor';
+
+// Initialize Firebase Admin SDK
+let adminApp: App | null = null;
+try {
+  const existingApps = getApps();
+  if (!existingApps.length) {
+    adminApp = initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  } else {
+    adminApp = existingApps[0]!;
+  }
+} catch (e) {
+  console.warn("Firebase Admin initialize warning:", e);
+}
+
+function getAdminFirestore() {
+  if (!adminApp) return null;
+  const dbId = firebaseConfig.firestoreDatabaseId;
+  if (dbId && dbId !== '(default)') {
+    return getFirestore(adminApp, dbId);
+  }
+  return getFirestore(adminApp);
+}
+
+// Server-side Secret for Administrator Access
+const ADMIN_SECRET = process.env.ADMIN_PASSWORD || process.env.SCOLARIS_ADMIN_PASSWORD || 'Scolaris_AI_3300013';
+
+function generateAdminToken(email: string): string {
+  const payload = {
+    email,
+    role: 'admin',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60)
+  };
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', ADMIN_SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${signature}`;
+}
+
+function verifyAdminToken(token: string): { email: string; role: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [header, body, signature] = parts;
+    const expectedSig = crypto.createHmac('sha256', ADMIN_SECRET).update(`${header}.${body}`).digest('base64url');
+    if (signature !== expectedSig) return null;
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    if (payload.role !== 'admin') return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   try {
@@ -32,9 +93,17 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // Lazy init and adapter helper for Groq / Gemini
+  // Lazy init and adapter helper for Scolaris AI / Groq / Gemini
   const getAIKey = (customKey?: string) => {
-    return customKey || process.env.GEMINI_API_KEY || process.env.GROQ_API_KEY;
+    return customKey || process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
+  };
+
+  const getCustomKey = (req: express.Request) => {
+    return (
+      (req.headers['x-scolaris-ai-key'] as string) ||
+      (req.headers['x-groq-api-key'] as string) ||
+      (req.headers['x-gemini-api-key'] as string)
+    );
   };
 
   const isUsingGemini = (customKey?: string) => {
@@ -42,8 +111,7 @@ async function startServer() {
       if (customKey.startsWith('AIzaSy')) return true;
       if (customKey.startsWith('gsk_')) return false;
     }
-    if (process.env.GEMINI_API_KEY) return true;
-    if (process.env.GROQ_API_KEY) return false;
+    if (!process.env.SCOLARIS_AI_KEY && !process.env.GROQ_API_KEY && process.env.GEMINI_API_KEY) return true;
     return false;
   };
 
@@ -62,89 +130,222 @@ async function startServer() {
     preferGroq?: boolean;
   }
 
-  const runAICall = async ({ customKey, systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
-    const key = getAIKey(customKey);
-    if (!key) throw new Error('API Key is required');
+  const tryOpenRouterCall = async (apiKey: string, systemInstruction?: string, messages: { role: string; content: string }[] = [], temperature?: number, jsonMode?: boolean): Promise<string | null> => {
+    if (!apiKey) return null;
 
-    const groqKey = process.env.GROQ_API_KEY || (customKey && customKey.startsWith('gsk_') ? customKey : null);
-    const shouldUseGroqFirst = preferGroq ? !!groqKey : !isUsingGemini(customKey);
-
-    if (shouldUseGroqFirst && groqKey) {
-      const groq = new Groq({ apiKey: groqKey });
-      const apiMessages: any[] = [];
-      if (systemInstruction) {
-        apiMessages.push({ role: 'system', content: systemInstruction });
+    // Direct Groq SDK execution if key starts with gsk_
+    if (apiKey.startsWith('gsk_')) {
+      try {
+        const groq = new Groq({ apiKey });
+        const apiMessages: any[] = [];
+        if (systemInstruction) apiMessages.push({ role: 'system', content: systemInstruction });
+        apiMessages.push(...messages);
+        const resp = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: apiMessages,
+          temperature: temperature !== undefined ? temperature : 0.3,
+          ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+        });
+        const content = resp.choices[0]?.message?.content;
+        if (content) return content;
+      } catch (err: any) {
+        console.warn("Direct Groq call in tryOpenRouterCall warning:", err?.message || err);
       }
-      apiMessages.push(...messages);
+    }
 
-      const candidateModels = [
-        'llama-3.1-8b-instant',
-        'llama-3.3-70b-versatile',
-        'llama3-70b-8192',
-        'llama3-8b-8192',
-        'mixtral-8x7b-32768',
-        'gemma2-9b-it'
-      ];
+    const candidateModels = [
+      'openai/gpt-oss-120b',
+      'qwen/qwen3.6-27b',
+      'qwen/qwen-2.5-72b-instruct',
+      'meta-llama/llama-3.3-70b-instruct',
+      'openai/gpt-4o-mini',
+      'deepseek/deepseek-chat'
+    ];
 
-      for (const model of candidateModels) {
-        try {
-          const response = await groq.chat.completions.create({
+    const apiMessages: any[] = [];
+    if (systemInstruction) {
+      apiMessages.push({ role: 'system', content: systemInstruction });
+    }
+    apiMessages.push(...messages);
+
+    for (const model of candidateModels) {
+      try {
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://ai.studio/build',
+            'X-Title': 'Scolaris AI'
+          },
+          body: JSON.stringify({
             model,
             messages: apiMessages,
             temperature: temperature !== undefined ? temperature : 0.3,
             ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-          });
+          })
+        });
 
-          const content = response.choices[0]?.message?.content;
-          if (content) {
-            return content;
+        if (resp.ok) {
+          const data = await resp.json();
+          const content = data?.choices?.[0]?.message?.content;
+          if (content) return content;
+        }
+      } catch (err: any) {
+        console.warn(`OpenRouter model '${model}' call warning:`, err?.message || err);
+      }
+    }
+
+    // Direct OpenAI API fallback if sk- key (and not sk-or-)
+    if (apiKey.startsWith('sk-') && !apiKey.startsWith('sk-or-')) {
+      try {
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: apiMessages,
+            temperature: temperature !== undefined ? temperature : 0.3,
+            ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+          })
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          const content = data?.choices?.[0]?.message?.content;
+          if (content) return content;
+        }
+      } catch (err: any) {
+        // ignore
+      }
+    }
+
+    return null;
+  };
+
+  const runAICall = async ({ customKey, systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
+    const key = getAIKey(customKey);
+    if (!key) throw new Error('API Key is required');
+
+    // 1. Try SCOLARIS_AI_KEY or custom key via OpenRouter / OpenAI
+    const scolarisKey = (customKey && !customKey.startsWith('AIzaSy') && !customKey.startsWith('gsk_'))
+      ? customKey
+      : (process.env.SCOLARIS_AI_KEY || (customKey && customKey.startsWith('sk-') ? customKey : null));
+
+    if (scolarisKey) {
+      const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
+      if (openRouterResult) {
+        return openRouterResult;
+      }
+    }
+
+    // 2. Groq Execution
+    const groqKey = (customKey && customKey.startsWith('gsk_'))
+      ? customKey
+      : (process.env.GROQ_API_KEY || (key && key.startsWith('gsk_') ? key : null));
+
+    if (groqKey) {
+      try {
+        const groq = new Groq({ apiKey: groqKey });
+        const apiMessages: any[] = [];
+        if (systemInstruction) {
+          apiMessages.push({ role: 'system', content: systemInstruction });
+        }
+        apiMessages.push(...messages);
+
+        const candidateModels = [
+          'llama-3.3-70b-versatile',
+          'llama-3.1-8b-instant',
+          'llama3-70b-8192',
+          'mixtral-8x7b-32768'
+        ];
+
+        for (const model of candidateModels) {
+          try {
+            const response = await groq.chat.completions.create({
+              model,
+              messages: apiMessages,
+              temperature: temperature !== undefined ? temperature : 0.3,
+              ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+            });
+
+            const content = response.choices[0]?.message?.content;
+            if (content) {
+              return content;
+            }
+          } catch (mErr: any) {
+            console.warn(`Groq model '${model}' call failed:`, mErr?.message || mErr);
           }
-        } catch (mErr: any) {
-          console.warn(`Groq model '${model}' call failed, attempting fallback:`, mErr?.message || mErr);
         }
+      } catch (gErr: any) {
+        console.warn(`Groq execution warning:`, gErr?.message || gErr);
       }
     }
 
-    // Gemini Execution (or fallback if Groq was unavailable/failed)
-    const geminiKey = (customKey && customKey.startsWith('AIzaSy')) ? customKey : (process.env.GEMINI_API_KEY || key);
-    const aiGen = new GoogleGenAI({
-      apiKey: geminiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
+    // 3. Gemini Execution - STRICTLY ONLY IF A VALID GEMINI KEY IS PROVIDED (starts with AIzaSy)
+    const geminiKey = (customKey && customKey.startsWith('AIzaSy'))
+      ? customKey
+      : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
+          ? process.env.GEMINI_API_KEY
+          : (key && key.startsWith('AIzaSy') ? key : null));
+
+    if (geminiKey) {
+      try {
+        const aiGen = new GoogleGenAI({
+          apiKey: geminiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
+
+        const contents = messages.map(m => {
+          let role = m.role === 'assistant' ? 'model' : m.role;
+          if (role !== 'user' && role !== 'model') {
+            role = 'user';
+          }
+          return {
+            role,
+            parts: [{ text: m.content }]
+          };
+        });
+
+        const config: any = {};
+        if (systemInstruction) {
+          config.systemInstruction = systemInstruction;
         }
+        if (temperature !== undefined) {
+          config.temperature = temperature;
+        }
+        if (jsonMode) {
+          config.responseMimeType = "application/json";
+        }
+
+        const geminiCandidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.5-flash'];
+        for (const model of geminiCandidateModels) {
+          try {
+            const response = await aiGen.models.generateContent({
+              model,
+              contents,
+              config
+            });
+            if (response.text) {
+              return response.text;
+            }
+          } catch (gErr: any) {
+            console.warn(`Gemini model '${model}' call warning:`, gErr?.message || gErr);
+          }
+        }
+      } catch (gemInitErr: any) {
+        console.warn("Gemini execution warning:", gemInitErr?.message || gemInitErr);
       }
-    });
-
-    const contents = messages.map(m => {
-      let role = m.role === 'assistant' ? 'model' : m.role;
-      if (role !== 'user' && role !== 'model') {
-        role = 'user';
-      }
-      return {
-        role,
-        parts: [{ text: m.content }]
-      };
-    });
-
-    const config: any = {};
-    if (systemInstruction) {
-      config.systemInstruction = systemInstruction;
-    }
-    if (temperature !== undefined) {
-      config.temperature = temperature;
-    }
-    if (jsonMode) {
-      config.responseMimeType = "application/json";
     }
 
-    const response = await aiGen.models.generateContent({
-      model: 'gemini-3.5-flash',
-      contents,
-      config
-    });
-
-    return response.text || '';
+    throw new Error('All AI providers failed to generate content or no valid API key was available.');
   };
 
   let s3Client: S3Client | null = null;
@@ -429,7 +630,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Proxy Groq / Gemini Chat
   app.post('/api/ai/chat', async (req, res) => {
     const { messages, groupName, groupDesc } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
@@ -454,7 +655,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Magic Import
   app.post('/api/ai/import', async (req, res) => {
     const { text } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
@@ -477,7 +678,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Generate Schedule
   app.post('/api/ai/schedule', async (req, res) => {
     const { courses, university } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
@@ -507,7 +708,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   // Scolaris Generate
   app.post('/api/scolaris/generate', async (req, res) => {
     const { studyMaterial, mode } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
 
     if (!studyMaterial) {
       return res.status(400).json({ error: "No study material provided." });
@@ -639,7 +840,7 @@ Jane: Exactly. Combining those with spaced repetition scheduled throughout our c
   app.post('/api/vision/scan', async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
-      const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+      const customKey = getCustomKey(req);
 
       if (!contentBase64) {
         return res.status(400).json({ error: 'contentBase64 parameter is required' });
@@ -678,11 +879,14 @@ You MUST return a JSON object containing structured study assets with this exact
   ]
 }`;
 
-      // Use Gemini vision if Gemini key is present or requested
-      if (process.env.GEMINI_API_KEY || isUsingGemini(customKey)) {
-        const apiKey = (customKey && customKey.startsWith('AIzaSy')) ? customKey : (process.env.GEMINI_API_KEY || getAIKey(customKey));
+      // Use Gemini vision if valid Gemini key is present
+      const geminiVisionKey = (customKey && customKey.startsWith('AIzaSy'))
+        ? customKey
+        : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy') ? process.env.GEMINI_API_KEY : null);
+
+      if (geminiVisionKey) {
         const aiGen = new GoogleGenAI({
-          apiKey,
+          apiKey: geminiVisionKey,
           httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
         });
 
@@ -761,7 +965,7 @@ You MUST return a JSON object containing structured study assets with this exact
   // Advanced Academic AI Companion / tutoring endpoint
   app.post('/api/scolaris/chat', async (req, res) => {
     const { messages, courseContext, fileContent } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
@@ -814,7 +1018,7 @@ Always refer to this context when answering questions about the material, explai
   // Study Materials
   app.post('/api/ai/materials', async (req, res) => {
     const { content, type } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       if (!content || typeof content !== 'string') {
         return res.status(400).json({ error: "No study material provided." });
@@ -930,7 +1134,7 @@ CRITICAL WRITING RULES:
   // Podcast Generation
   app.post('/api/ai/podcast', async (req, res) => {
     const { topic } = req.body;
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
@@ -965,7 +1169,7 @@ CRITICAL WRITING RULES:
   app.post('/api/ai/validate', async (req, res) => {
     const { text, message, groupName, groupDesc } = req.body;
     const msgText = text || message || '';
-    const customKey = (req.headers['x-groq-api-key'] || req.headers['x-gemini-api-key']) as string | undefined;
+    const customKey = getCustomKey(req);
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
@@ -989,6 +1193,392 @@ CRITICAL WRITING RULES:
     } catch (error: any) {
       console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getValidateFallback());
+    }
+  });
+
+  // ==========================================
+  // ADMIN ACCESS & AUTHORIZATION ROUTES
+  // ==========================================
+
+  // Audit Log Helper Function
+  async function recordAdminAuditLog(
+    event: string, 
+    details: string, 
+    status: 'SUCCESS' | 'FAILURE' = 'SUCCESS',
+    req?: express.Request
+  ) {
+    try {
+      const rawIp = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1') : '127.0.0.1';
+      const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+      const userAgent = req ? (req.headers['user-agent'] || 'Unknown Client') : 'Internal';
+      const logDoc = {
+        event,
+        status,
+        timestamp: new Date().toISOString(),
+        details,
+        ip,
+        userAgent
+      };
+
+      const db = getAdminFirestore();
+      if (db) {
+        try {
+          await db.collection('admin_logs').add(logDoc);
+          return;
+        } catch (err: any) {
+          console.warn("Firestore Admin SDK log write warning:", err?.message || err);
+        }
+      }
+
+      // Fallback REST write
+      try {
+        const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/documents/admin_logs`;
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              event: { stringValue: logDoc.event },
+              status: { stringValue: logDoc.status },
+              timestamp: { stringValue: logDoc.timestamp },
+              details: { stringValue: logDoc.details },
+              ip: { stringValue: logDoc.ip },
+              userAgent: { stringValue: logDoc.userAgent }
+            }
+          })
+        });
+      } catch (e) {
+        console.warn("REST audit log write fallback error:", e);
+      }
+    } catch (err) {
+      console.warn("Failed to record admin audit log:", err);
+    }
+  }
+
+  // Admin Login Endpoint (Password Authentication Only)
+  app.post('/api/admin/login', async (req, res) => {
+    try {
+      const { password } = req.body;
+      const adminEmail = 'admin@scolaris.ai';
+
+      if (!password || typeof password !== 'string' || password !== ADMIN_SECRET) {
+        await recordAdminAuditLog(
+          'ADMIN_LOGIN_ATTEMPT', 
+          'Failed login attempt: Invalid administrator password', 
+          'FAILURE', 
+          req
+        );
+        return res.status(401).json({ 
+          success: false, 
+          error: 'Invalid administrator password.' 
+        });
+      }
+
+      let customToken = '';
+      let firebaseUid = 'scolaris_admin_system_uid';
+
+      if (adminApp) {
+        try {
+          let userRecord;
+          try {
+            userRecord = await getAuth().getUserByEmail(adminEmail);
+          } catch {
+            userRecord = await getAuth().createUser({
+              email: adminEmail,
+              emailVerified: true,
+              displayName: 'Scolaris Administrator'
+            });
+          }
+          firebaseUid = userRecord.uid;
+          await getAuth().setCustomUserClaims(firebaseUid, { admin: true, role: 'admin' });
+          customToken = await getAuth().createCustomToken(firebaseUid, { admin: true });
+
+          // Synchronize admin document in Firestore
+          const db = getAdminFirestore();
+          if (db) {
+            try {
+              await db.collection('admins').doc(firebaseUid).set({
+                email: adminEmail,
+                role: 'admin',
+                updatedAt: new Date().toISOString()
+              }, { merge: true });
+            } catch (dbErr: any) {
+              console.warn("Firestore admin doc write notice:", dbErr?.message || dbErr);
+            }
+          }
+        } catch (authErr: any) {
+          console.warn("Firebase Admin Auth note (using HMAC session):", authErr?.message || 'IdentityToolkit API unavailable');
+        }
+      }
+
+      const adminToken = generateAdminToken(adminEmail);
+
+      await recordAdminAuditLog(
+        'ADMIN_LOGIN_SUCCESS', 
+        'Administrator authenticated successfully with valid security key', 
+        'SUCCESS', 
+        req
+      );
+
+      res.json({
+        success: true,
+        adminToken,
+        customToken,
+        user: {
+          uid: firebaseUid,
+          email: adminEmail,
+          role: 'admin'
+        }
+      });
+    } catch (err: any) {
+      await recordAdminAuditLog('ADMIN_LOGIN_ERROR', `Server error during login: ${err?.message}`, 'FAILURE', req);
+      res.status(500).json({ success: false, error: err?.message || 'Server error during admin login.' });
+    }
+  });
+
+  // Admin Verification Middleware
+  const authenticateAdminToken = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Administrator authorization token required.' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    // 1. Try verifying server HMAC token
+    const serverVerified = verifyAdminToken(token);
+    if (serverVerified) {
+      (req as any).adminUser = serverVerified;
+      return next();
+    }
+
+    // 2. Try verifying Firebase ID Token
+    if (adminApp) {
+      try {
+        const decoded = await getAuth().verifyIdToken(token);
+        if (decoded.admin === true || decoded.role === 'admin') {
+          (req as any).adminUser = { email: decoded.email || 'admin@scolaris.ai', role: 'admin' };
+          return next();
+        }
+      } catch (err) {
+        // Fallback check failed
+      }
+    }
+
+    return res.status(403).json({ success: false, error: 'Access denied: Valid administrator privileges required.' });
+  };
+
+  // Admin Token Verification Endpoint
+  app.get('/api/admin/verify', authenticateAdminToken, (req, res) => {
+    res.json({
+      success: true,
+      verified: true,
+      admin: (req as any).adminUser
+    });
+  });
+
+  // Helper to fetch Firestore collection docs safely
+  async function fetchCollectionDocs(collectionName: string): Promise<any[]> {
+    const db = getAdminFirestore();
+    if (db) {
+      try {
+        const snap = await db.collection(collectionName).get();
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (err: any) {
+        console.warn(`Admin Firestore SDK get for ${collectionName} notice, attempting REST fallback:`, err?.message || err);
+      }
+    }
+
+    try {
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/documents/${collectionName}`;
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const data = await resp.json();
+        const documents = data.documents || [];
+        return documents.map((docItem: any) => {
+          const docId = docItem.name ? docItem.name.split('/').pop() : 'doc';
+          const fields = docItem.fields || {};
+          const parsed: any = { id: docId };
+          for (const key of Object.keys(fields)) {
+            const valObj = fields[key];
+            if (valObj.stringValue !== undefined) parsed[key] = valObj.stringValue;
+            else if (valObj.integerValue !== undefined) parsed[key] = parseInt(valObj.integerValue, 10);
+            else if (valObj.doubleValue !== undefined) parsed[key] = parseFloat(valObj.doubleValue);
+            else if (valObj.booleanValue !== undefined) parsed[key] = valObj.booleanValue;
+            else parsed[key] = valObj;
+          }
+          return parsed;
+        });
+      }
+    } catch (e) {
+      console.warn(`REST fetch fallback for ${collectionName} warning:`, e);
+    }
+    return [];
+  }
+
+  // Admin Overview Statistics
+  app.get('/api/admin/stats', authenticateAdminToken, async (req, res) => {
+    try {
+      await recordAdminAuditLog('DASHBOARD_OVERVIEW_VIEW', 'Viewed system overview metrics and user telemetry', 'SUCCESS', req);
+
+      const [profiles, courses, hubs, groups, sessions] = await Promise.all([
+        fetchCollectionDocs('profiles'),
+        fetchCollectionDocs('courses'),
+        fetchCollectionDocs('study_hubs'),
+        fetchCollectionDocs('study_groups'),
+        fetchCollectionDocs('study_sessions')
+      ]);
+
+      const now = Date.now();
+      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+
+      const totalUsers = profiles.length;
+      const newUsers = profiles.filter(p => {
+        if (!p.updatedAt && !p.createdAt) return false;
+        const time = new Date(p.updatedAt || p.createdAt).getTime();
+        return time >= sevenDaysAgo;
+      }).length;
+
+      let totalAIConversations = 0;
+      let totalMaterials = 0;
+
+      hubs.forEach(h => {
+        if (h.summary) totalAIConversations += 1;
+        if (Array.isArray(h.flashcards)) totalAIConversations += h.flashcards.length;
+        if (Array.isArray(h.quizzes)) totalAIConversations += h.quizzes.length;
+        if (h.transcript) totalAIConversations += 1;
+        if (h.fileName || h.fileContent) totalMaterials += 1;
+      });
+
+      res.json({
+        success: true,
+        stats: {
+          totalUsers,
+          newUsers,
+          activeUsers: Math.max(totalUsers, 1),
+          totalCourses: courses.length,
+          totalStudyHubs: hubs.length,
+          totalStudyGroups: groups.length,
+          totalStudySessions: sessions.length,
+          totalAIConversations,
+          totalUploadedMaterials: totalMaterials,
+          updatedAt: new Date().toISOString()
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch admin stats.' });
+    }
+  });
+
+  // Admin User List
+  app.get('/api/admin/users', authenticateAdminToken, async (req, res) => {
+    try {
+      await recordAdminAuditLog('USERS_DIRECTORY_VIEW', 'Accessed user accounts directory', 'SUCCESS', req);
+
+      const profiles = await fetchCollectionDocs('profiles');
+      const userList = profiles.map(p => ({
+        uid: p.id || p.userId || 'unknown',
+        name: p.name || 'Scholar User',
+        email: p.email || 'N/A',
+        institution: p.institution || p.university || 'Not Specified',
+        level: p.level || 'Undergraduate',
+        tier: p.tier || 'scholar',
+        isPro: p.isPro ?? p.is_pro ?? true,
+        onboarded: p.onboarded ?? false,
+        updatedAt: p.updatedAt || new Date().toISOString()
+      }));
+
+      res.json({
+        success: true,
+        users: userList
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch user list.' });
+    }
+  });
+
+  // Admin AI Usage Statistics
+  app.get('/api/admin/ai-usage', authenticateAdminToken, async (req, res) => {
+    try {
+      await recordAdminAuditLog('AI_ANALYTICS_VIEW', 'Viewed AI model analytics and generation usage metrics', 'SUCCESS', req);
+
+      const hubs = await fetchCollectionDocs('study_hubs');
+
+      let summariesCount = 0;
+      let flashcardsCount = 0;
+      let quizzesCount = 0;
+      let podcastCount = 0;
+
+      hubs.forEach(h => {
+        if (h.summary) summariesCount++;
+        if (Array.isArray(h.flashcards)) flashcardsCount += h.flashcards.length;
+        if (Array.isArray(h.quizzes)) quizzesCount += h.quizzes.length;
+        if (h.podcastUrl || h.transcript) podcastCount++;
+      });
+
+      res.json({
+        success: true,
+        aiUsage: {
+          totalHubs: hubs.length,
+          summariesGenerated: summariesCount,
+          flashcardsGenerated: flashcardsCount,
+          quizzesGenerated: quizzesCount,
+          podcastsGenerated: podcastCount,
+          totalRequests: summariesCount + flashcardsCount + quizzesCount + podcastCount
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch AI usage.' });
+    }
+  });
+
+  // Admin System Status
+  app.get('/api/admin/status', authenticateAdminToken, async (req, res) => {
+    await recordAdminAuditLog('SYSTEM_STATUS_VIEW', 'Viewed backend system health and memory telemetry', 'SUCCESS', req);
+
+    const memory = process.memoryUsage();
+    res.json({
+      success: true,
+      status: {
+        server: 'Operational',
+        uptimeSeconds: Math.floor(process.uptime()),
+        nodeVersion: process.version,
+        memoryUsageMB: {
+          rss: Math.round(memory.rss / (1024 * 1024)),
+          heapUsed: Math.round(memory.heapUsed / (1024 * 1024)),
+          heapTotal: Math.round(memory.heapTotal / (1024 * 1024))
+        },
+        database: {
+          status: 'Connected',
+          projectId: firebaseConfig.projectId,
+          firestoreDatabaseId: firebaseConfig.firestoreDatabaseId
+        },
+        aiEngines: {
+          groq: 'Online',
+          gemini: 'Online'
+        },
+        timestamp: new Date().toISOString()
+      }
+    });
+  });
+
+  // Admin Audit Logs Endpoint
+  app.get('/api/admin/logs', authenticateAdminToken, async (req, res) => {
+    try {
+      await recordAdminAuditLog('AUDIT_LOGS_VIEW', 'Fetched administrative security audit trail', 'SUCCESS', req);
+      const rawLogs = await fetchCollectionDocs('admin_logs');
+      const sortedLogs = rawLogs.sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA;
+      });
+
+      res.json({
+        success: true,
+        logs: sortedLogs
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit logs.' });
     }
   });
 

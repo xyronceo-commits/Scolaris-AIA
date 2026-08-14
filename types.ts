@@ -43,6 +43,7 @@ export interface UserProfile {
   age: number;
   semesterEnd: string;
   targetCGPA?: number;
+  avatarIcon?: string;
   onboarded: boolean;
   tutorialSeen: boolean;
   isPro: boolean;
@@ -123,4 +124,4 @@ export interface StudyGroup {
   sharedMaterials: SharedMaterial[];
 }
 
-export type AppState = 'onboarding' | 'dashboard' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library';
+export type AppState = 'onboarding' | 'dashboard' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';

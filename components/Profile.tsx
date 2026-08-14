@@ -1,6 +1,7 @@
 import React from 'react';
 import { UserProfile } from '../types';
 import { ICONS } from '../constants';
+import { UserAvatar, AVATAR_OPTIONS } from './UserAvatar';
 import { ArrowRight, LogOut, Sparkles, X, Key, Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
 
 interface ProfileProps {
@@ -69,12 +70,15 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
         <section className="space-y-4">
            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">{profile.name.split(' ')[0]}'s Account</h3>
            <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm space-y-8">
-              <div className="flex items-center gap-6">
-                 <div className="w-16 h-16 rounded-2xl bg-slate-900 flex items-center justify-center text-white text-2xl font-serif font-bold italic shadow-xl relative">
-                    {profile.name.charAt(0)}
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 rounded-lg border-2 border-white flex items-center justify-center">
-                       <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+                 <div className="shrink-0">
+                   <UserAvatar 
+                     avatarIcon={editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap'}
+                     name={profile.name}
+                     size="xl"
+                     showStatus
+                     isOnline
+                   />
                  </div>
                  <div className="space-y-1 w-full max-w-xs">
                     {isEditing ? (
@@ -99,6 +103,38 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                     )}
                  </div>
               </div>
+
+              {/* Avatar Icon Choice Selection Grid */}
+              {isEditing && (
+                <div className="pt-4 border-t border-slate-100 space-y-3">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                    Choose Profile Avatar Icon
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
+                    {AVATAR_OPTIONS.map((opt) => {
+                      const isSelected = (editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap') === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setEditedProfile({ ...editedProfile, avatarIcon: opt.id })}
+                          className={`flex flex-col items-center justify-center p-3 rounded-2xl transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-blue-50 border-2 border-blue-600 shadow-sm scale-105'
+                              : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
+                          }`}
+                          title={opt.name}
+                        >
+                          <UserAvatar avatarIcon={opt.id} size="sm" />
+                          <span className="text-[9px] font-bold text-slate-600 truncate w-full text-center mt-1.5">
+                            {opt.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6 pt-2">
                  <div className="space-y-1 px-4 border-l-2 border-slate-50">

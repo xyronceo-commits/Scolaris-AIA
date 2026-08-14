@@ -6,6 +6,7 @@ import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, 
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import ReactMarkdown from 'react-markdown';
+import PodcastPlayer from './PodcastPlayer';
 
 // Component for individual flashcards in Grid View
 const FlashcardItem: React.FC<{ card: Flashcard; index: number }> = ({ card, index }) => {
@@ -416,17 +417,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
   };
 
   const generatePodcast = async () => {
-    if (!fileContent) return alert("Upload material first!");
+    const topicText = fileContent || activeHub.summary || (currentCourse ? `${currentCourse.code}: ${currentCourse.title}` : 'Academic course materials');
     setLoading(true);
     try {
-      const { script, wavUrl } = await GeminiService.generatePodcast(fileContent);
+      const { script, wavUrl } = await GeminiService.generatePodcast(topicText);
       const updatedHub = { ...activeHub, podcastUrl: wavUrl, transcript: script } as StudyHubData;
       setHubs({ ...hubs, [activeCourseId]: updatedHub });
-      DBService.saveHub(updatedHub);
-      addNotification('content', 'Seminar Podcast Ready', `The audio seminar for ${currentCourse?.code} is now available.`, 'hub');
-    } catch (err) {
+      await DBService.saveHub(updatedHub);
+      addNotification('content', 'Seminar Podcast Ready', `The audio seminar for ${currentCourse?.code || 'Course'} is now available.`, 'hub');
+    } catch (err: any) {
       console.error(err);
-      alert("Podcast generation failed.");
+      alert("Podcast generation warning: " + (err?.message || "Generation failed."));
     } finally {
       setLoading(false);
     }
@@ -463,7 +464,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const tools = [
     { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: 'Key Concepts' },
-    { id: 'scanner', label: 'Doc Scanner', icon: <ScanText size={20} />, desc: 'Vision AI OCR' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
     { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
     { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
@@ -696,14 +696,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     </div>
 
                     {/* Live Image Preview if uploaded */}
-                    {scannedDocPreview && (
+                    {scannedDocPreview ? (
                       <div className="p-3 bg-white border border-slate-150 rounded-2xl space-y-2">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Scanned Input Preview</span>
                         <div className="max-h-48 rounded-xl overflow-hidden bg-slate-900 flex items-center justify-center">
                           <img src={scannedDocPreview} alt="Scanned Preview" className="max-h-48 object-contain" />
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Scanned Results Display */}
@@ -1395,46 +1395,36 @@ const StudyHub: React.FC<StudyHubProps> = ({
               </div>
             )}
 
-            {activeTool === 'podcast' && isPodcastAllowed && !activeHub.podcastUrl && fileContent && (
-              <div className="flex flex-col items-center justify-center h-[400px] gap-8">
-                  <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
-                    {ICONS.Audio}
+            {activeTool === 'podcast' && (
+              <div className="space-y-8 animate-in fade-in duration-500">
+                {(activeHub.podcastUrl || activeHub.transcript) ? (
+                  <PodcastPlayer
+                    src={activeHub.podcastUrl || undefined}
+                    title={`${currentCourse?.title || 'Academic'} Revision Podcast`}
+                    subtitle={`AI Seminar & Audio Summary for ${currentCourse?.code || 'Course'}`}
+                    transcript={activeHub.transcript}
+                    onRegenerate={generatePodcast}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-10 sm:p-14 bg-slate-50/80 rounded-[2.5rem] border border-slate-100 text-center gap-6">
+                    <div className="w-20 h-20 bg-blue-100/80 text-blue-700 rounded-3xl flex items-center justify-center shadow-inner">
+                      {ICONS.Audio}
+                    </div>
+                    <div className="max-w-md space-y-2">
+                      <h3 className="text-2xl font-serif font-bold text-slate-900">AI Seminar Podcast</h3>
+                      <p className="text-sm text-slate-500 font-medium">
+                        Generate an interactive audio seminar dialogue between AI professors covering the key revision concepts for {currentCourse?.code || 'this course'}.
+                      </p>
+                    </div>
+                    <button 
+                      onClick={generatePodcast} 
+                      className="px-8 py-4 bg-blue-700 hover:bg-blue-800 text-white rounded-2xl font-bold shadow-md transition-all flex items-center gap-3 text-sm cursor-pointer"
+                    >
+                      <Sparkles size={18} />
+                      <span>Generate AI Revision Podcast</span>
+                    </button>
                   </div>
-                  <button 
-                    onClick={generatePodcast} 
-                    className="px-12 py-6 bg-slate-900 text-white rounded-[2rem] font-bold shadow-md hover:bg-black transition-all uppercase tracking-widest text-sm"
-                  >
-                    Generate AI Podcast
-                  </button>
-              </div>
-            )}
-
-            {activeTool === 'podcast' && activeHub.podcastUrl && (
-              <div className="space-y-16">
-                  <div className="flex justify-between items-center border-b border-slate-100 pb-10">
-                    <div className="flex items-center gap-6">
-                      <h3 className="text-3xl sm:text-4xl font-serif font-bold tracking-tight text-slate-900">Audio Seminar</h3>
-                      <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-5 py-2 rounded-full uppercase tracking-widest border border-blue-100 shadow-sm">AI Generated</span>
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 p-12 sm:p-20 rounded-[4rem] flex flex-col items-center gap-16 border border-slate-100 shadow-sm relative overflow-hidden group">
-                    <div className="flex gap-4 items-center h-28 relative z-10 transition-transform duration-700 group-hover:scale-110">
-                      {[3,6,10,5,8,4,10,7,9,4,8,6,3,7,5,9].map((h, i) => (
-                        <div key={i} className="w-2 sm:w-3 bg-blue-700 rounded-full animate-bounce" style={{ height: `${h * 10}%`, animationDelay: `${i * 60}ms`, animationDuration: '800ms' }} />
-                      ))}
-                    </div>
-                    <div className="w-full relative z-10">
-                      <audio ref={audioRef} controls src={activeHub.podcastUrl} className="w-full accent-blue-600 rounded-full shadow-sm" />
-                    </div>
-                    <div className="text-center space-y-4 relative z-10">
-                      <div className="flex items-center justify-center gap-4 text-blue-700 font-bold text-2xl sm:text-3xl tracking-tight">
-                         <span>AI Prof. Alpha</span>
-                         <AudioWaveform size={32} />
-                         <span>AI Prof. Beta</span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.4em] animate-pulse">Seminar in session</p>
-                    </div>
-                  </div>
+                )}
               </div>
             )}
 

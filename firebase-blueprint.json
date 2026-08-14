@@ -77,6 +77,62 @@
         "sharedMaterials": { "type": "array" }
       },
       "required": ["id", "name"]
+    },
+    "admins": {
+      "title": "AdminUser",
+      "description": "Administrator account records and roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "admin_logs": {
+      "title": "AdminLog",
+      "description": "Server-side audit log for administrative actions and security events",
+      "type": "object",
+      "properties": {
+        "event": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "details": { "type": "string" },
+        "ip": { "type": "string" },
+        "userAgent": { "type": "string" }
+      },
+      "required": ["event", "status", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "profiles",
+      "description": "User profiles collection"
+    },
+    "/courses/{courseId}": {
+      "schema": "courses",
+      "description": "Courses collection"
+    },
+    "/study_sessions/{sessionId}": {
+      "schema": "study_sessions",
+      "description": "Study sessions collection"
+    },
+    "/study_hubs/{hubId}": {
+      "schema": "study_hubs",
+      "description": "Study hubs collection"
+    },
+    "/study_groups/{groupId}": {
+      "schema": "study_groups",
+      "description": "Study groups collection"
+    },
+    "/admins/{adminId}": {
+      "schema": "admins",
+      "description": "Admin accounts collection"
+    },
+    "/admin_logs/{logId}": {
+      "schema": "admin_logs",
+      "description": "Server-side admin audit logs"
     }
   }
 }

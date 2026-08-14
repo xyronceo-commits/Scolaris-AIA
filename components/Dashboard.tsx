@@ -2,6 +2,7 @@
 import React from 'react';
 import { UserProfile, Course, StudySession } from '../types';
 import { ICONS, DAYS, DIFFICULTY_COLORS } from '../constants';
+import { UserAvatar } from './UserAvatar';
 import { Globe, ArrowRight } from 'lucide-react';
 
 interface DashboardProps {
@@ -47,11 +48,26 @@ const Dashboard: React.FC<DashboardProps> = ({ profile, courses, schedule, onOpe
   return (
     <div className="space-y-12 animate-in fade-in duration-700 pb-20">
       {/* Header Section */}
-      <div className="space-y-0.5">
-        <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight">
-          Hey, {profile.name.split(' ')[0]}!
-        </h1>
-        <p className="text-slate-500 font-medium text-sm italic">Ready to crush today's goals?</p>
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight">
+            Hey, {profile.name.split(' ')[0]}!
+          </h1>
+          <p className="text-slate-500 font-medium text-sm italic">Ready to crush today's goals?</p>
+        </div>
+        <button 
+          onClick={() => onNavigate?.('profile')}
+          className="cursor-pointer hover:scale-105 transition-transform"
+          title="Go to Profile"
+        >
+          <UserAvatar 
+            avatarIcon={profile.avatarIcon || 'graduation-cap'} 
+            name={profile.name} 
+            size="lg" 
+            showStatus 
+            isOnline 
+          />
+        </button>
       </div>
 
       {/* Quick Actions Panel */}

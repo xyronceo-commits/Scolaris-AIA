@@ -18,7 +18,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
     level: 'Freshman',
     age: 20,
     semesterEnd: new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
-    tier: 'scholar' as SubscriptionTier
+    tier: 'scholar' as SubscriptionTier,
+    avatarIcon: 'graduation-cap'
   });
 
   const nextStep = () => {
@@ -39,6 +40,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
       level: formData.level,
       age: formData.age,
       semesterEnd: formData.semesterEnd,
+      avatarIcon: formData.avatarIcon || 'graduation-cap',
       onboarded: true,
       tutorialSeen: false,
       isPro: true,
@@ -104,6 +106,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
                   level: formData.level,
                   age: formData.age || 20,
                   semesterEnd: formData.semesterEnd || new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
+                  avatarIcon: formData.avatarIcon || 'graduation-cap',
                   onboarded: true,
                   tutorialSeen: false,
                   isPro: true,

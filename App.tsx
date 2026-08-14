@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { Course, UserProfile, StudySession, AppState, StudyHubData, StudyGroup, AppNotification } from './types';
 import { ICONS } from './constants';
-import { GraduationCap, Menu, X, ShieldAlert } from 'lucide-react';
+import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock } from 'lucide-react';
 import Onboarding from './components/Onboarding';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
@@ -14,7 +14,10 @@ import CGPACalculator from './components/CGPACalculator';
 import PomodoroTimer from './components/PomodoroTimer';
 import TimetableView from './components/TimetableView';
 import Profile from './components/Profile';
+import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
+import AdminLogin from './components/AdminLogin';
+import AdminDashboard from './components/AdminDashboard';
 import { ScolarisChatWidget } from './components/ScolarisChatWidget';
 import Auth from './components/Auth';
 import { EmailVerification } from './components/EmailVerification';
@@ -41,6 +44,31 @@ const App: React.FC = () => {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [sessionExpiredMsg, setSessionExpiredMsg] = useState<string | null>(null);
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
+
+  // Admin System State
+  const [adminToken, setAdminToken] = useState<string | null>(() => sessionStorage.getItem('scolaris_admin_token'));
+  const [adminUser, setAdminUser] = useState<{ email: string; role: string } | null>(() => {
+    try {
+      const stored = sessionStorage.getItem('scolaris_admin_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isClaimAdmin, setIsClaimAdmin] = useState(false);
+  const [showAdminLoginForm, setShowAdminLoginForm] = useState(false);
+
+  // URL Path Listener for /admin
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (window.location.pathname === '/admin') {
+        setActiveTab('admin');
+      }
+    };
+    handleLocationChange();
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
 
   // Load User Data & Profile from Firestore
   const loadUserData = async (user: User) => {
@@ -95,12 +123,25 @@ const App: React.FC = () => {
         setAuthUser(currentUser);
         setSessionExpiredMsg(null);
 
+        // Check for admin custom claim
+        try {
+          const idTokenResult = await currentUser.getIdTokenResult(true);
+          if (idTokenResult.claims.admin === true || idTokenResult.claims.role === 'admin') {
+            setIsClaimAdmin(true);
+          } else {
+            setIsClaimAdmin(false);
+          }
+        } catch {
+          setIsClaimAdmin(false);
+        }
+
         if (currentUser.emailVerified) {
           await loadUserData(currentUser);
         }
       } else {
         setAuthUser(null);
         setProfile(null);
+        setIsClaimAdmin(false);
       }
 
       setAuthLoading(false);
@@ -210,6 +251,19 @@ const App: React.FC = () => {
     setActiveTab('dashboard');
     setShowAuth(true);
     setSessionExpiredMsg(null);
+    handleAdminSignOut();
+  };
+
+  const handleAdminSignOut = () => {
+    sessionStorage.removeItem('scolaris_admin_token');
+    sessionStorage.removeItem('scolaris_admin_user');
+    setAdminToken(null);
+    setAdminUser(null);
+    setShowAdminLoginForm(false);
+    if (window.location.pathname === '/admin') {
+      window.history.pushState({}, '', '/');
+    }
+    setActiveTab('dashboard');
   };
 
   const deleteAccount = () => {
@@ -321,8 +375,73 @@ const App: React.FC = () => {
     return <Onboarding userEmail={profile.email} onComplete={handleOnboardingComplete} />;
   }
 
-  // 6. Main Protected Application View
+  // 6. Main Protected Application View & Admin Router
   const renderContent = () => {
+    // Admin Route Handler
+    if (activeTab === 'admin' || window.location.pathname === '/admin') {
+      if (adminToken || isClaimAdmin) {
+        return (
+          <AdminDashboard
+            adminToken={adminToken || ''}
+            adminEmail={adminUser?.email || authUser?.email || 'admin@scolaris.ai'}
+            onSignOut={handleAdminSignOut}
+            onBackToStudentWorkspace={() => {
+              window.history.pushState({}, '', '/');
+              setActiveTab('dashboard');
+            }}
+          />
+        );
+      }
+
+      if (showAdminLoginForm || !authUser) {
+        return (
+          <AdminLogin
+            onLoginSuccess={(token, user) => {
+              setAdminToken(token);
+              setAdminUser(user);
+              setShowAdminLoginForm(false);
+              setActiveTab('admin');
+            }}
+            onBackToStudentPortal={() => {
+              window.history.pushState({}, '', '/');
+              setActiveTab('dashboard');
+            }}
+          />
+        );
+      }
+
+      return (
+        <div className="min-h-[75vh] flex flex-col items-center justify-center p-6 text-center max-w-md mx-auto space-y-6">
+          <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center border border-rose-500/20 shadow-xl">
+            <ShieldAlert size={32} />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-serif font-bold text-slate-900">Access Denied</h2>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              You do not have administrator privileges. Only authorized Scolaris AI administrative accounts can access this panel.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 w-full">
+            <button
+              onClick={() => {
+                window.history.pushState({}, '', '/');
+                setActiveTab('dashboard');
+              }}
+              className="flex-1 py-3 px-4 bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-md hover:bg-slate-800 cursor-pointer"
+            >
+              Return to Student Portal
+            </button>
+            <button
+              onClick={() => setShowAdminLoginForm(true)}
+              className="flex-1 py-3 px-4 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold transition-all border border-blue-200 hover:bg-blue-100 cursor-pointer"
+            >
+              Admin Sign In
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard 
@@ -528,23 +647,42 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-4 space-y-4">
-           <div className="pt-2 border-t border-slate-50">
+           <div className="pt-2 border-t border-slate-50 flex items-center justify-between">
               <button 
                 onClick={() => {
                   setActiveTab('profile');
                   if (window.innerWidth < 1024) setIsSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+                className={`flex-1 flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all duration-200 ${
                   activeTab === 'profile' 
-                    ? 'text-blue-600' 
-                    : 'text-slate-400 hover:text-slate-900'
+                    ? 'bg-blue-50 text-blue-600 font-bold border border-blue-100 shadow-xs' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
               >
-                {ICONS.User}
-                <span className="text-sm font-bold uppercase tracking-widest mt-0.5 flex items-center gap-2">
-                  Profile
-                  <div className={`w-1 h-1 rounded-full ${dbConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                <UserAvatar 
+                  avatarIcon={profile?.avatarIcon || 'graduation-cap'} 
+                  name={profile?.name || 'Profile'}
+                  size="xs"
+                  showStatus
+                  isOnline={dbConnected ?? true}
+                />
+                <span className="text-xs font-bold truncate">
+                  {profile?.name ? profile.name.split(' ')[0] : 'Profile'}
                 </span>
+              </button>
+
+              {/* Discreet Admin Portal Entry Icon */}
+              <button
+                onClick={() => {
+                  window.history.pushState({}, '', '/admin');
+                  setActiveTab('admin');
+                  setShowAdminLoginForm(true);
+                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                }}
+                title="Admin Portal"
+                className="p-2.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100/80 rounded-xl transition-all cursor-pointer mr-1"
+              >
+                <Shield size={16} />
               </button>
            </div>
         </div>
