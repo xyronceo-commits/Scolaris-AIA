@@ -19,13 +19,19 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
     setEditedProfile(profile);
   }, [profile]);
   
-  const [apiKeyInput, setApiKeyInput] = React.useState(() => localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key') || '');
+  const [apiKeyInput, setApiKeyInput] = React.useState(() => 
+    localStorage.getItem('scolaris_custom_gemini_api_key') || 
+    localStorage.getItem('scolaris_custom_scolaris_ai_key') || 
+    localStorage.getItem('scolaris_custom_groq_api_key') || ''
+  );
   const [showKey, setShowKey] = React.useState(false);
   const [saveSuccess, setSaveSuccess] = React.useState(false);
 
   const handleSaveKey = () => {
     const trimmed = apiKeyInput.trim();
     if (trimmed) {
+      localStorage.setItem('scolaris_custom_gemini_api_key', trimmed);
+      localStorage.setItem('scolaris_custom_scolaris_ai_key', trimmed);
       localStorage.setItem('scolaris_custom_groq_api_key', trimmed);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
@@ -35,8 +41,9 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
   };
 
   const handleClearKey = () => {
-    localStorage.removeItem('scolaris_custom_groq_api_key');
     localStorage.removeItem('scolaris_custom_gemini_api_key');
+    localStorage.removeItem('scolaris_custom_scolaris_ai_key');
+    localStorage.removeItem('scolaris_custom_groq_api_key');
     setApiKeyInput('');
     setSaveSuccess(false);
   };

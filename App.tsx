@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { Course, UserProfile, StudySession, AppState, StudyHubData, StudyGroup, AppNotification } from './types';
 import { ICONS } from './constants';
-import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock } from 'lucide-react';
+import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock, Sun, Moon } from 'lucide-react';
 import Onboarding from './components/Onboarding';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
@@ -14,6 +14,7 @@ import CGPACalculator from './components/CGPACalculator';
 import PomodoroTimer from './components/PomodoroTimer';
 import TimetableView from './components/TimetableView';
 import Profile from './components/Profile';
+import AnalyticsView from './components/AnalyticsView';
 import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
 import AdminLogin from './components/AdminLogin';
@@ -36,6 +37,25 @@ const App: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('scolaris_theme') === 'dark';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('scolaris_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('scolaris_theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  const toggleTheme = () => setIsDarkMode(prev => !prev);
   
   // Auth State Management
   const [authLoading, setAuthLoading] = useState(true);
@@ -492,15 +512,15 @@ const App: React.FC = () => {
       case 'library':
         return <PomodoroTimer />;
       case 'analytics':
-        return <div className="text-center py-20 bg-white rounded-[3rem] border border-slate-100 shadow-sm animate-in fade-in">
-          <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-8">
-            {ICONS.Analytics}
-          </div>
-          <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">Deep Analytics</h2>
-          <p className="text-slate-500 font-medium max-w-sm mx-auto leading-relaxed italic">
-            Visualizing your academic journey. This feature is being tuned for peak precision.
-          </p>
-        </div>;
+        return <AnalyticsView 
+          courses={courses} 
+          schedule={schedule} 
+          profile={profile} 
+          hubs={hubs}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          setCourses={setCourses}
+        />;
       case 'profile':
         return <Profile profile={profile} setProfile={handleSaveProfile} onSignOut={handleSignOut} onDelete={deleteAccount} />;
       default:
@@ -526,35 +546,46 @@ const App: React.FC = () => {
   ];
 
   return (
-    <div className="flex h-screen bg-slate-50/10 font-sans text-slate-900 overflow-hidden relative">
+    <div className="flex h-screen bg-slate-50/10 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden relative transition-colors duration-300">
       {/* Mobile Top Header Bar */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-100 flex items-center justify-between px-4 z-40 shadow-sm">
+      <header className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between px-4 z-40 shadow-sm transition-colors duration-300">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsSidebarOpen(true)}
-            className="p-1.5 hover:bg-slate-50 rounded-lg text-slate-600 transition-colors active:scale-95"
+            className="p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors active:scale-95"
           >
             <Menu size={20} />
           </button>
           
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-slate-900 flex items-center justify-center text-white shadow-md">
+            <div className="w-7 h-7 rounded-md bg-slate-900 dark:bg-indigo-600 flex items-center justify-center text-white shadow-md">
                <div className="font-serif font-bold text-xs">S</div>
             </div>
-            <span className="font-serif font-bold text-base tracking-tight leading-none text-slate-900">Scolaris</span>
+            <span className="font-serif font-bold text-base tracking-tight leading-none text-slate-900 dark:text-slate-100">Scolaris</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Mobile Dark Mode Toggle */}
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            title="Toggle Theme Mode"
+          >
+            {isDarkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-indigo-600" />}
+          </button>
+
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             className={`p-2 rounded-lg transition-all duration-200 relative ${
-              showNotifications ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50'
+              showNotifications 
+                ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400' 
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
             {ICONS.Bell}
             {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white dark:border-slate-900" />
             )}
           </button>
         </div>
@@ -570,24 +601,24 @@ const App: React.FC = () => {
 
       {/* Sidebar Drawer */}
       <aside className={`
-        fixed inset-y-0 left-0 w-60 bg-white z-50 flex flex-col border-r border-slate-100 
+        fixed inset-y-0 left-0 w-60 bg-white dark:bg-slate-900 z-50 flex flex-col border-r border-slate-100 dark:border-slate-800/80
         transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        <div className="h-20 flex items-center justify-between px-6 border-b border-slate-50 lg:border-none">
+        <div className="h-20 flex items-center justify-between px-6 border-b border-slate-50 dark:border-slate-800 lg:border-none">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-lg">
+            <div className="w-9 h-9 rounded-lg bg-slate-900 dark:bg-indigo-600 flex items-center justify-center text-white shadow-lg">
                <div className="font-serif font-bold text-base">S</div>
             </div>
             <div className="flex flex-col">
-               <span className="font-serif font-bold text-lg tracking-tight leading-none">Scolaris</span>
-               <span className="text-[9px] font-bold text-slate-400 tracking-[0.1em] mt-1 uppercase">FREE</span>
+               <span className="font-serif font-bold text-lg tracking-tight leading-none text-slate-900 dark:text-slate-100">Scolaris</span>
+               <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 tracking-[0.1em] mt-1 uppercase">FREE</span>
             </div>
           </div>
           
           <button 
             onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden p-1.5 hover:bg-slate-50 rounded-lg text-slate-500 transition-colors"
+            className="lg:hidden p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-400 transition-colors"
           >
             <X size={18} />
           </button>
@@ -601,14 +632,14 @@ const App: React.FC = () => {
             }}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative ${
               showNotifications 
-                ? 'bg-blue-50 text-blue-600' 
-                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400' 
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/60'
             }`}
           >
-            <div className={`transition-all duration-200 ${showNotifications ? 'scale-110 text-blue-600' : 'group-hover:scale-110'}`}>
+            <div className={`transition-all duration-200 ${showNotifications ? 'scale-110 text-blue-600 dark:text-blue-400' : 'group-hover:scale-110'}`}>
               {ICONS.Bell}
               {unreadCount > 0 && (
-                <span className="absolute top-2.5 left-6 w-2 h-2 bg-rose-500 rounded-full border-2 border-white" />
+                <span className="absolute top-2.5 left-6 w-2 h-2 bg-rose-500 rounded-full border-2 border-white dark:border-slate-900" />
               )}
             </div>
             <span className={`text-sm font-medium ${showNotifications ? 'font-bold' : ''}`}>
@@ -621,7 +652,7 @@ const App: React.FC = () => {
             )}
           </button>
           
-          <div className="h-px bg-slate-50 my-2 mx-2" />
+          <div className="h-px bg-slate-50 dark:bg-slate-800/60 my-2 mx-2" />
 
           {navItems.map((item) => (
             <button
@@ -632,11 +663,11 @@ const App: React.FC = () => {
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group ${
                 activeTab === item.id 
-                  ? 'bg-blue-50 text-blue-600' 
-                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                  ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400' 
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/60'
               }`}
             >
-              <div className={`transition-all duration-200 ${activeTab === item.id ? 'scale-110 text-blue-600' : 'group-hover:scale-110'}`}>
+              <div className={`transition-all duration-200 ${activeTab === item.id ? 'scale-110 text-blue-600 dark:text-blue-400' : 'group-hover:scale-110'}`}>
                 {item.icon}
               </div>
               <span className={`text-sm font-medium ${activeTab === item.id ? 'font-bold' : ''}`}>
@@ -646,8 +677,22 @@ const App: React.FC = () => {
           ))}
         </nav>
 
-        <div className="p-4 space-y-4">
-           <div className="pt-2 border-t border-slate-50 flex items-center justify-between">
+        <div className="p-4 space-y-2">
+           {/* Global Theme Mode Button in Sidebar */}
+           <button
+             onClick={toggleTheme}
+             className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+           >
+             <span className="flex items-center gap-2">
+               {isDarkMode ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-indigo-600" />}
+               <span>{isDarkMode ? 'Light Mode' : 'Study Dark Mode'}</span>
+             </span>
+             <span className="text-[10px] uppercase font-mono tracking-widest text-slate-400">
+               {isDarkMode ? 'DARK' : 'LIGHT'}
+             </span>
+           </button>
+
+           <div className="pt-2 border-t border-slate-50 dark:border-slate-800/60 flex items-center justify-between">
               <button 
                 onClick={() => {
                   setActiveTab('profile');
@@ -655,8 +700,8 @@ const App: React.FC = () => {
                 }}
                 className={`flex-1 flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all duration-200 ${
                   activeTab === 'profile' 
-                    ? 'bg-blue-50 text-blue-600 font-bold border border-blue-100 shadow-xs' 
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 font-bold border border-blue-100 dark:border-blue-900/60 shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                 }`}
               >
                 <UserAvatar 
@@ -680,7 +725,7 @@ const App: React.FC = () => {
                   if (window.innerWidth < 1024) setIsSidebarOpen(false);
                 }}
                 title="Admin Portal"
-                className="p-2.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100/80 rounded-xl transition-all cursor-pointer mr-1"
+                className="p-2.5 text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mr-1"
               >
                 <Shield size={16} />
               </button>
@@ -689,7 +734,7 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto bg-white relative pt-16 lg:pt-0">
+      <main className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative pt-16 lg:pt-0 transition-colors duration-300">
         {showNotifications && (
           <div className="absolute top-4 right-4 w-80 bg-white border border-slate-100 shadow-2xl rounded-3xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">

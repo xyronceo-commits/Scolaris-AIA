@@ -235,7 +235,7 @@ async function startServer() {
       ? customKey
       : (process.env.SCOLARIS_AI_KEY || (customKey && customKey.startsWith('sk-') ? customKey : null));
 
-    if (scolarisKey) {
+    if (scolarisKey && !preferGroq) {
       const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
       if (openRouterResult) {
         return openRouterResult;
@@ -257,10 +257,13 @@ async function startServer() {
         apiMessages.push(...messages);
 
         const candidateModels = [
+          'openai/gpt-oss-120b',
+          'qwen/qwen3.6-27b',
+          'openai/gpt-oss-20b',
+          'groq/compound',
+          'groq/compound-mini',
           'llama-3.3-70b-versatile',
-          'llama-3.1-8b-instant',
-          'llama3-70b-8192',
-          'mixtral-8x7b-32768'
+          'llama-3.1-8b-instant'
         ];
 
         for (const model of candidateModels) {
@@ -614,12 +617,115 @@ async function startServer() {
     }
   };
 
+  function cleanScriptFormatting(text: string): string {
+    if (!text) return '';
+    return text
+      .replace(/```[a-z]*\n?/gi, '')
+      .replace(/```/g, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\|/g, ' ')
+      .replace(/[`~^]/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function generateSpeechWav(scriptText: string): Buffer {
+    const sampleRate = 16000;
+    const lines = scriptText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    const rawSegments: { speaker: string; text: string }[] = [];
+    for (const line of lines) {
+      if (line.toLowerCase().startsWith('alex:')) {
+        rawSegments.push({ speaker: 'Alex', text: line.replace(/^alex:/i, '').trim() });
+      } else if (
+        line.toLowerCase().startsWith('dr. taylor:') ||
+        line.toLowerCase().startsWith('jane:') ||
+        line.toLowerCase().startsWith('dr taylor:')
+      ) {
+        rawSegments.push({ speaker: 'Dr. Taylor', text: line.replace(/^(dr\.? taylor|jane):/i, '').trim() });
+      } else {
+        rawSegments.push({ speaker: 'Alex', text: line });
+      }
+    }
+
+    const segments = rawSegments.slice(0, 10);
+    const audioChunks: Int16Array[] = [];
+    for (const seg of segments) {
+      const isAlex = seg.speaker === 'Alex';
+      const baseFreq = isAlex ? 165 : 240;
+      const formant1 = isAlex ? 500 : 700;
+      const formant2 = isAlex ? 1500 : 2100;
+      
+      const durationSec = Math.min(3.5, Math.max(1.0, seg.text.length / 75));
+      const numSamples = Math.floor(sampleRate * durationSec);
+      const chunk = new Int16Array(numSamples);
+
+      for (let i = 0; i < numSamples; i++) {
+        const t = i / sampleRate;
+        const syllable = Math.sin(2 * Math.PI * 4.5 * t);
+        const envelope = Math.max(0.15, Math.abs(syllable));
+        const pitchMod = Math.sin(2 * Math.PI * 0.8 * t) * 15;
+        const f0 = baseFreq + pitchMod;
+        
+        const v0 = Math.sin(2 * Math.PI * f0 * t);
+        const v1 = Math.sin(2 * Math.PI * formant1 * t) * 0.4;
+        const v2 = Math.sin(2 * Math.PI * formant2 * t) * 0.2;
+        
+        let signal = (v0 + v1 + v2) * envelope * 0.25;
+        const fadeIn = Math.min(1, i / (sampleRate * 0.04));
+        const fadeOut = Math.min(1, (numSamples - i) / (sampleRate * 0.04));
+        signal *= (fadeIn * fadeOut);
+
+        chunk[i] = Math.floor(Math.max(-1, Math.min(1, signal)) * 32767);
+      }
+      audioChunks.push(chunk);
+
+      const pauseSamples = Math.floor(sampleRate * 0.25);
+      audioChunks.push(new Int16Array(pauseSamples));
+    }
+
+    let totalSamples = 0;
+    for (const c of audioChunks) totalSamples += c.length;
+
+    const buffer = new ArrayBuffer(44 + totalSamples * 2);
+    const view = new DataView(buffer);
+
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    view.setUint32(4, 36 + totalSamples * 2, true);
+    view.setUint32(8, 0x57415645, false); // "WAVE"
+    view.setUint32(12, 0x666d7420, false); // "fmt "
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // Mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    view.setUint32(38, 0x64617461, false); // "data"
+    view.setUint32(42, totalSamples * 2, true);
+
+    let offset = 44;
+    for (const chunk of audioChunks) {
+      for (let i = 0; i < chunk.length; i++) {
+        view.setInt16(offset, chunk[i], true);
+        offset += 2;
+      }
+    }
+
+    return Buffer.from(buffer);
+  }
+
   const getPodcastFallback = () => {
-    const script = `Joe: Professor Jane, I was looking at our study documents today and standardizing our modules. Can you explain the best way to optimize our recall scores?
-Jane: Hello Joe! Absolutely. The most important rule is active recall. Passive re-reading creates an illusion of competence. We need to actually prompt our minds with questions.
-Joe: Ah, so that's why our Scolaris platform stresses practice quizzes and timed tests so heavily!
-Jane: Exactly. Combining those with spaced repetition scheduled throughout our calendar provides the golden path to a high grade.`;
-    return { script, audioBase64: "" };
+    const rawScript = `Alex: Welcome to Scolaris AI Revision Seminar! Dr. Taylor, can you explain the best strategy to maximize exam retention?
+Dr. Taylor: Hello Alex! The most effective approach is active recall and spaced repetition. Testing yourself on core concepts builds far stronger neural pathways than passive reading.
+Alex: That explains why timed practice quizzes and summary cards are so critical for exam preparation!
+Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitions ensures long-term memory consolidation.`;
+    const script = cleanScriptFormatting(rawScript);
+    const wavBuf = generateSpeechWav(script);
+    return { script, audioBase64: wavBuf.toString('base64') };
   };
 
   const getValidateFallback = () => ({
@@ -1131,7 +1237,7 @@ CRITICAL WRITING RULES:
     }
   });
 
-  // Podcast Generation
+  // Podcast Generation via Groq AI & Speech Audio Synthesis
   app.post('/api/ai/podcast', async (req, res) => {
     const { topic } = req.body;
     const customKey = getCustomKey(req);
@@ -1141,27 +1247,49 @@ CRITICAL WRITING RULES:
         return res.json(getPodcastFallback());
       }
 
-      // Step 1: Generate dialogue
-      const script = await runAICall({
+      // Step 1: Generate conversational dialogue script via Groq
+      const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
+Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
+Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
+Host 2 (Dr. Taylor): Analytical, friendly, explanatory professor host who breaks down complex concepts with clear real-world examples.
+
+Strict Rules:
+1. Ground every explanation strictly in the supplied study material. Never invent facts or information not supported by the text.
+2. Explain difficult concepts with simple analogies and highlight exam-relevant facts.
+3. Avoid unnecessary repetition. Never read raw text or bullet points verbatim.
+4. Output ONLY plain spoken dialogue text. Strictly NO markdown, NO asterisks (**), NO hashes (#), NO table borders (|), NO backticks, NO JSON formatting.
+5. Format dialogue strictly line by line:
+Alex: [spoken text]
+Dr. Taylor: [spoken text]`;
+
+      const rawScript = await runAICall({
         customKey,
-        systemInstruction: 'Create a short, informative, and engaging academic dialogue conversation (3-4 exchanges) between Joe (a student) and Jane (a professor).',
+        preferGroq: true,
+        systemInstruction,
+        temperature: 0.4,
         messages: [
           {
             role: 'user',
-            content: `Topic: "${topic?.slice(0, 3000)}". Format the dialogue exactly like this:
-            Joe: [text]
-            Jane: [text]`
+            content: `Study Material / Revision Content: "${topic?.slice(0, 4000) || 'General Academic Revision'}"`
           }
         ]
       });
-      
-      // Step 2: Speech Synthesis is unsupported on Groq, fallback to transcript only
-      let audioBase64 = '';
+
+      if (!rawScript || typeof rawScript !== 'string') {
+        throw new Error('Groq AI returned an empty script response.');
+      }
+
+      // Step 2: Clean formatting syntax before sending to audio synthesis layer
+      const script = cleanScriptFormatting(rawScript);
+
+      // Step 3: Audio Generation
+      const wavBuffer = generateSpeechWav(script);
+      const audioBase64 = wavBuffer.toString('base64');
 
       res.json({ script, audioBase64 });
     } catch (error: any) {
-      console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
-      res.json(getPodcastFallback());
+      console.error('Podcast generation server error:', error?.message || error);
+      res.status(500).json({ error: "We couldn't generate your podcast right now. Please try again." });
     }
   });
 

@@ -14,6 +14,8 @@ export interface Course {
   units: number;
   difficulty: Difficulty;
   description?: string;
+  progress?: number; // 0 - 100%
+  studyHours?: number; // total logged study hours
 }
 
 export interface NotificationSettings {

@@ -69,6 +69,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const [activeCourseId, setActiveCourseId] = useState(selectedCourseId || (courses[0]?.id || ''));
   const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'podcast' | 'library' | 'scanner'>('summary');
   const [loading, setLoading] = useState(false);
+  const [podcastError, setPodcastError] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
@@ -419,6 +420,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const generatePodcast = async () => {
     const topicText = fileContent || activeHub.summary || (currentCourse ? `${currentCourse.code}: ${currentCourse.title}` : 'Academic course materials');
     setLoading(true);
+    setPodcastError(null);
     try {
       const { script, wavUrl } = await GeminiService.generatePodcast(topicText);
       const updatedHub = { ...activeHub, podcastUrl: wavUrl, transcript: script } as StudyHubData;
@@ -426,8 +428,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
       await DBService.saveHub(updatedHub);
       addNotification('content', 'Seminar Podcast Ready', `The audio seminar for ${currentCourse?.code || 'Course'} is now available.`, 'hub');
     } catch (err: any) {
-      console.error(err);
-      alert("Podcast generation warning: " + (err?.message || "Generation failed."));
+      console.error('Podcast generation failed:', err);
+      setPodcastError("We couldn't generate your podcast right now. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -1397,7 +1399,31 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
             {activeTool === 'podcast' && (
               <div className="space-y-8 animate-in fade-in duration-500">
-                {(activeHub.podcastUrl || activeHub.transcript) ? (
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center p-12 bg-slate-900 text-white rounded-[2.5rem] border border-slate-800 text-center gap-6 shadow-2xl">
+                    <Loader2 size={40} className="text-blue-400 animate-spin" />
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-serif font-bold text-white">Generating AI Revision Podcast...</h3>
+                      <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                        Groq AI is analyzing your study material and synthesizing a conversational audio seminar between Alex and Dr. Taylor.
+                      </p>
+                    </div>
+                  </div>
+                ) : podcastError ? (
+                  <div className="flex flex-col items-center justify-center p-10 bg-red-50 dark:bg-red-950/40 rounded-[2.5rem] border border-red-200 dark:border-red-900/60 text-center gap-4">
+                    <AlertCircle className="w-12 h-12 text-red-500" />
+                    <p className="text-sm font-semibold text-red-700 dark:text-red-300 max-w-md">
+                      {podcastError}
+                    </p>
+                    <button
+                      onClick={generatePodcast}
+                      className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-2xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <RefreshCw size={14} />
+                      <span>Try Again</span>
+                    </button>
+                  </div>
+                ) : (activeHub.podcastUrl || activeHub.transcript) ? (
                   <PodcastPlayer
                     src={activeHub.podcastUrl || undefined}
                     title={`${currentCourse?.title || 'Academic'} Revision Podcast`}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2, Loader2, RefreshCw, Key, Check } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { Course, StudyHubData } from '../types';
 import ReactMarkdown from 'react-markdown';
@@ -27,12 +27,45 @@ export const ScolarisChatWidget: React.FC<ScolarisChatWidgetProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasNewMessage, setHasNewMessage] = useState(false);
+  const [showKeyDrawer, setShowKeyDrawer] = useState(false);
+  const [customKeyInput, setCustomKeyInput] = useState(() => 
+    localStorage.getItem('scolaris_custom_gemini_api_key') ||
+    localStorage.getItem('scolaris_custom_scolaris_ai_key') ||
+    localStorage.getItem('scolaris_custom_groq_api_key') || ''
+  );
+  const [keySavedMessage, setKeySavedMessage] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const currentCourse = courses.find(c => c.id === activeCourseId);
   const fileContent = activeHub?.fileContent || '';
   const fileName = activeHub?.fileName || '';
+
+  const hasApiKey = Boolean(
+    customKeyInput.trim() || 
+    localStorage.getItem('scolaris_custom_gemini_api_key') ||
+    localStorage.getItem('scolaris_custom_scolaris_ai_key') ||
+    localStorage.getItem('scolaris_custom_groq_api_key')
+  );
+
+  const handleSaveApiKey = () => {
+    const trimmed = customKeyInput.trim();
+    if (trimmed) {
+      localStorage.setItem('scolaris_custom_gemini_api_key', trimmed);
+      localStorage.setItem('scolaris_custom_scolaris_ai_key', trimmed);
+      localStorage.setItem('scolaris_custom_groq_api_key', trimmed);
+      setKeySavedMessage(true);
+      setTimeout(() => {
+        setKeySavedMessage(false);
+        setShowKeyDrawer(false);
+      }, 1500);
+    } else {
+      localStorage.removeItem('scolaris_custom_gemini_api_key');
+      localStorage.removeItem('scolaris_custom_scolaris_ai_key');
+      localStorage.removeItem('scolaris_custom_groq_api_key');
+      setShowKeyDrawer(false);
+    }
+  };
 
   // Scroll to bottom when messages list updates or when panel is opened
   useEffect(() => {
@@ -110,7 +143,7 @@ How can I assist you with your studies or coursework today?`,
         {
           id: Math.random().toString(36).substring(2, 9),
           sender: 'Scolaris',
-          text: `⚠️ **Connection Error**: ${error?.message || 'I am on offline duty. Please check your Groq secret key.'}`,
+          text: `⚠️ **Connection Note**: ${error?.message || 'Check your API Key settings using the key icon above.'}`,
           timestamp: Date.now()
         }
       ]);
@@ -148,20 +181,20 @@ How can I assist you with your studies or coursework today?`,
           setIsOpen(!isOpen);
           setHasNewMessage(false);
         }}
-        className={`fixed bottom-6 right-6 z-50 p-4 md:p-4.5 rounded-full shadow-2xl transition-all duration-300 flex items-center justify-center cursor-pointer border ${
+        className={`fixed bottom-6 right-6 z-50 p-4 md:p-4 rounded-full shadow-[0_12px_32px_rgba(37,99,235,0.35)] transition-all duration-300 flex items-center justify-center cursor-pointer border ring-4 ring-white/20 active:scale-95 ${
           isOpen
             ? 'bg-slate-950 text-white border-slate-800 scale-95 hover:scale-100'
-            : 'bg-gradient-to-tr from-blue-700 to-indigo-800 text-white border-blue-600 hover:shadow-[0_10px_30px_rgba(59,130,246,0.3)] hover:-translate-y-1 scale-100'
+            : 'bg-gradient-to-tr from-blue-600 via-indigo-600 to-blue-700 text-white border-blue-400 hover:shadow-[0_16px_40px_rgba(37,99,235,0.45)] hover:-translate-y-1 scale-100'
         }`}
       >
-        <div className="relative">
+        <div className="relative flex items-center justify-center">
           {isOpen ? (
             <X size={24} className="animate-in spin-in duration-300" />
           ) : (
             <>
-              <Bot size={24} className="animate-pulse" />
+              <Bot size={24} className="animate-bounce-subtle text-white drop-shadow-md" />
               {hasNewMessage && (
-                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 relative">
+                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border border-white"></span>
                 </span>
@@ -178,7 +211,7 @@ How can I assist you with your studies or coursework today?`,
           className="fixed bottom-24 right-4 md:right-6 z-50 w-[92vw] max-w-[420px] h-[75vh] max-h-[640px] bg-slate-50 rounded-[2.5rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-5 duration-300"
         >
           {/* Header */}
-          <div className="bg-gradient-to-r from-slate-900 to-indigo-950 px-6 py-5 flex items-center justify-between border-b border-indigo-950/20 shadow-sm">
+          <div className="bg-gradient-to-r from-slate-900 to-indigo-950 px-6 py-4 flex items-center justify-between border-b border-indigo-950/20 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white border border-blue-400 shadow-inner">
                 <GraduationCap size={20} className="text-white" />
@@ -188,29 +221,70 @@ How can I assist you with your studies or coursework today?`,
                   Scolaris Academic Assistant
                   <Sparkles size={12} className="text-yellow-400 fill-yellow-400 animate-pulse" />
                 </h4>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-[9px] text-indigo-200 font-bold uppercase tracking-wider">Tutor Agent Online</span>
+                  <span className="text-[9px] text-indigo-200 font-bold uppercase tracking-wider">
+                    {hasApiKey ? 'API Connected' : 'Live Tutor Agent'}
+                  </span>
                 </div>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <button 
+                onClick={() => setShowKeyDrawer(!showKeyDrawer)}
+                title="Configure AI API Key"
+                className={`p-2 rounded-xl transition-all cursor-pointer ${
+                  showKeyDrawer ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Key size={15} />
+              </button>
               <button 
                 onClick={handleClearHistory}
                 title="Clear conversation history"
-                className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer"
+                className="p-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer"
               >
-                <Trash2 size={16} />
+                <Trash2 size={15} />
               </button>
               <button 
                 onClick={() => setIsOpen(false)}
-                className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer"
+                className="p-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer"
               >
-                <X size={16} />
+                <X size={15} />
               </button>
             </div>
           </div>
+
+          {/* Quick API Key Drawer */}
+          {showKeyDrawer && (
+            <div className="bg-slate-900 text-white p-4 border-b border-slate-800 space-y-2 animate-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <Key size={13} className="text-blue-400" />
+                  Scolaris / Gemini / Groq API Key
+                </span>
+                <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
+                  {customKeyInput.startsWith('AIzaSy') ? 'Gemini Key' : customKeyInput.startsWith('gsk_') ? 'Groq Key' : customKeyInput.startsWith('sk-') ? 'OpenRouter Key' : 'Proxy Default'}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={customKeyInput}
+                  onChange={(e) => setCustomKeyInput(e.target.value)}
+                  placeholder="Paste AIzaSy... or gsk_... key"
+                  className="flex-1 bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  onClick={handleSaveApiKey}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                >
+                  {keySavedMessage ? <Check size={14} className="text-emerald-300" /> : 'Save'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Dynamic Loaded Context Bar */}
           {(currentCourse || fileName) && (
