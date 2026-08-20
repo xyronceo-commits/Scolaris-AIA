@@ -25,6 +25,7 @@ import { EmailVerification } from './components/EmailVerification';
 import { auth } from './lib/firebase';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { DBService } from './services/db';
+import ScolarisLogo from './components/ScolarisLogo';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
@@ -89,6 +90,41 @@ const App: React.FC = () => {
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
+
+  // Update Page Title Metadata based on Active State
+  useEffect(() => {
+    if (showAdminLoginForm) {
+      document.title = 'Admin | Scolaris AI';
+      return;
+    }
+    if (!authUser && showAuth) {
+      document.title = authMode === 'signup' ? 'Create Account | Scolaris AI' : 'Sign In | Scolaris AI';
+      return;
+    }
+    if (!authUser) {
+      document.title = 'Scolaris AI — AI-Powered Study Platform';
+      return;
+    }
+    const tabTitles: Record<string, string> = {
+      dashboard: 'Dashboard | Scolaris AI',
+      courses: 'My Courses | Scolaris AI',
+      hub: 'Study | Scolaris AI',
+      tools: 'AI Study Tools | Scolaris AI',
+      podcast: 'AI Podcast | Scolaris AI',
+      profile: 'Profile | Scolaris AI',
+      schedule: 'Schedule | Scolaris AI',
+      groups: 'Study Circles | Scolaris AI',
+      analytics: 'Analytics | Scolaris AI',
+      paid: 'Pro Access | Scolaris AI',
+      admin: 'Admin | Scolaris AI'
+    };
+    if (tabTitles[activeTab]) {
+      document.title = tabTitles[activeTab];
+    } else {
+      const formatted = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
+      document.title = `${formatted} | Scolaris AI`;
+    }
+  }, [activeTab, authUser, showAuth, authMode, showAdminLoginForm]);
 
   // Load User Data & Profile from Firestore
   const loadUserData = async (user: User) => {
@@ -323,9 +359,9 @@ const App: React.FC = () => {
   // 1. Loading State
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-14 h-14 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-xl mb-4 animate-bounce">
-          <div className="font-serif font-bold text-xl italic">S</div>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+        <div className="p-3 bg-slate-900 dark:bg-indigo-600 text-white rounded-2xl shadow-xl mb-4 animate-bounce">
+          <ScolarisLogo variant="icon" size={32} colorClass="text-white" />
         </div>
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
           Resolving Academic Session...
@@ -558,10 +594,7 @@ const App: React.FC = () => {
           </button>
           
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-slate-900 dark:bg-indigo-600 flex items-center justify-center text-white shadow-md">
-               <div className="font-serif font-bold text-xs">S</div>
-            </div>
-            <span className="font-serif font-bold text-base tracking-tight leading-none text-slate-900 dark:text-slate-100">Scolaris</span>
+            <ScolarisLogo variant="full" size={26} />
           </div>
         </div>
 
@@ -607,13 +640,7 @@ const App: React.FC = () => {
       `}>
         <div className="h-20 flex items-center justify-between px-6 border-b border-slate-50 dark:border-slate-800 lg:border-none">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-slate-900 dark:bg-indigo-600 flex items-center justify-center text-white shadow-lg">
-               <div className="font-serif font-bold text-base">S</div>
-            </div>
-            <div className="flex flex-col">
-               <span className="font-serif font-bold text-lg tracking-tight leading-none text-slate-900 dark:text-slate-100">Scolaris</span>
-               <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 tracking-[0.1em] mt-1 uppercase">FREE</span>
-            </div>
+            <ScolarisLogo variant="full" size={32} showSubtitle />
           </div>
           
           <button 

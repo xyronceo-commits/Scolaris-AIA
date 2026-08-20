@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Course, Difficulty, UserProfile } from '../types';
 import { DIFFICULTY_COLORS } from '../constants';
 import { GeminiService } from '../services/gemini';
+import { RecentFiles } from './RecentFiles';
+import { auth } from '../lib/firebase';
 import { 
   Plus, 
   Sparkles, 
@@ -255,17 +257,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
             <span>Add Course</span>
           </button>
 
-          {/* Button 4: Load Demo */}
-          <button
-            onClick={handleLoadDemo}
-            title="Instantly load academic curriculum loadouts (e.g. CS, Biostatistics)"
-            className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-indigo-600 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer select-none active:scale-95"
-          >
-            <BookOpen size={13.5} className="text-indigo-500" />
-            <span>Load Demo</span>
-          </button>
-
-          {/* Button 5: Wipe All */}
+          {/* Button 4: Wipe All */}
           <button
             onClick={handleClearAll}
             disabled={courses.length === 0}
@@ -642,6 +634,14 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
           </div>
         </div>
       )}
+
+      {/* Recent Uploaded Files */}
+      <section className="pt-4">
+        <RecentFiles 
+          userId={auth.currentUser?.uid || ''} 
+          courses={courses} 
+        />
+      </section>
 
     </div>
   );

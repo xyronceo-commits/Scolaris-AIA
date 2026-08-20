@@ -36,6 +36,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@vitejs/plugin-react": "^5.0.0",
     "esbuild": "^0.28.0",
+    "sharp": "^0.35.3",
     "tsx": "^4.22.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

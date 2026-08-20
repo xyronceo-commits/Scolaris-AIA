@@ -73,6 +73,21 @@ export interface QuizQuestion {
   explanation?: string;
 }
 
+export interface UserFile {
+  id: string;
+  userId: string;
+  courseId: string;
+  fileName: string;
+  fileType: string;
+  fileSize: string;
+  storagePath: string;
+  downloadUrl?: string;
+  uploadedAt: string;
+  timestamp: number;
+  courseCode?: string;
+  courseTitle?: string;
+}
+
 export interface LibraryFile {
   id: string;
   fileName: string;

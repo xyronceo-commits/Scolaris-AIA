@@ -1,0 +1,18 @@
+# Scolaris AI Robots Configuration
+User-agent: *
+Allow: /$
+Allow: /index.html
+
+# Disallow private user workspace, dashboard, courses, files, and admin routes
+Disallow: /dashboard
+Disallow: /courses
+Disallow: /hub
+Disallow: /schedule
+Disallow: /groups
+Disallow: /analytics
+Disallow: /profile
+Disallow: /admin
+Disallow: /api/
+Disallow: /auth
+
+Sitemap: https://ais-dev-yahxa4uuxs5gx2wzqqd3t5-417290327349.europe-west2.run.app/sitemap.xml

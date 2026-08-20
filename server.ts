@@ -377,6 +377,17 @@ async function startServer() {
     res.json({ status: 'healthy' });
   });
 
+  // SEO Static Deliverables
+  app.get('/robots.txt', (req, res) => {
+    res.type('text/plain');
+    res.sendFile(path.join(process.cwd(), 'public', 'robots.txt'));
+  });
+
+  app.get('/sitemap.xml', (req, res) => {
+    res.type('application/xml');
+    res.sendFile(path.join(process.cwd(), 'public', 'sitemap.xml'));
+  });
+
   // Get S3 configuration details
   app.get('/api/s3/config', (req, res) => {
     res.json({
@@ -622,14 +633,83 @@ async function startServer() {
     return text
       .replace(/```[a-z]*\n?/gi, '')
       .replace(/```/g, '')
+      .replace(/<[^>]*>/g, '')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
       .replace(/_([^_]+)_/g, '$1')
+      .replace(/~~([^~]+)~~/g, '$1')
       .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^[\s*+-]+\s+/gm, '')
       .replace(/\|/g, ' ')
       .replace(/[`~^]/g, '')
+      .replace(/[^\x00-\x7F]/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
+  }
+
+  async function generateGroqPodcastScript(studyMaterial: string, customApiKey?: string): Promise<string> {
+    const groqKey = (customApiKey && customApiKey.startsWith('gsk_'))
+      ? customApiKey
+      : (process.env.GROQ_API_KEY || (customApiKey && !customApiKey.startsWith('AIzaSy') ? customApiKey : null));
+
+    if (!groqKey) {
+      throw new Error("GROQ_API_KEY environment variable is not configured.");
+    }
+
+    const groq = new Groq({ apiKey: groqKey });
+
+    const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
+Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
+Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
+Host 2 (Dr. Taylor): Analytical, friendly, explanatory professor host who breaks down complex concepts with clear real-world examples.
+
+Strict Rules:
+1. Ground every explanation strictly in the supplied study material. Never invent facts or information not supported by the text.
+2. Explain difficult concepts with simple analogies and highlight exam-relevant facts.
+3. Avoid unnecessary repetition. Never read raw text or bullet points verbatim.
+4. Output ONLY plain spoken dialogue text. Strictly NO markdown formatting, NO asterisks (**), NO hashes (#), NO table borders (|), NO backticks, NO JSON formatting.
+5. Format dialogue strictly line by line:
+Alex: [spoken text]
+Dr. Taylor: [spoken text]`;
+
+    const modelsToTry = [
+      'llama3-70b-8192',
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant'
+    ];
+
+    let rawScript: string | null = null;
+    let lastError: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await groq.chat.completions.create({
+          model,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Study Material / Revision Content: "${studyMaterial?.slice(0, 4500) || 'General Academic Revision'}"` }
+          ],
+          temperature: 0.4
+        });
+
+        const content = response.choices[0]?.message?.content;
+        if (content && content.trim().length > 0) {
+          rawScript = content;
+          break;
+        }
+      } catch (err: any) {
+        console.warn(`Groq podcast call with model '${model}' failed:`, err?.message || err);
+        lastError = err;
+      }
+    }
+
+    if (!rawScript) {
+      throw new Error(`Groq AI podcast script generation failed: ${lastError?.message || 'No response from Groq API'}`);
+    }
+
+    return rawScript;
   }
 
   function generateSpeechWav(scriptText: string): Buffer {
@@ -716,6 +796,64 @@ async function startServer() {
     }
 
     return Buffer.from(buffer);
+  }
+
+  function validateWavBuffer(buf: Buffer | Uint8Array): { valid: boolean; error?: string; durationSec?: number } {
+    if (!buf || buf.length < 44) {
+      return { valid: false, error: 'Audio buffer is missing or too small for a valid 44-byte WAV header.' };
+    }
+
+    // RIFF header check
+    if (buf[0] !== 82 || buf[1] !== 73 || buf[2] !== 70 || buf[3] !== 70) {
+      return { valid: false, error: 'Missing RIFF header signature.' };
+    }
+
+    // WAVE container check
+    if (buf[8] !== 87 || buf[9] !== 65 || buf[10] !== 86 || buf[11] !== 69) {
+      return { valid: false, error: 'Missing WAVE format signature.' };
+    }
+
+    // fmt subchunk check
+    if (buf[12] !== 102 || buf[13] !== 109 || buf[14] !== 116 || buf[15] !== 32) {
+      return { valid: false, error: 'Missing fmt subchunk signature.' };
+    }
+
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const audioFormat = view.getUint16(20, true);
+    const numChannels = view.getUint16(22, true);
+    const sampleRate = view.getUint32(24, true);
+    const byteRate = view.getUint32(28, true);
+
+    if (audioFormat !== 1 && audioFormat !== 3) {
+      return { valid: false, error: `Invalid audio encoding format (${audioFormat}).` };
+    }
+
+    if (numChannels < 1 || numChannels > 8) {
+      return { valid: false, error: `Invalid channel count (${numChannels}).` };
+    }
+
+    if (sampleRate < 8000 || sampleRate > 192000) {
+      return { valid: false, error: `Invalid sample rate (${sampleRate} Hz).` };
+    }
+
+    let dataSize = 0;
+    for (let offset = 12; offset <= buf.length - 8; offset++) {
+      if (buf[offset] === 100 && buf[offset + 1] === 97 && buf[offset + 2] === 116 && buf[offset + 3] === 97) {
+        dataSize = view.getUint32(offset + 4, true);
+        break;
+      }
+    }
+
+    if (dataSize <= 0) {
+      return { valid: false, error: 'Audio data subchunk is empty.' };
+    }
+
+    const durationSec = byteRate > 0 ? dataSize / byteRate : 0;
+    if (durationSec < 0.2) {
+      return { valid: false, error: 'Audio stream duration is too short (< 0.2s).' };
+    }
+
+    return { valid: true, durationSec };
   }
 
   const getPodcastFallback = () => {
@@ -1237,61 +1375,64 @@ CRITICAL WRITING RULES:
     }
   });
 
-  // Podcast Generation via Groq AI & Speech Audio Synthesis
-  app.post('/api/ai/podcast', async (req, res) => {
-    const { topic } = req.body;
+  // Podcast Generation via Groq AI (llama3-70b-8192) & Speech Audio Synthesis
+  const handlePodcastGeneration = async (req: express.Request, res: express.Response) => {
+    const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
     const customKey = getCustomKey(req);
+
     try {
-      const apiKey = getAIKey(customKey);
-      if (!apiKey) {
-        return res.json(getPodcastFallback());
-      }
-
-      // Step 1: Generate conversational dialogue script via Groq
-      const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
-Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
-Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
-Host 2 (Dr. Taylor): Analytical, friendly, explanatory professor host who breaks down complex concepts with clear real-world examples.
-
-Strict Rules:
-1. Ground every explanation strictly in the supplied study material. Never invent facts or information not supported by the text.
-2. Explain difficult concepts with simple analogies and highlight exam-relevant facts.
-3. Avoid unnecessary repetition. Never read raw text or bullet points verbatim.
-4. Output ONLY plain spoken dialogue text. Strictly NO markdown, NO asterisks (**), NO hashes (#), NO table borders (|), NO backticks, NO JSON formatting.
-5. Format dialogue strictly line by line:
+      // Step 1: Connect to Groq using GROQ_API_KEY and generate script via llama3-70b-8192
+      let rawScript = '';
+      try {
+        rawScript = await generateGroqPodcastScript(studyText, customKey);
+      } catch (groqErr: any) {
+        console.warn('Direct Groq llama3-70b-8192 call failed, attempting fallback AI caller:', groqErr?.message || groqErr);
+        const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
+Create a natural, highly engaging dialogue conversation (4 to 6 exchanges) between two podcast hosts:
+Host 1 (Alex): Student host asking insightful questions.
+Host 2 (Dr. Taylor): Professor host explaining core concepts.
+Format dialogue strictly line by line:
 Alex: [spoken text]
-Dr. Taylor: [spoken text]`;
+Dr. Taylor: [spoken text]
+Strictly NO markdown formatting.`;
 
-      const rawScript = await runAICall({
-        customKey,
-        preferGroq: true,
-        systemInstruction,
-        temperature: 0.4,
-        messages: [
-          {
-            role: 'user',
-            content: `Study Material / Revision Content: "${topic?.slice(0, 4000) || 'General Academic Revision'}"`
-          }
-        ]
-      });
+        rawScript = await runAICall({
+          customKey,
+          preferGroq: true,
+          systemInstruction,
+          temperature: 0.4,
+          messages: [{ role: 'user', content: `Study Material: "${studyText?.slice(0, 4000) || 'General Academic Revision'}"` }]
+        });
+      }
 
       if (!rawScript || typeof rawScript !== 'string') {
-        throw new Error('Groq AI returned an empty script response.');
+        const fallbackObj = getPodcastFallback();
+        rawScript = fallbackObj.script;
       }
 
-      // Step 2: Clean formatting syntax before sending to audio synthesis layer
+      // Step 2: Clean script of Markdown, special symbols, and formatting noise before audio generation
       const script = cleanScriptFormatting(rawScript);
 
-      // Step 3: Audio Generation
+      // Step 3: Audio Generation & Output Stream Validation
       const wavBuffer = generateSpeechWav(script);
-      const audioBase64 = wavBuffer.toString('base64');
+      const validation = validateWavBuffer(wavBuffer);
+      if (!validation.valid) {
+        console.error('Audio validation failed for podcast output:', validation.error);
+        return res.status(500).json({ error: `Audio stream validation failed: ${validation.error || 'Corrupt media file generated.'}` });
+      }
 
-      res.json({ script, audioBase64 });
+      const audioBase64 = wavBuffer.toString('base64');
+      res.json({ script, audioBase64, durationSec: validation.durationSec });
     } catch (error: any) {
       console.error('Podcast generation server error:', error?.message || error);
       res.status(500).json({ error: "We couldn't generate your podcast right now. Please try again." });
     }
-  });
+  };
+
+  app.post('/api/ai/podcast', handlePodcastGeneration);
+  app.post('/api/ai/podcast/groq', handlePodcastGeneration);
+  app.post('/api/podcast/groq', handlePodcastGeneration);
+  app.post('/api/podcast/generate', handlePodcastGeneration);
 
   // Message Validation Route
   app.post('/api/ai/validate', async (req, res) => {

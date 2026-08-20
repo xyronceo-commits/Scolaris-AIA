@@ -3,6 +3,7 @@ import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2,
 import { GeminiService } from '../services/gemini';
 import { Course, StudyHubData } from '../types';
 import ReactMarkdown from 'react-markdown';
+import ScolarisLogo from './ScolarisLogo';
 
 interface ScolarisChatWidgetProps {
   courses: Course[];
@@ -213,12 +214,12 @@ How can I assist you with your studies or coursework today?`,
           {/* Header */}
           <div className="bg-gradient-to-r from-slate-900 to-indigo-950 px-6 py-4 flex items-center justify-between border-b border-indigo-950/20 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white border border-blue-400 shadow-inner">
-                <GraduationCap size={20} className="text-white" />
+              <div className="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-white shadow-inner p-1.5">
+                <ScolarisLogo variant="icon" size={24} colorClass="text-white" />
               </div>
               <div>
                 <h4 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
-                  Scolaris Academic Assistant
+                  Scolaris AI Assistant
                   <Sparkles size={12} className="text-yellow-400 fill-yellow-400 animate-pulse" />
                 </h4>
                 <div className="flex items-center gap-2">

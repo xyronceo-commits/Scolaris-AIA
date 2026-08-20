@@ -9,6 +9,7 @@ import {
   sendEmailVerification,
   updateProfile 
 } from 'firebase/auth';
+import ScolarisLogo from './ScolarisLogo';
 
 interface AuthProps {
   onAuthSuccess: () => void;
@@ -151,8 +152,8 @@ export const Auth: React.FC<AuthProps> = ({
         className="max-w-md w-full relative z-10 my-auto"
       >
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 hover:scale-105 transition-transform duration-300">
-             <div className="font-serif font-black text-xl italic">S</div>
+          <div className="inline-flex items-center justify-center p-3.5 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 hover:scale-105 transition-transform duration-300">
+            <ScolarisLogo variant="icon" size={38} colorClass="text-white" />
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">
             {mode === 'signin' ? 'Welcome Back' : 'Create Scholarly Space'}

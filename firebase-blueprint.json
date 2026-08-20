@@ -103,6 +103,26 @@
         "userAgent": { "type": "string" }
       },
       "required": ["event", "status", "timestamp"]
+    },
+    "user_files": {
+      "title": "UserFile",
+      "description": "Uploaded course materials and files isolated by user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "downloadUrl": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "courseCode": { "type": "string" },
+        "courseTitle": { "type": "string" }
+      },
+      "required": ["id", "userId", "fileName", "storagePath"]
     }
   },
   "firestore": {
@@ -113,6 +133,10 @@
     "/courses/{courseId}": {
       "schema": "courses",
       "description": "Courses collection"
+    },
+    "/user_files/{fileId}": {
+      "schema": "user_files",
+      "description": "User files collection isolated by user"
     },
     "/study_sessions/{sessionId}": {
       "schema": "study_sessions",

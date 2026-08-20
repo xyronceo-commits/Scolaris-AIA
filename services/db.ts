@@ -1,4 +1,4 @@
-import { db, auth } from '../lib/firebase';
+import { db, auth, storage } from '../lib/firebase';
 import { 
   doc, 
   getDoc, 
@@ -10,7 +10,55 @@ import {
   deleteDoc, 
   writeBatch 
 } from 'firebase/firestore';
-import { UserProfile, Course, StudySession, StudyGroup, StudyHubData, Difficulty, SubscriptionTier } from '../types';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { UserProfile, Course, StudySession, StudyGroup, StudyHubData, Difficulty, SubscriptionTier, UserFile } from '../types';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export const DBService = {
   // Profiles
@@ -520,6 +568,173 @@ export const DBService = {
       }
     } catch (err) {
       console.error('deleteGroupLocal error:', err);
+    }
+  },
+
+  // User Isolated File Storage
+  async getUserFiles(userId: string): Promise<UserFile[]> {
+    if (!userId) return [];
+    const cacheKey = `scolaris_user_private_v1_files_${userId}`;
+    const cached = localStorage.getItem(cacheKey);
+    let cachedFiles: UserFile[] = [];
+    if (cached) {
+      try { cachedFiles = JSON.parse(cached); } catch { cachedFiles = []; }
+    }
+
+    try {
+      const q = query(collection(db, 'user_files'), where('userId', '==', userId));
+      const querySnap = await getDocs(q);
+
+      const files: UserFile[] = [];
+      querySnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        files.push({
+          id: docSnap.id,
+          userId: d.userId,
+          courseId: d.courseId || '',
+          fileName: d.fileName || '',
+          fileType: d.fileType || '',
+          fileSize: d.fileSize || '',
+          storagePath: d.storagePath || '',
+          downloadUrl: d.downloadUrl || '',
+          uploadedAt: d.uploadedAt || new Date().toISOString(),
+          timestamp: d.timestamp || Date.now(),
+          courseCode: d.courseCode || '',
+          courseTitle: d.courseTitle || ''
+        });
+      });
+
+      // Sort by timestamp descending (most recent first)
+      files.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+      if (files.length > 0) {
+        localStorage.setItem(cacheKey, JSON.stringify(files));
+        return files;
+      }
+      return cachedFiles;
+    } catch (err) {
+      console.error('getUserFiles Firestore error:', err);
+      return cachedFiles;
+    }
+  },
+
+  async uploadFileToStorage(
+    userId: string, 
+    courseId: string, 
+    file: File, 
+    courseCode?: string, 
+    courseTitle?: string
+  ): Promise<UserFile> {
+    if (!userId) {
+      throw new Error('User must be authenticated to upload files');
+    }
+
+    const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    // Isolated storage path: users/{userId}/courses/{courseId}/{fileId}_{fileName}
+    const storagePath = `users/${userId}/courses/${courseId}/${fileId}_${sanitizedFileName}`;
+
+    let downloadUrl = '';
+    try {
+      const fileRef = ref(storage, storagePath);
+      await uploadBytes(fileRef, file);
+      downloadUrl = await getDownloadURL(fileRef);
+    } catch (storageErr) {
+      console.warn('Firebase Storage upload warning (metadata stored):', storageErr);
+    }
+
+    const formatSize = (bytes: number) => {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+
+    const userFile: UserFile = {
+      id: fileId,
+      userId: userId,
+      courseId: courseId,
+      fileName: file.name,
+      fileType: file.type || 'application/octet-stream',
+      fileSize: formatSize(file.size),
+      storagePath: storagePath,
+      downloadUrl: downloadUrl,
+      uploadedAt: new Date().toISOString(),
+      timestamp: Date.now(),
+      courseCode: courseCode || '',
+      courseTitle: courseTitle || ''
+    };
+
+    // Save metadata record in Firestore under user_files collection
+    try {
+      const docRef = doc(db, 'user_files', fileId);
+      await setDoc(docRef, userFile, { merge: true });
+    } catch (dbErr) {
+      console.error('Save user_files Firestore error:', dbErr);
+      handleFirestoreError(dbErr, OperationType.WRITE, `user_files/${fileId}`);
+    }
+
+    // Update local cache
+    const cacheKey = `scolaris_user_private_v1_files_${userId}`;
+    const cached = localStorage.getItem(cacheKey);
+    let cachedFiles: UserFile[] = [];
+    if (cached) {
+      try { cachedFiles = JSON.parse(cached); } catch { cachedFiles = []; }
+    }
+    cachedFiles = [userFile, ...cachedFiles.filter(f => f.id !== fileId)];
+    localStorage.setItem(cacheKey, JSON.stringify(cachedFiles));
+
+    return userFile;
+  },
+
+  async saveUserFileRecord(fileRecord: UserFile): Promise<{ error: any }> {
+    try {
+      const docRef = doc(db, 'user_files', fileRecord.id);
+      await setDoc(docRef, fileRecord, { merge: true });
+
+      const cacheKey = `scolaris_user_private_v1_files_${fileRecord.userId}`;
+      const cached = localStorage.getItem(cacheKey);
+      let list: UserFile[] = [];
+      if (cached) {
+        try { list = JSON.parse(cached); } catch { list = []; }
+      }
+      const idx = list.findIndex(f => f.id === fileRecord.id);
+      if (idx >= 0) list[idx] = fileRecord;
+      else list.unshift(fileRecord);
+      localStorage.setItem(cacheKey, JSON.stringify(list));
+
+      return { error: null };
+    } catch (err) {
+      console.error('saveUserFileRecord Firestore error:', err);
+      return { error: err };
+    }
+  },
+
+  async deleteUserFile(fileId: string, userId: string, storagePath?: string): Promise<void> {
+    try {
+      if (storagePath) {
+        try {
+          const fileRef = ref(storage, storagePath);
+          await deleteObject(fileRef);
+        } catch (e) {
+          console.warn('Storage file deletion warning:', e);
+        }
+      }
+
+      const docRef = doc(db, 'user_files', fileId);
+      await deleteDoc(docRef);
+
+      const cacheKey = `scolaris_user_private_v1_files_${userId}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const list: UserFile[] = JSON.parse(cached);
+          const filtered = list.filter(f => f.id !== fileId);
+          localStorage.setItem(cacheKey, JSON.stringify(filtered));
+        } catch {}
+      }
+    } catch (err) {
+      console.error('deleteUserFile error:', err);
+      handleFirestoreError(err, OperationType.DELETE, `user_files/${fileId}`);
     }
   }
 };

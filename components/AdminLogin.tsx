@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Shield, Lock, Mail, ArrowLeft, KeyRound, AlertCircle, Loader2 } from 'lucide-react';
 import { signInWithCustomToken } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import ScolarisLogo from './ScolarisLogo';
 
 interface AdminLoginProps {
   onLoginSuccess: (adminToken: string, user: { uid?: string; email: string; role: string }) => void;
@@ -68,11 +69,11 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
       <div className="w-full max-w-md relative z-10 space-y-8 p-6 sm:p-10">
         {/* Header Section */}
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 text-blue-400 border border-blue-500/30 shadow-lg mb-2">
-            <Shield className="w-8 h-8 text-blue-400" />
+          <div className="inline-flex items-center justify-center p-3.5 rounded-2xl bg-slate-800 text-white border border-slate-700 shadow-lg mb-2">
+            <ScolarisLogo variant="icon" size={36} colorClass="text-indigo-400" />
           </div>
           <h1 className="text-3xl font-serif font-bold text-white tracking-tight">
-            Scolaris Admin
+            Scolaris AI Admin
           </h1>
           <p className="text-xs text-slate-400 font-medium tracking-wide uppercase">
             Secure Administrator Portal

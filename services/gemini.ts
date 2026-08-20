@@ -12,8 +12,28 @@ function decode(base64: string) {
 }
 
 /**
- * Converts raw PCM 16-bit Mono data to a playable WAV Blob
+ * Validates media bytes structure before creating blob
  */
+function validateAudioBytes(bytes: Uint8Array): { valid: boolean; error?: string } {
+  if (!bytes || bytes.length < 44) {
+    return { valid: false, error: 'The audio buffer is missing or too short to contain a valid media header (< 44 bytes).' };
+  }
+
+  // RIFF header check
+  const isRiff = bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70;
+  if (isRiff) {
+    const isWave = bytes[8] === 87 && bytes[9] === 65 && bytes[10] === 86 && bytes[11] === 69;
+    if (!isWave) {
+      return { valid: false, error: 'The audio stream container is missing the WAVE header.' };
+    }
+    const isFmt = bytes[12] === 102 && bytes[13] === 109 && bytes[14] === 116 && bytes[15] === 32;
+    if (!isFmt) {
+      return { valid: false, error: 'The audio stream is missing the fmt subchunk header.' };
+    }
+  }
+
+  return { valid: true };
+}
 function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
   const header = new ArrayBuffer(44);
   const view = new DataView(header);
@@ -270,15 +290,21 @@ export const GeminiService = {
       if (data?.audioBase64) {
         try {
           const bytes = decode(data.audioBase64);
-          if (bytes.length > 12 && bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70) {
+          const validation = validateAudioBytes(bytes);
+          if (!validation.valid) {
+            console.error('Audio stream validation failed:', validation.error);
+            throw new Error(`Corrupt audio output: ${validation.error}`);
+          }
+
+          if (bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70) {
             const blob = new Blob([bytes], { type: 'audio/wav' });
             wavUrl = URL.createObjectURL(blob);
           } else {
             const wavBlob = pcmToWav(bytes, 16000);
             wavUrl = URL.createObjectURL(wavBlob);
           }
-        } catch (err) {
-          console.error('Error decoding audio stream:', err);
+        } catch (err: any) {
+          console.error('Error validating or decoding audio stream:', err);
         }
       }
     } catch (apiErr: any) {

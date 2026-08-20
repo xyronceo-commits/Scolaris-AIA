@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  
+  <g filter="url(#glow)">
+    <!-- Mortarboard Diamond Outline Top -->
+    <polygon points="256,36 468,156 256,276 44,156" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linejoin="round"/>
+    
+    <!-- Vertical Center Divider -->
+    <line x1="256" y1="36" x2="256" y2="276" stroke="#FFFFFF" stroke-width="8" stroke-dasharray="6,4"/>
+
+    <!-- LEFT HEMISPHERE: Human Brain Anatomy Folds -->
+    <g fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Frontal / Parietal / Temporal / Occipital Cortex loops -->
+      <path d="M 240,65 C 200,60 160,85 130,115 C 105,140 90,165 100,190 C 110,215 140,240 180,250 C 210,258 235,245 245,225" />
+      <path d="M 235,90 C 200,95 170,120 150,145 C 135,165 135,190 155,205 C 175,220 210,215 235,195" />
+      <path d="M 220,115 C 190,120 175,140 170,165 C 168,185 185,195 210,185" />
+      <path d="M 245,115 C 225,125 210,140 215,160 C 220,175 240,170 248,155" />
+      <path d="M 195,80 C 175,95 150,125 140,150" />
+      <path d="M 170,190 C 150,205 135,215 125,200" />
+      <path d="M 225,235 C 200,240 175,230 160,215" />
+      <path d="M 245,140 C 235,145 230,155 235,165 C 240,172 248,168 248,160" />
+    </g>
+
+    <!-- RIGHT HEMISPHERE: AI Digital Circuit Board / Neural Network -->
+    <g fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Main Bus Lines & Chip Traces -->
+      <path d="M 270,60 L 330,60 L 380,100 L 420,100" />
+      <path d="M 270,95 L 310,95 L 340,125 L 390,125 L 430,150" />
+      <path d="M 270,130 L 295,130 L 320,155 L 370,155 L 400,180" />
+      <path d="M 270,165 L 310,165 L 335,190 L 380,190" />
+      <path d="M 270,200 L 290,200 L 320,230 L 360,230" />
+      <path d="M 270,235 L 300,235 L 325,255" />
+
+      <!-- Vertical Branch Traces -->
+      <path d="M 330,60 L 330,90" />
+      <path d="M 380,100 L 380,140" />
+      <path d="M 320,155 L 320,185" />
+      <path d="M 370,155 L 370,210" />
+      <path d="M 310,95 L 310,145" />
+
+      <!-- Square Microchip / Processor Core Matrix -->
+      <rect x="335" y="135" width="22" height="22" fill="#FFFFFF" rx="3" stroke="none"/>
+    </g>
+
+    <!-- Circuit Connection Nodes (Terminal Circles) -->
+    <g fill="#FFFFFF">
+      <circle cx="330" cy="60" r="6" />
+      <circle cx="420" cy="100" r="6" />
+      <circle cx="390" cy="125" r="6" />
+      <circle cx="430" cy="150" r="6" />
+      <circle cx="400" cy="180" r="6" />
+      <circle cx="380" cy="190" r="6" />
+      <circle cx="360" cy="230" r="6" />
+      <circle cx="325" cy="255" r="6" />
+      <circle cx="380" cy="140" r="5" />
+      <circle cx="320" cy="185" r="5" />
+      <circle cx="310" cy="145" r="5" />
+    </g>
+
+    <!-- Skullcap Base under Mortarboard -->
+    <path d="M 148,206 L 256,262 L 364,206 L 364,260 C 364,300 315,335 256,335 C 197,335 148,300 148,260 Z" fill="#FFFFFF"/>
+    
+    <!-- Skullcap Inner Shadow / Outline definition -->
+    <path d="M 148,206 L 256,262 L 364,206" fill="none" stroke="#FFFFFF" stroke-width="8"/>
+
+    <!-- Tassel Loop & Dangling String on Right Side -->
+    <circle cx="468" cy="156" r="8" fill="#FFFFFF"/>
+    <path d="M 468,164 C 472,210 475,250 472,295" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+    
+    <!-- Tassel Ring & Fringe Bulb -->
+    <circle cx="472" cy="302" r="9" fill="#FFFFFF"/>
+    <path d="M 462,312 L 482,312 L 487,370 L 457,370 Z" fill="#FFFFFF"/>
+  </g>
+
+  <!-- Centered Typography: Scolaris AI -->
+  <text x="256" y="456" text-anchor="middle" font-family="'Inter', 'SF Pro Display', -apple-system, sans-serif" font-weight="800" font-size="54" fill="#FFFFFF" letter-spacing="-0.5">Scolaris AI</text>
+</svg>

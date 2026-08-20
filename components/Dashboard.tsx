@@ -3,6 +3,8 @@ import React from 'react';
 import { UserProfile, Course, StudySession } from '../types';
 import { ICONS, DAYS, DIFFICULTY_COLORS } from '../constants';
 import { UserAvatar } from './UserAvatar';
+import { RecentFiles } from './RecentFiles';
+import { auth } from '../lib/firebase';
 import { Globe, ArrowRight } from 'lucide-react';
 
 interface DashboardProps {
@@ -271,6 +273,15 @@ const Dashboard: React.FC<DashboardProps> = ({ profile, courses, schedule, onOpe
                </div>
             ))}
          </div>
+      </section>
+
+      {/* User Isolated Storage Recent Files */}
+      <section className="pt-2">
+        <RecentFiles 
+          userId={auth.currentUser?.uid || ''} 
+          courses={courses} 
+          onOpenHub={onOpenHub} 
+        />
       </section>
     </div>
   );

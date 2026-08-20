@@ -1,6 +1,6 @@
 {
   "name": "Scolaris AI",
-  "description": "A refined academic workspace for university students featuring AI-powered study planning, collaborative research hubs, and automated lecture synthesizers.",
+  "description": "Scolaris AI helps students turn their course materials into smarter study resources, understand difficult topics, practise, revise, and learn more effectively with AI.",
   "requestFramePermissions": [
     "camera",
     "microphone"

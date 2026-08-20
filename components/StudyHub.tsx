@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState } from '../types';
+import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState, UserFile } from '../types';
 import { ICONS } from '../constants';
 import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
+import { auth } from '../lib/firebase';
 import ReactMarkdown from 'react-markdown';
-import PodcastPlayer from './PodcastPlayer';
+import { RecentFiles } from './RecentFiles';
 
 // Component for individual flashcards in Grid View
 const FlashcardItem: React.FC<{ card: Flashcard; index: number }> = ({ card, index }) => {
@@ -67,9 +68,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
   onCourseIdChange
 }) => {
   const [activeCourseId, setActiveCourseId] = useState(selectedCourseId || (courses[0]?.id || ''));
-  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'podcast' | 'library' | 'scanner'>('summary');
+  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner'>('summary');
   const [loading, setLoading] = useState(false);
-  const [podcastError, setPodcastError] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
@@ -84,7 +84,36 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const scannerFileInputRef = useRef<HTMLInputElement>(null);
 
   const [isUploadingLibrary, setIsUploadingLibrary] = useState(false);
+  const [refreshFilesTrigger, setRefreshFilesTrigger] = useState(0);
+  const [isSessionFileActive, setIsSessionFileActive] = useState(false);
   const libraryFileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [libraryFilter, setLibraryFilter] = useState<'recent' | 'all'>('recent');
+  const [userFiles, setUserFiles] = useState<UserFile[]>([]);
+
+  useEffect(() => {
+    const fetchUserFiles = async () => {
+      const userId = auth.currentUser?.uid;
+      if (userId) {
+        try {
+          const files = await DBService.getUserFiles(userId);
+          setUserFiles(files);
+        } catch (err) {
+          console.error('Failed to fetch user files:', err);
+        }
+      }
+    };
+    fetchUserFiles();
+  }, [auth.currentUser?.uid, refreshFilesTrigger]);
+
+  const handleSelectRecentFile = (file: UserFile) => {
+    if (file.courseId) {
+      setActiveCourseId(file.courseId);
+    }
+    setIsSessionFileActive(true);
+    addNotification('content', 'File Loaded', `Loaded ${file.fileName} into Study Hub`, 'hub');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     if (activeCourseId) {
@@ -110,62 +139,28 @@ const StudyHub: React.FC<StudyHubProps> = ({
     if (!file || !activeCourseId) return;
 
     setIsUploadingLibrary(true);
-    addNotification('content', 'File Uploading', `Uploading ${file.name} to Supabase S3 storage...`, 'hub');
+    addNotification('content', 'File Uploading', `Uploading ${file.name} to isolated user storage...`, 'hub');
 
     try {
-      const base64 = await fileToBase64(file);
+      const activeCourse = courses.find(c => c.id === activeCourseId);
+      const userId = auth.currentUser?.uid || 'user_anonymous';
 
-      const response = await fetch('/api/s3/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type,
-          contentBase64: base64
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('S3 Proxy endpoint returned status ' + response.status);
-      }
-
-      const uploadResult = await response.json();
-
-      if (uploadResult.success) {
-        const newFile: LibraryFile = {
-          id: Math.random().toString(36).substring(2, 9),
-          fileName: file.name,
-          fileType: file.type || 'application/octet-stream',
-          fileSize: (file.size / 1024).toFixed(1) + ' KB',
-          s3Key: uploadResult.key,
-          s3Url: uploadResult.publicUrl,
-          timestamp: Date.now()
-        };
-
-        const existingFiles = activeHub.libraryFiles || [];
-        const updatedHub = {
-          ...activeHub,
-          libraryFiles: [newFile, ...existingFiles]
-        } as StudyHubData;
-
-        setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
-        await DBService.saveHub(updatedHub);
-        addNotification('content', 'Upload Complete', `${file.name} successfully stored in secure storage!`, 'hub');
-      } else {
-        throw new Error(uploadResult.error || 'Unknown upload error');
-      }
-
-    } catch (err: any) {
-      console.warn('S3 store failed. Falling back to local simulation.', err?.message);
+      const userFile = await DBService.uploadFileToStorage(
+        userId,
+        activeCourseId,
+        file,
+        activeCourse?.code,
+        activeCourse?.title
+      );
 
       const newFile: LibraryFile = {
-        id: Math.random().toString(36).substring(2, 9),
+        id: userFile.id,
         fileName: file.name,
         fileType: file.type || 'application/octet-stream',
-        fileSize: (file.size / 1024).toFixed(1) + ' KB',
-        s3Key: `simulated/${Date.now()}-${file.name}`,
-        s3Url: '',
-        timestamp: Date.now()
+        fileSize: userFile.fileSize,
+        s3Key: userFile.storagePath,
+        s3Url: userFile.downloadUrl || '',
+        timestamp: userFile.timestamp
       };
 
       const existingFiles = activeHub.libraryFiles || [];
@@ -176,7 +171,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
       setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
       await DBService.saveHub(updatedHub);
-      addNotification('content', 'Upload Complete', `${file.name} added to Course Library (local).`, 'hub');
+      setRefreshFilesTrigger(prev => prev + 1);
+      addNotification('content', 'Upload Complete', `${file.name} successfully saved to your isolated storage!`, 'hub');
+
+    } catch (err: any) {
+      console.warn('Isolated storage upload failed:', err?.message || err);
+      addNotification('content', 'Upload Warning', `Could not save ${file.name} to storage.`, 'hub');
     } finally {
       setIsUploadingLibrary(false);
       if (libraryFileInputRef.current) libraryFileInputRef.current.value = '';
@@ -290,31 +290,78 @@ const StudyHub: React.FC<StudyHubProps> = ({
     if (!file) return;
 
     setIsExtracting(true);
-    addNotification('content', 'Processing File', `Scolaris is reading and analyzing ${file.name}...`, 'hub');
+    setIsSessionFileActive(true);
+    addNotification('content', 'Processing File', `Reading and extracting text from ${file.name}...`, 'hub');
 
     try {
       const base64 = await fileToBase64(file);
       const res = await GeminiService.extractFileText(file.name, file.type, base64);
       
+      let content = '';
       if (res.success && res.extractedText) {
-        const content = res.extractedText;
+        content = res.extractedText;
+      } else {
+        const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
+        if (!isPlainTextFile) {
+          throw new Error(res.error || "We couldn't read this document correctly. Please try uploading another copy.");
+        }
+      }
+
+      if (content || file.type.startsWith('text/')) {
+        if (!content) {
+          content = await file.text();
+        }
+
         setFileContent(content);
         const name = file.name;
+
+        // Save file to user-isolated Firebase Storage & Firestore
+        const userId = auth.currentUser?.uid;
+        if (userId && activeCourseId) {
+          const activeCourse = courses.find(c => c.id === activeCourseId);
+          try {
+            await DBService.uploadFileToStorage(
+              userId,
+              activeCourseId,
+              file,
+              activeCourse?.code,
+              activeCourse?.title
+            );
+          } catch (stErr) {
+            console.warn('Isolated storage save warning:', stErr);
+          }
+        }
+        
+        // Summarize uploaded file
+        addNotification('content', 'Summarizing Document', `Summarizing core takeaways from ${name}...`, 'hub');
+        let summaryText = '';
+        try {
+          const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
+          if (sumRes) {
+            summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
+          }
+        } catch (sumErr) {
+          console.warn('Summary generation warning:', sumErr);
+        }
+
         const updatedHub = { 
           ...activeHub, 
           fileContent: content, 
-          fileName: name 
+          fileName: '',
+          summary: summaryText || activeHub.summary
         } as StudyHubData;
-        setHubs({ ...hubs, [activeCourseId]: updatedHub });
+
+        setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
         await DBService.saveHub(updatedHub);
-        addNotification('content', 'Analysis Ready', `Successfully extracted clean text from ${file.name}!`, 'hub');
+        setRefreshFilesTrigger(prev => prev + 1);
+        addNotification('content', 'Summary Ready', `Read and summarized core takeaways from ${name}!`, 'hub');
+        setActiveTool('summary');
       } else {
-        const errMsg = res.error || (res.isScannedPdf ? "This PDF appears to be scanned or image-based. Text extraction isn't available for this file yet." : "We couldn't read this document correctly. Please try uploading another copy.");
+        const errMsg = res.error || "We couldn't read this document correctly. Please try uploading another copy.";
         throw new Error(errMsg);
       }
     } catch (err: any) {
-      console.warn("Server file extraction failed/rejected:", err?.message || err);
-      // ONLY fallback to local readAsText if it is genuinely a plain text file (.txt, .md, .csv)
+      console.warn("Server file processing failed:", err?.message || err);
       const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
       
       if (isPlainTextFile) {
@@ -324,19 +371,35 @@ const StudyHub: React.FC<StudyHubProps> = ({
           if (content && content.trim().length > 0) {
             setFileContent(content);
             const name = file.name;
+
+            // Generate summary for plain text
+            let summaryText = '';
+            try {
+              const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
+              if (sumRes) {
+                summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
+              }
+            } catch (sumErr) {
+              console.warn('Summary warning:', sumErr);
+            }
+
             const updatedHub = { 
               ...activeHub, 
               fileContent: content, 
-              fileName: name 
+              fileName: '',
+              summary: summaryText || activeHub.summary
             } as StudyHubData;
-            setHubs({ ...hubs, [activeCourseId]: updatedHub });
+
+            setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
             await DBService.saveHub(updatedHub);
-            addNotification('content', 'Loaded Text', `Loaded ${file.name} as standard text.`, 'hub');
+            setRefreshFilesTrigger(prev => prev + 1);
+            addNotification('content', 'Summary Ready', `Loaded and summarized ${file.name}.`, 'hub');
+            setActiveTool('summary');
           }
         };
         reader.readAsText(file);
       } else {
-        const alertMsg = err?.message || "We couldn't read this document correctly. Please try uploading another copy or text-based material.";
+        const alertMsg = err?.message || "We couldn't read this document correctly. Please try uploading another copy.";
         addNotification('content', 'Extraction Warning', alertMsg, 'hub');
         alert(alertMsg);
       }
@@ -417,24 +480,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
     }
   };
 
-  const generatePodcast = async () => {
-    const topicText = fileContent || activeHub.summary || (currentCourse ? `${currentCourse.code}: ${currentCourse.title}` : 'Academic course materials');
-    setLoading(true);
-    setPodcastError(null);
-    try {
-      const { script, wavUrl } = await GeminiService.generatePodcast(topicText);
-      const updatedHub = { ...activeHub, podcastUrl: wavUrl, transcript: script } as StudyHubData;
-      setHubs({ ...hubs, [activeCourseId]: updatedHub });
-      await DBService.saveHub(updatedHub);
-      addNotification('content', 'Seminar Podcast Ready', `The audio seminar for ${currentCourse?.code || 'Course'} is now available.`, 'hub');
-    } catch (err: any) {
-      console.error('Podcast generation failed:', err);
-      setPodcastError("We couldn't generate your podcast right now. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleShareToGroup = (groupId: string) => {
     if (!currentCourse) return;
 
@@ -470,7 +515,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
     { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
     { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
     { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: 'Timed Exam' },
-    { id: 'podcast', label: 'Podcast', icon: ICONS.Audio, desc: 'Audio Seminar' },
   ];
 
   return (
@@ -540,21 +584,59 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   {ICONS.Plus}
                 </div>
                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest relative z-10">
-                  {activeHub.fileName ? "Replace Document" : "Upload Document"}
+                  Upload Document
                 </p>
-                {activeHub.fileName && (
-                  <div className="mt-3 py-1.5 px-4 bg-emerald-50 text-emerald-600 text-[9px] font-bold uppercase rounded-xl border border-emerald-100 inline-block relative z-10 truncate max-w-[180px]">
-                    {activeHub.fileName}
-                  </div>
-                )}
-                {!activeHub.fileName && fileContent && (
-                  <div className="mt-3 py-1.5 px-4 bg-emerald-50 text-emerald-600 text-[9px] font-bold uppercase rounded-xl border border-emerald-100 inline-block relative z-10">
-                    File Ready
-                  </div>
-                )}
               </div>
             )}
           </div>
+
+          {/* Recently Uploaded Quick List */}
+          {(() => {
+            const courseRecentFiles = userFiles.filter(f => 
+              (!activeCourseId || f.courseId === activeCourseId)
+            ).slice(0, 3);
+
+            if (courseRecentFiles.length === 0) return null;
+
+            return (
+              <div className="bg-white p-5 rounded-[2rem] space-y-3 border border-slate-100 shadow-sm animate-in fade-in">
+                <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  <span className="flex items-center gap-1.5 font-sans">
+                    <FileText size={12} className="text-indigo-600" />
+                    Recently Uploaded
+                  </span>
+                  <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[8px] font-mono font-bold">
+                    Quick Load
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {courseRecentFiles.map(file => (
+                    <button
+                      key={file.id}
+                      onClick={() => handleSelectRecentFile(file)}
+                      className="w-full text-left p-2.5 bg-slate-50/80 hover:bg-indigo-50/70 rounded-xl border border-slate-100 hover:border-indigo-200 transition-all text-xs font-semibold text-slate-700 flex items-center justify-between gap-2 group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText size={13} className="text-indigo-600 shrink-0" />
+                        <span className="truncate font-sans text-[11px] font-bold text-slate-800">{file.fileName}</span>
+                      </div>
+                      <ArrowUpRight size={12} className="text-slate-300 group-hover:text-indigo-600 shrink-0 transition-colors" />
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('recent-files-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="w-full py-1 text-center text-[9px] font-bold uppercase tracking-wider text-indigo-600 hover:text-indigo-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span>Full Document Library Below</span>
+                  <span>↓</span>
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Tools Grid - Adaptive */}
           <div className="grid grid-cols-2 lg:grid-cols-1 gap-4">
@@ -598,17 +680,20 @@ const StudyHub: React.FC<StudyHubProps> = ({
             </div>
           )}
 
-          {!fileContent && !activeHub.summary && (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in zoom-in duration-700">
-              <div className="p-16 bg-slate-50 rounded-[4rem] mb-12 text-blue-300 relative group border border-slate-100">
-                <Sparkles size={72} className="relative z-10" />
+          {!isSessionFileActive ? (
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in zoom-in duration-700 min-h-[400px]">
+              <div className="p-12 bg-blue-50/60 rounded-[3rem] mb-8 text-blue-500 border border-blue-100 shadow-xs">
+                <Sparkles size={56} className="relative z-10" />
               </div>
-              <h3 className="text-3xl sm:text-4xl font-serif font-bold text-slate-900 mb-6 tracking-tight">Upload Study Material</h3>
-              <p className="max-w-md text-slate-500 leading-relaxed text-lg sm:text-xl font-medium">Your studio is ready. Add your syllabus, notes, or research papers to unlock advanced study tools.</p>
+              <h3 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mb-3 tracking-tight">
+                Upload or Select Study Material
+              </h3>
+              <p className="max-w-md text-slate-500 leading-relaxed text-sm sm:text-base font-medium">
+                Upload a document above or click any saved file in <span className="font-bold text-indigo-600">Recent Courses &amp; Files</span> below to view or generate summaries, flashcards, quizzes, and podcasts.
+              </p>
             </div>
-          )}
-
-          <div className="page-transition">
+          ) : (
+            <div className="page-transition">
             {activeTool === 'summary' && activeHub.summary && (
               <div className="space-y-12">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-10 gap-4">
@@ -1397,63 +1482,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
               </div>
             )}
 
-            {activeTool === 'podcast' && (
-              <div className="space-y-8 animate-in fade-in duration-500">
-                {loading ? (
-                  <div className="flex flex-col items-center justify-center p-12 bg-slate-900 text-white rounded-[2.5rem] border border-slate-800 text-center gap-6 shadow-2xl">
-                    <Loader2 size={40} className="text-blue-400 animate-spin" />
-                    <div className="space-y-2">
-                      <h3 className="text-xl font-serif font-bold text-white">Generating AI Revision Podcast...</h3>
-                      <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                        Groq AI is analyzing your study material and synthesizing a conversational audio seminar between Alex and Dr. Taylor.
-                      </p>
-                    </div>
-                  </div>
-                ) : podcastError ? (
-                  <div className="flex flex-col items-center justify-center p-10 bg-red-50 dark:bg-red-950/40 rounded-[2.5rem] border border-red-200 dark:border-red-900/60 text-center gap-4">
-                    <AlertCircle className="w-12 h-12 text-red-500" />
-                    <p className="text-sm font-semibold text-red-700 dark:text-red-300 max-w-md">
-                      {podcastError}
-                    </p>
-                    <button
-                      onClick={generatePodcast}
-                      className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-2xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md"
-                    >
-                      <RefreshCw size={14} />
-                      <span>Try Again</span>
-                    </button>
-                  </div>
-                ) : (activeHub.podcastUrl || activeHub.transcript) ? (
-                  <PodcastPlayer
-                    src={activeHub.podcastUrl || undefined}
-                    title={`${currentCourse?.title || 'Academic'} Revision Podcast`}
-                    subtitle={`AI Seminar & Audio Summary for ${currentCourse?.code || 'Course'}`}
-                    transcript={activeHub.transcript}
-                    onRegenerate={generatePodcast}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center p-10 sm:p-14 bg-slate-50/80 rounded-[2.5rem] border border-slate-100 text-center gap-6">
-                    <div className="w-20 h-20 bg-blue-100/80 text-blue-700 rounded-3xl flex items-center justify-center shadow-inner">
-                      {ICONS.Audio}
-                    </div>
-                    <div className="max-w-md space-y-2">
-                      <h3 className="text-2xl font-serif font-bold text-slate-900">AI Seminar Podcast</h3>
-                      <p className="text-sm text-slate-500 font-medium">
-                        Generate an interactive audio seminar dialogue between AI professors covering the key revision concepts for {currentCourse?.code || 'this course'}.
-                      </p>
-                    </div>
-                    <button 
-                      onClick={generatePodcast} 
-                      className="px-8 py-4 bg-blue-700 hover:bg-blue-800 text-white rounded-2xl font-bold shadow-md transition-all flex items-center gap-3 text-sm cursor-pointer"
-                    >
-                      <Sparkles size={18} />
-                      <span>Generate AI Revision Podcast</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
             {activeTool === 'library' && (
               <div className="space-y-10 animate-in fade-in duration-500">
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-6 border-b border-slate-100 pb-8">
@@ -1512,89 +1540,167 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                 {/* Stored Documents List */}
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      Archived Materials ({(activeHub.libraryFiles || []).length})
-                    </h4>
-                  </div>
+                  {(() => {
+                    const allFiles = activeHub.libraryFiles || [];
+                    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+                    const recentFiles = allFiles.filter(f => f.timestamp >= cutoff);
+                    const displayedRecent = recentFiles.length > 0 ? recentFiles : allFiles.slice(0, 3);
+                    const displayedFiles = libraryFilter === 'recent' ? displayedRecent : allFiles;
 
-                  {(!activeHub.libraryFiles || activeHub.libraryFiles.length === 0) ? (
-                    <div className="text-center p-12 bg-slate-50/50 rounded-[2rem] border border-slate-100">
-                      <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center mx-auto mb-4">
-                        <Folder size={18} />
-                      </div>
-                      <h5 className="font-bold text-slate-700 text-xs uppercase tracking-wider mb-1">Library is empty</h5>
-                      <p className="text-[11px] text-slate-500 font-medium">No custom syllabus or notes added for this course yet.</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {activeHub.libraryFiles.map((file) => {
-                        const isPdf = file.fileName.toLowerCase().endsWith('.pdf') || file.fileType?.includes('pdf');
-                        const isDocx = file.fileName.toLowerCase().endsWith('.docx') || file.fileType?.includes('document');
-                        const fileColorClass = isPdf 
-                          ? 'bg-rose-50 text-rose-600 border-rose-100' 
-                          : isDocx 
-                            ? 'bg-blue-50 text-blue-600 border-blue-100' 
-                            : 'bg-indigo-50 text-indigo-600 border-indigo-100';
-
-                        return (
-                          <div 
-                            key={file.id} 
-                            className="bg-white border border-slate-100 hover:border-slate-200 rounded-[2rem] p-6 flex flex-col justify-between h-44 group transition-all shadow-sm"
-                          >
-                            <div className="flex items-start gap-4">
-                              <div className={`w-12 h-12 shrink-0 ${fileColorClass} rounded-2xl flex items-center justify-center border group-hover:scale-105 transition-transform`}>
-                                <File size={22} />
-                              </div>
-                              <div className="space-y-1 flex-1 min-w-0">
-                                <h5 
-                                  className="text-[13px] font-bold text-slate-800 leading-snug truncate uppercase font-serif italic"
-                                  title={file.fileName}
-                                >
-                                  {file.fileName}
-                                </h5>
-                                <div className="flex items-center gap-2 flex-wrap text-[9px] font-mono font-bold uppercase tracking-wide">
-                                  <span className="text-slate-400 font-sans font-medium">{file.fileSize || 'N/A'}</span>
-                                  <span className="text-slate-300">•</span>
-                                  <span className="text-slate-400 font-sans font-medium">
-                                    {new Date(file.timestamp).toLocaleDateString()}
-                                  </span>
-                                  {!file.s3Key.startsWith('simulated/') && (
-                                    <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded leading-none text-[8px] border border-indigo-100 font-black">
-                                      S3 Core
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
+                    return (
+                      <>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-xs font-bold uppercase tracking-widest text-slate-700">
+                                {libraryFilter === 'recent' ? 'Recently Uploaded Documents' : 'All Course Materials'}
+                              </h4>
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 font-bold rounded-full text-[10px]">
+                                {displayedFiles.length} {displayedFiles.length === 1 ? 'file' : 'files'}
+                              </span>
                             </div>
-
-                            <div className="flex items-center justify-between pt-4 border-t border-slate-50/80">
-                              <button 
-                                onClick={() => handleDeleteLibraryFile(file.id)}
-                                className="p-2 bg-slate-50 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
-                                title="Delete from Library"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-
-                              <button 
-                                onClick={() => handleAccessLibraryFile(file)}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white hover:bg-indigo-600 rounded-xl text-[9px] font-mono uppercase tracking-widest font-black transition-all cursor-pointer shadow-sm active:scale-95"
-                              >
-                                <Download size={11} /> Access File
-                              </button>
-                            </div>
+                            <p className="text-[11px] text-slate-500 font-medium">
+                              {libraryFilter === 'recent'
+                                ? 'Filtered to display recently uploaded course files in the main view.'
+                                : 'Displaying complete archived course documents.'}
+                            </p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+
+                          {/* Filter Toggle */}
+                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+                            <button
+                              onClick={() => setLibraryFilter('recent')}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                                libraryFilter === 'recent'
+                                  ? 'bg-white text-indigo-600 shadow-xs'
+                                  : 'text-slate-500 hover:text-slate-900'
+                              }`}
+                            >
+                              Recently Uploaded
+                            </button>
+                            <button
+                              onClick={() => setLibraryFilter('all')}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                                libraryFilter === 'all'
+                                  ? 'bg-white text-indigo-600 shadow-xs'
+                                  : 'text-slate-500 hover:text-slate-900'
+                              }`}
+                            >
+                              All Documents ({allFiles.length})
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Informative Callout Banner */}
+                        <div className="p-4 bg-indigo-50/80 border border-indigo-100/90 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-950 font-medium">
+                          <div className="flex items-center gap-2.5">
+                            <Sparkles size={16} className="text-indigo-600 shrink-0" />
+                            <span>
+                              {libraryFilter === 'recent'
+                                ? 'Only recently uploaded documents appear in this main view. Access your searchable full document library across all courses below.'
+                                : 'Full course list active. You can also search your entire multi-course file archive in the dedicated section below.'}
+                            </span>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              const el = document.getElementById('recent-files-section');
+                              if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-xs flex items-center gap-1.5"
+                          >
+                            <span>Full Document Library</span>
+                            <ArrowUpRight size={12} />
+                          </button>
+                        </div>
+
+                        {displayedFiles.length === 0 ? (
+                          <div className="text-center p-12 bg-slate-50/50 rounded-[2rem] border border-slate-100">
+                            <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center mx-auto mb-4">
+                              <Folder size={18} />
+                            </div>
+                            <h5 className="font-bold text-slate-700 text-xs uppercase tracking-wider mb-1">No Recent Files</h5>
+                            <p className="text-[11px] text-slate-500 font-medium max-w-sm mx-auto">
+                              No materials uploaded recently for this course. Upload a new document above or switch to 'All Documents'.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {displayedFiles.map((file) => {
+                              const isPdf = file.fileName.toLowerCase().endsWith('.pdf') || file.fileType?.includes('pdf');
+                              const isDocx = file.fileName.toLowerCase().endsWith('.docx') || file.fileType?.includes('document');
+                              const fileColorClass = isPdf 
+                                ? 'bg-rose-50 text-rose-600 border-rose-100' 
+                                : isDocx 
+                                  ? 'bg-blue-50 text-blue-600 border-blue-100' 
+                                  : 'bg-indigo-50 text-indigo-600 border-indigo-100';
+
+                              return (
+                                <div 
+                                  key={file.id} 
+                                  className="bg-white border border-slate-100 hover:border-slate-200 rounded-[2rem] p-6 flex flex-col justify-between h-44 group transition-all shadow-sm"
+                                >
+                                  <div className="flex items-start gap-4">
+                                    <div className={`w-12 h-12 shrink-0 ${fileColorClass} rounded-2xl flex items-center justify-center border group-hover:scale-105 transition-transform`}>
+                                      <File size={22} />
+                                    </div>
+                                    <div className="space-y-1 flex-1 min-w-0">
+                                      <h5 
+                                        className="text-[13px] font-bold text-slate-800 leading-snug truncate uppercase font-serif italic"
+                                        title={file.fileName}
+                                      >
+                                        {file.fileName}
+                                      </h5>
+                                      <div className="flex items-center gap-2 flex-wrap text-[9px] font-mono font-bold uppercase tracking-wide">
+                                        <span className="text-slate-400 font-sans font-medium">{file.fileSize || 'N/A'}</span>
+                                        <span className="text-slate-300">•</span>
+                                        <span className="text-slate-400 font-sans font-medium">
+                                          {new Date(file.timestamp).toLocaleDateString()}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center justify-between pt-4 border-t border-slate-50/80">
+                                    <button 
+                                      onClick={() => handleDeleteLibraryFile(file.id)}
+                                      className="p-2 bg-slate-50 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                                      title="Delete from Library"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+
+                                    <button 
+                                      onClick={() => handleAccessLibraryFile(file)}
+                                      className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white hover:bg-indigo-600 rounded-xl text-[9px] font-mono uppercase tracking-widest font-black transition-all cursor-pointer shadow-sm active:scale-95"
+                                    >
+                                      <Download size={11} /> Access File
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
+
+      {/* User Isolated Storage Recent Files */}
+      <section id="recent-files-section" className="pt-8 border-t border-slate-100 mt-8 scroll-mt-6">
+        <RecentFiles 
+          userId={auth.currentUser?.uid || ''} 
+          courses={courses} 
+          onSelectFile={handleSelectRecentFile}
+          refreshTrigger={refreshFilesTrigger}
+        />
+      </section>
     </div>
   );
 };
