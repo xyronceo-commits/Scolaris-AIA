@@ -33,11 +33,6 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-50/50 rounded-full blur-[100px] pointer-events-none -z-10" />
         
         <div className="max-w-3xl mx-auto text-center space-y-6">
-          <div className="inline-flex items-center gap-2 px-2 py-1 bg-blue-50 border border-blue-100 rounded-full animate-in slide-in-from-top-4 duration-700">
-             <div className="w-1 h-1 bg-blue-600 rounded-full animate-pulse" />
-             <span className="text-[7px] font-bold text-blue-700 uppercase tracking-[0.2em]">AI-powered academic productivity</span>
-          </div>
-
           <h1 className="text-2xl md:text-4xl font-serif font-bold tracking-tighter text-slate-900 leading-[1.1] animate-in fade-in zoom-in duration-1000">
             Study smarter,<br />not harder.
           </h1>

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { Course, UserProfile, StudySession, AppState, StudyHubData, StudyGroup, AppNotification } from './types';
 import { ICONS } from './constants';
-import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock, Sun, Moon } from 'lucide-react';
+import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock, Sun, Moon, CheckCheck, Trash2 } from 'lucide-react';
 import Onboarding from './components/Onboarding';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
@@ -346,12 +346,122 @@ const App: React.FC = () => {
     setNotifications(prev => [newNotification, ...prev]);
   };
 
+  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
+  const [isClearingNotifications, setIsClearingNotifications] = useState(false);
+  const notificationScrollRef = useRef<HTMLDivElement>(null);
+
+  // Default initial notifications if empty
+  useEffect(() => {
+    if (notifications.length === 0 && authUser) {
+      setNotifications([
+        {
+          id: 'notif-1',
+          type: 'content',
+          title: 'Welcome to Scolaris AI',
+          message: 'Your AI Academic Studio is active. Explore your dashboard and generate study plans!',
+          timestamp: Date.now() - 1000 * 60 * 5,
+          read: false,
+          link: 'dashboard'
+        },
+        {
+          id: 'notif-2',
+          type: 'session',
+          title: 'Upcoming Study Session',
+          message: 'Revision session scheduled. Review flashcards & study notes for your courses.',
+          timestamp: Date.now() - 1000 * 60 * 25,
+          read: false,
+          link: 'schedule'
+        },
+        {
+          id: 'notif-3',
+          type: 'message',
+          title: 'AI Study Assistant Ready',
+          message: 'Ask Scolaris AI anything about your course materials or generate an AI podcast.',
+          timestamp: Date.now() - 1000 * 60 * 90,
+          read: false,
+          link: 'hub'
+        },
+        {
+          id: 'notif-4',
+          type: 'content',
+          title: 'Study Circle Collaboration',
+          message: 'Connect with classmates in Study Circles to share notes and solve questions together.',
+          timestamp: Date.now() - 1000 * 60 * 240,
+          read: false,
+          link: 'groups'
+        }
+      ]);
+    }
+  }, [authUser]);
+
+  // Scroll-past auto-mark-as-read via IntersectionObserver
+  useEffect(() => {
+    if (!showNotifications || !notificationScrollRef.current) return;
+
+    const scrollContainer = notificationScrollRef.current;
+    const timers: Record<string, NodeJS.Timeout> = {};
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const id = entry.target.getAttribute('data-notification-id');
+          if (!id) return;
+
+          if (entry.isIntersecting) {
+            if (!timers[id]) {
+              timers[id] = setTimeout(() => {
+                setNotifications((prev) =>
+                  prev.map((n) => (n.id === id && !n.read ? { ...n, read: true } : n))
+                );
+              }, 350);
+            }
+          } else {
+            if (timers[id]) {
+              clearTimeout(timers[id]);
+              delete timers[id];
+            }
+          }
+        });
+      },
+      {
+        root: scrollContainer,
+        threshold: 0.6,
+      }
+    );
+
+    const items = scrollContainer.querySelectorAll('.notification-item');
+    items.forEach((item) => observer.observe(item));
+
+    return () => {
+      observer.disconnect();
+      Object.values(timers).forEach(clearTimeout);
+    };
+  }, [showNotifications, notifications]);
+
   const markAllAsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
+  const handleMarkAllAsReadAnimated = () => {
+    if (isMarkingAllRead) return;
+    setIsMarkingAllRead(true);
+    setTimeout(() => {
+      markAllAsRead();
+      setIsMarkingAllRead(false);
+    }, 500);
+  };
+
   const clearNotifications = () => {
     setNotifications([]);
+  };
+
+  const handleClearAllAnimated = () => {
+    if (isClearingNotifications) return;
+    setIsClearingNotifications(true);
+    setTimeout(() => {
+      clearNotifications();
+      setIsClearingNotifications(false);
+    }, 300);
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -763,53 +873,101 @@ const App: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative pt-16 lg:pt-0 transition-colors duration-300">
         {showNotifications && (
-          <div className="absolute top-4 right-4 w-80 bg-white border border-slate-100 shadow-2xl rounded-3xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
-               <h3 className="text-sm font-serif font-bold text-slate-900">Notifications</h3>
-               <div className="flex gap-2">
-                 <button onClick={markAllAsRead} className="text-[10px] font-bold text-blue-600 uppercase tracking-widest hover:text-blue-700">Mark all Read</button>
-                 <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
+          <div className="absolute top-4 right-4 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-2xl rounded-3xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+               <div className="flex items-center gap-2">
+                 <h3 className="text-sm font-serif font-bold text-slate-900 dark:text-slate-100">Notifications</h3>
+                 {unreadCount > 0 && (
+                   <span className={`px-2 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-full border border-blue-500/20 transition-all duration-500 ${isMarkingAllRead ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
+                     {unreadCount} new
+                   </span>
+                 )}
+               </div>
+               <div className="flex items-center gap-2">
+                 {unreadCount > 0 && (
+                   <button 
+                     onClick={handleMarkAllAsReadAnimated}
+                     disabled={isMarkingAllRead}
+                     className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest hover:text-blue-700 dark:hover:text-blue-300 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                     title="Mark all notifications as read"
+                   >
+                     <CheckCheck size={13} className={`transition-transform duration-300 ${isMarkingAllRead ? 'scale-125 text-emerald-500' : ''}`} />
+                     <span>{isMarkingAllRead ? 'Reading...' : 'Read All'}</span>
+                   </button>
+                 )}
+                 <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-1 rounded-lg">
+                   <X size={14} />
+                 </button>
                </div>
             </div>
-            <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+
+            <div 
+              ref={notificationScrollRef}
+              className="max-h-[400px] overflow-y-auto custom-scrollbar transition-all duration-300"
+            >
                {notifications.length === 0 ? (
                  <div className="p-10 text-center space-y-3">
-                   <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-200 mx-auto">
+                   <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800/60 rounded-2xl flex items-center justify-center text-slate-300 dark:text-slate-600 mx-auto">
                      {ICONS.Bell}
                    </div>
                    <p className="text-slate-400 text-xs font-medium italic">No notifications yet.</p>
                  </div>
                ) : (
-                 <div className="divide-y divide-slate-50">
-                    {notifications.map(n => (
-                      <div 
-                        key={n.id} 
-                        onClick={() => {
-                          if (n.link) setActiveTab(n.link);
-                          setShowNotifications(false);
-                          setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, read: true } : notif));
-                        }}
-                        className={`p-4 hover:bg-slate-50 transition-all cursor-pointer group relative ${!n.read ? 'bg-blue-50/30' : ''}`}
-                      >
-                         {!n.read && <div className="absolute top-5 left-2 w-1.5 h-1.5 bg-blue-600 rounded-full" />}
-                         <div className="pl-3 space-y-1">
-                            <div className="flex items-center justify-between">
-                               <h4 className="text-xs font-bold text-slate-900">{n.title}</h4>
-                               <span className="text-[9px] text-slate-400 font-medium">{new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                            <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">{n.message}</p>
-                         </div>
-                      </div>
-                    ))}
+                 <div className={`divide-y divide-slate-100 dark:divide-slate-800 transition-all duration-300 ${isClearingNotifications ? 'opacity-0 scale-95 -translate-y-2' : 'opacity-100 scale-100'}`}>
+                    {notifications.map(n => {
+                      const isUnread = !n.read;
+                      return (
+                        <div 
+                          key={n.id} 
+                          data-notification-id={n.id}
+                          onClick={() => {
+                            if (n.link) setActiveTab(n.link);
+                            setShowNotifications(false);
+                            setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, read: true } : notif));
+                          }}
+                          className={`notification-item p-4 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all duration-500 cursor-pointer group relative ${
+                            isUnread && !isMarkingAllRead 
+                              ? 'bg-blue-50/40 dark:bg-blue-950/30' 
+                              : isUnread && isMarkingAllRead
+                              ? 'bg-emerald-50/40 dark:bg-emerald-950/30 ring-1 ring-emerald-500/30'
+                              : ''
+                          }`}
+                        >
+                           {/* Unread indicator dot with smooth scale animation */}
+                           <div 
+                             className={`absolute top-5 left-3 w-2 h-2 rounded-full transition-all duration-500 ease-out ${
+                               isUnread && !isMarkingAllRead 
+                                 ? 'bg-blue-600 dark:bg-blue-400 scale-100 opacity-100' 
+                                 : isUnread && isMarkingAllRead
+                                 ? 'bg-emerald-500 scale-125 opacity-100 animate-ping'
+                                 : 'scale-0 opacity-0'
+                             }`} 
+                           />
+
+                           <div className="pl-4 space-y-1">
+                              <div className="flex items-center justify-between">
+                                 <h4 className={`text-xs font-bold transition-colors duration-300 ${isUnread ? 'text-slate-900 dark:text-slate-100 font-extrabold' : 'text-slate-700 dark:text-slate-300'}`}>
+                                   {n.title}
+                                 </h4>
+                                 <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium">{new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{n.message}</p>
+                           </div>
+                        </div>
+                      );
+                    })}
                  </div>
                )}
             </div>
+
             {notifications.length > 0 && (
               <button 
-                onClick={clearNotifications}
-                className="w-full p-3 text-[10px] font-bold text-rose-500 uppercase tracking-widest bg-rose-50/30 hover:bg-rose-50 border-t border-rose-100 transition-all"
+                onClick={handleClearAllAnimated}
+                disabled={isClearingNotifications}
+                className="w-full p-3 text-[10px] font-bold text-rose-500 dark:text-rose-400 uppercase tracking-widest bg-rose-50/30 dark:bg-rose-950/20 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-t border-rose-100 dark:border-rose-900/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                Clear All
+                <Trash2 size={12} />
+                <span>{isClearingNotifications ? 'Clearing...' : 'Clear All'}</span>
               </button>
             )}
           </div>
