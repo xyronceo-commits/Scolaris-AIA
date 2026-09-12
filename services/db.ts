@@ -701,9 +701,14 @@ export const DBService = {
       try {
         const arrayBuf = await file.arrayBuffer();
         const base64 = Buffer.from(arrayBuf).toString('base64');
+        const token = await auth.currentUser?.getIdToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
         const extractResp = await fetch('/api/files/extract', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             fileName: file.name,
             fileType: file.type,

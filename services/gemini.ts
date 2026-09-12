@@ -1,5 +1,7 @@
 
 
+import { auth } from '../lib/firebase';
+
 // Standard decoding for binary audio
 function decode(base64: string) {
   const binaryString = atob(base64);
@@ -68,8 +70,12 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
   return new Blob([header, pcmData], { type: 'audio/wav' });
 }
 
-const getHeaders = (): HeadersInit => {
+const getHeaders = async (): Promise<HeadersInit> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = await auth.currentUser?.getIdToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const customKey = localStorage.getItem('scolaris_custom_scolaris_ai_key') || localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key');
   if (customKey) {
     headers['X-Scolaris-AI-Key'] = customKey;
@@ -117,7 +123,7 @@ export const GeminiService = {
     try {
       return await safeFetchJson('/api/ai/import', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ text })
       }, 'Extraction failed');
     } catch (err) {
@@ -154,7 +160,7 @@ export const GeminiService = {
     try {
       return await safeFetchJson('/api/ai/import', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ text: `Extract from URL: ${url}` })
       }, 'URL ingestion failed');
     } catch (err) {
@@ -176,7 +182,7 @@ export const GeminiService = {
     try {
       return await safeFetchJson('/api/ai/schedule', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ courses, university })
       }, 'Schedule generation failed');
     } catch (err) {
@@ -211,7 +217,7 @@ export const GeminiService = {
     try {
       return await safeFetchJson('/api/ai/materials', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ content, type })
       }, 'Material generation failed');
     } catch (err) {
@@ -279,7 +285,7 @@ export const GeminiService = {
     try {
       const data = await safeFetchJson('/api/ai/podcast', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ topic })
       }, 'Podcast service unavailable');
 
@@ -346,7 +352,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       const data = await safeFetchJson('/api/ai/chat', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ messages, groupName, groupDesc })
       }, 'Group chat failed');
       return data.text;
@@ -360,7 +366,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       return await safeFetchJson('/api/ai/validate', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ text, groupName, groupDesc })
       }, 'Validation failed');
     } catch (err) {
@@ -373,7 +379,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       return await safeFetchJson('/api/scolaris/generate', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ studyMaterial, mode })
       }, 'Scolaris generation failed');
     } catch (err) {
@@ -404,7 +410,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       return await safeFetchJson('/api/scolaris/chat', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ messages, courseContext, fileContent })
       }, 'Scolaris chatbot request failed');
     } catch (err) {
@@ -417,7 +423,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       return await safeFetchJson('/api/files/extract', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ fileName, fileType, contentBase64 })
       }, 'File text extraction failed');
     } catch (err) {
@@ -434,7 +440,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       return await safeFetchJson('/api/vision/scan', {
         method: 'POST',
-        headers: getHeaders(),
+        headers: await getHeaders(),
         body: JSON.stringify({ fileName, fileType, contentBase64 })
       }, 'Vision document scan failed');
     } catch (err) {

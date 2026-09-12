@@ -112,6 +112,56 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  interface AuthenticatedRequest extends express.Request {
+    user?: any;
+  }
+
+  const userApiRequests = new Map<string, number[]>();
+
+  const requireAuth = async (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+    if (!adminApp) {
+      return res.status(503).json({ success: false, error: 'Authentication service unavailable' });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing or invalid Authorization header' });
+    }
+
+    const token = authHeader.substring(7).trim();
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing ID token' });
+    }
+
+    try {
+      const decodedToken = await getAuth(adminApp).verifyIdToken(token);
+      req.user = decodedToken;
+      next();
+    } catch (err: any) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired ID token' });
+    }
+  };
+
+  const apiRateLimiter = (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+    const key = req.user?.uid || req.ip || req.socket.remoteAddress || 'unknown';
+    const windowMs = 60 * 1000;
+    const maxRequests = 20;
+    const now = Date.now();
+
+    const timestamps = (userApiRequests.get(key) || []).filter(ts => now - ts < windowMs);
+    if (timestamps.length >= maxRequests) {
+      userApiRequests.set(key, timestamps);
+      return res.status(429).json({
+        success: false,
+        error: 'Too many requests. Please try again in a minute.'
+      });
+    }
+
+    timestamps.push(now);
+    userApiRequests.set(key, timestamps);
+    next();
+  };
+
   // Lazy init and adapter helper for Scolaris AI / Groq / Gemini
   const getAIKey = (customKey?: string) => {
     return customKey || process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
@@ -418,7 +468,7 @@ async function startServer() {
   });
 
   // Standard S3 Upload Proxy Route
-  app.post('/api/s3/upload', async (req, res) => {
+  app.post('/api/s3/upload', requireAuth, apiRateLimiter, async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
       if (!fileName || !contentBase64) {
@@ -455,7 +505,7 @@ async function startServer() {
   });
 
   // S3 Presign Download Proxy Route
-  app.post('/api/s3/presign', async (req, res) => {
+  app.post('/api/s3/presign', requireAuth, apiRateLimiter, async (req, res) => {
     try {
       const { key } = req.body;
       if (!key) {
@@ -891,7 +941,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   });
 
   // Proxy Groq / Gemini Chat
-  app.post('/api/ai/chat', async (req, res) => {
+  app.post('/api/ai/chat', requireAuth, apiRateLimiter, async (req, res) => {
     const { messages, groupName, groupDesc } = req.body;
     const customKey = getCustomKey(req);
     try {
@@ -916,7 +966,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   });
 
   // Dedicated Group AI Study Endpoint (Grounded strictly in group materials)
-  app.post('/api/groups/ai', async (req, res) => {
+  app.post('/api/groups/ai', requireAuth, apiRateLimiter, async (req, res) => {
     const { groupId, groupName, groupCourse, materialsContent, prompt, mode } = req.body;
     const customKey = getCustomKey(req);
 
@@ -967,7 +1017,7 @@ CRITICAL SECURITY & CONTEXT RULES:
   });
 
   // Magic Import
-  app.post('/api/ai/import', async (req, res) => {
+  app.post('/api/ai/import', requireAuth, apiRateLimiter, async (req, res) => {
     const { text } = req.body;
     const customKey = getCustomKey(req);
     try {
@@ -990,7 +1040,7 @@ CRITICAL SECURITY & CONTEXT RULES:
   });
 
   // Generate Schedule
-  app.post('/api/ai/schedule', async (req, res) => {
+  app.post('/api/ai/schedule', requireAuth, apiRateLimiter, async (req, res) => {
     const { courses, university } = req.body;
     const customKey = getCustomKey(req);
     try {
@@ -1020,7 +1070,7 @@ CRITICAL SECURITY & CONTEXT RULES:
   });
 
   // Scolaris Generate
-  app.post('/api/scolaris/generate', async (req, res) => {
+  app.post('/api/scolaris/generate', requireAuth, apiRateLimiter, async (req, res) => {
     const { studyMaterial, mode } = req.body;
     const customKey = getCustomKey(req);
 
@@ -1117,7 +1167,7 @@ CRITICAL SECURITY & CONTEXT RULES:
   });
 
   // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
-  app.post('/api/files/extract', async (req, res) => {
+  app.post('/api/files/extract', requireAuth, apiRateLimiter, async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
       
@@ -1151,7 +1201,7 @@ CRITICAL SECURITY & CONTEXT RULES:
   });
 
   // Vision Document Scanner Endpoint: Parses handwritten notes & PDFs into structured study content
-  app.post('/api/vision/scan', async (req, res) => {
+  app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
       const customKey = getCustomKey(req);
@@ -1277,7 +1327,7 @@ You MUST return a JSON object containing structured study assets with this exact
   });
 
   // Advanced Academic AI Companion / tutoring endpoint
-  app.post('/api/scolaris/chat', async (req, res) => {
+  app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
     const { messages, courseContext, fileContent } = req.body;
     const customKey = getCustomKey(req);
     try {
@@ -1330,7 +1380,7 @@ Always refer to this context when answering questions about the material, explai
   });
 
   // Study Materials
-  app.post('/api/ai/materials', async (req, res) => {
+  app.post('/api/ai/materials', requireAuth, apiRateLimiter, async (req, res) => {
     const { content, type } = req.body;
     const customKey = getCustomKey(req);
     try {
@@ -1499,13 +1549,13 @@ Strictly NO markdown formatting.`;
     }
   };
 
-  app.post('/api/ai/podcast', handlePodcastGeneration);
-  app.post('/api/ai/podcast/groq', handlePodcastGeneration);
-  app.post('/api/podcast/groq', handlePodcastGeneration);
-  app.post('/api/podcast/generate', handlePodcastGeneration);
+  app.post('/api/ai/podcast', requireAuth, apiRateLimiter, handlePodcastGeneration);
+  app.post('/api/ai/podcast/groq', requireAuth, apiRateLimiter, handlePodcastGeneration);
+  app.post('/api/podcast/groq', requireAuth, apiRateLimiter, handlePodcastGeneration);
+  app.post('/api/podcast/generate', requireAuth, apiRateLimiter, handlePodcastGeneration);
 
   // Message Validation Route
-  app.post('/api/ai/validate', async (req, res) => {
+  app.post('/api/ai/validate', requireAuth, apiRateLimiter, async (req, res) => {
     const { text, message, groupName, groupDesc } = req.body;
     const msgText = text || message || '';
     const customKey = getCustomKey(req);

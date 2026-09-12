@@ -317,9 +317,15 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         .map(m => `--- DOCUMENT: ${m.fileName} ---\n${m.content || 'No text content available.'}`)
         .join('\n\n');
 
+      const token = await auth.currentUser?.getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch('/api/groups/ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           groupId: activeGroup.id,
           groupName: activeGroup.name,

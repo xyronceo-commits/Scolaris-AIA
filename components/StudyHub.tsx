@@ -187,9 +187,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
     if (file.s3Url && !file.s3Key.startsWith('simulated/')) {
       try {
         addNotification('content', 'Retrieving File', `Generating dynamic authorization for ${file.fileName}...`, 'hub');
+        const token = await auth.currentUser?.getIdToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
         const response = await fetch('/api/s3/presign', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ key: file.s3Key })
         });
         const data = await response.json();
