@@ -41,10 +41,27 @@ function getAdminFirestore() {
   return getFirestore(adminApp);
 }
 
-// Server-side Secret for Administrator Access
-const ADMIN_SECRET = process.env.ADMIN_PASSWORD || process.env.SCOLARIS_ADMIN_PASSWORD || 'Scolaris_AI_3300013';
+// Server-side Secret for Administrator Access (Fails closed if env var is missing)
+function getAdminSecret(): string | null {
+  const secret = process.env.ADMIN_PASSWORD || process.env.SCOLARIS_ADMIN_PASSWORD;
+  if (!secret || secret.trim() === '') return null;
+  return secret.trim();
+}
+
+function safeCompareStrings(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 function generateAdminToken(email: string): string {
+  const secret = getAdminSecret();
+  if (!secret) throw new Error('Admin secret unavailable');
   const payload = {
     email,
     role: 'admin',
@@ -53,17 +70,19 @@ function generateAdminToken(email: string): string {
   };
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', ADMIN_SECRET).update(`${header}.${body}`).digest('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${signature}`;
 }
 
 function verifyAdminToken(token: string): { email: string; role: string } | null {
+  const secret = getAdminSecret();
+  if (!secret) return null; // Fail closed if secret is not set
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [header, body, signature] = parts;
-    const expectedSig = crypto.createHmac('sha256', ADMIN_SECRET).update(`${header}.${body}`).digest('base64url');
-    if (signature !== expectedSig) return null;
+    const expectedSig = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
+    if (!safeCompareStrings(signature, expectedSig)) return null;
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
     if (payload.role !== 'admin') return null;
@@ -896,6 +915,57 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     }
   });
 
+  // Dedicated Group AI Study Endpoint (Grounded strictly in group materials)
+  app.post('/api/groups/ai', async (req, res) => {
+    const { groupId, groupName, groupCourse, materialsContent, prompt, mode } = req.body;
+    const customKey = getCustomKey(req);
+
+    try {
+      const apiKey = getAIKey(customKey);
+      
+      let systemInstruction = `You are Scolaris AI, an intelligent academic study companion assigned exclusively to the Study Group: "${groupName || 'Academic Study Group'}" (Course: ${groupCourse || 'General'}).
+      
+CRITICAL SECURITY & CONTEXT RULES:
+1. You MUST ONLY use information from the uploaded study materials provided in the context below for this group.
+2. STRICT ISOLATION: Do NOT reference materials, documents, or data from any other group or user.
+3. If the group has no uploaded materials yet, politely inform the members to upload course notes or lecture slides so you can assist them.
+4. Format all responses clearly with clean Markdown, headings, bullet points, and bolded terms for student study clarity.`;
+
+      if (materialsContent && typeof materialsContent === 'string' && materialsContent.trim().length > 0) {
+        systemInstruction += `\n\nSHARED GROUP MATERIALS CONTEXT:\n---\n${materialsContent.slice(0, 16000)}\n---`;
+      } else {
+        systemInstruction += `\n\nNOTE: No document contents are currently uploaded for this group. Suggest members upload PDFs, lecture notes, or slides in the Shared Materials tab!`;
+      }
+
+      if (mode === 'quiz') {
+        systemInstruction += `\n\nSPECIAL TASK: Generate 5-10 practice questions with multiple choice options or active recall questions based on these group materials. Provide answer keys with detailed explanations.`;
+      } else if (mode === 'summarize') {
+        systemInstruction += `\n\nSPECIAL TASK: Provide a comprehensive, structured academic summary of all materials uploaded to this group. Break down into key modules, definitions, and core takeaways.`;
+      } else if (mode === 'topics') {
+        systemInstruction += `\n\nSPECIAL TASK: Identify and rank the top high-yield revision topics and exam questions most likely to appear from these uploaded group materials.`;
+      }
+
+      if (!apiKey) {
+        const fallbackText = `[Offline Group AI Mode] Analysis for group "${groupName}":\n\n### 📌 Group Study Synthesis\n- Materials Analyzed: ${materialsContent ? '1+ group documents' : 'No documents uploaded yet.'}\n\n**Query:** "${prompt || 'General Study Overview'}"\n\nTo unlock live deep AI reasoning across all group files, ensure an API key is configured in your profile.`;
+        return res.json({ text: fallbackText });
+      }
+
+      const aiContent = await runAICall({
+        customKey,
+        systemInstruction,
+        messages: [{ role: 'user', content: prompt || 'Synthesize and analyze the group study materials.' }],
+        temperature: 0.4
+      });
+
+      res.json({ text: aiContent });
+    } catch (error: any) {
+      console.warn("Group AI study endpoint error:", error?.message || error);
+      res.json({
+        text: `I'm ready to help your study group! ${materialsContent ? 'I have indexed your group materials.' : 'Upload lecture notes to the Shared Materials tab to get started.'} What concept or topic should we explore?`
+      });
+    }
+  });
+
   // Magic Import
   app.post('/api/ai/import', async (req, res) => {
     const { text } = req.body;
@@ -1524,13 +1594,61 @@ Strictly NO markdown formatting.`;
     }
   }
 
+  // In-memory rate limiter for Admin Login (5 attempts per 15 mins per IP)
+  const adminLoginAttempts = new Map<string, number[]>();
+
+  const checkAdminLoginRateLimit = (ip: string): boolean => {
+    const windowMs = 15 * 60 * 1000;
+    const maxAttempts = 5;
+    const now = Date.now();
+    const attempts = (adminLoginAttempts.get(ip) || []).filter(ts => now - ts < windowMs);
+    if (attempts.length >= maxAttempts) {
+      adminLoginAttempts.set(ip, attempts);
+      return false;
+    }
+    attempts.push(now);
+    adminLoginAttempts.set(ip, attempts);
+    return true;
+  };
+
   // Admin Login Endpoint (Password Authentication Only)
   app.post('/api/admin/login', async (req, res) => {
     try {
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+
+      // Check Rate Limit
+      if (!checkAdminLoginRateLimit(clientIp)) {
+        await recordAdminAuditLog(
+          'ADMIN_LOGIN_RATE_LIMITED',
+          'Too many administrator login attempts. Rate limit enforced.',
+          'FAILURE',
+          req
+        );
+        return res.status(429).json({
+          success: false,
+          error: 'Too many administrator login attempts. Please try again after 15 minutes.'
+        });
+      }
+
+      // Check if Admin secret is configured in environment
+      const secret = getAdminSecret();
+      if (!secret) {
+        await recordAdminAuditLog(
+          'ADMIN_LOGIN_DISABLED',
+          'Login rejected: ADMIN_PASSWORD environment variable is not configured on server.',
+          'FAILURE',
+          req
+        );
+        return res.status(503).json({
+          success: false,
+          error: 'Admin authentication is unavailable. ADMIN_PASSWORD environment variable is not set.'
+        });
+      }
+
       const { password } = req.body;
       const adminEmail = 'admin@scolaris.ai';
 
-      if (!password || typeof password !== 'string' || password !== ADMIN_SECRET) {
+      if (!password || typeof password !== 'string' || !safeCompareStrings(password, secret)) {
         await recordAdminAuditLog(
           'ADMIN_LOGIN_ATTEMPT', 
           'Failed login attempt: Invalid administrator password', 

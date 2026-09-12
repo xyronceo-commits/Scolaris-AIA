@@ -111,6 +111,69 @@ export interface StudyHubData {
   libraryFiles?: LibraryFile[];
 }
 
+export interface GroupMember {
+  userId: string;
+  name: string;
+  email?: string;
+  avatarIcon?: string;
+  role: 'owner' | 'admin' | 'member';
+  joinedAt: string | number;
+}
+
+export interface GroupMaterial {
+  id: string;
+  groupId: string;
+  courseId?: string;
+  courseCode?: string;
+  fileName: string;
+  fileType: string;
+  fileSize: string;
+  storagePath: string;
+  downloadUrl?: string;
+  uploadedBy: string; // userId
+  uploadedByName: string;
+  uploadedAt: string;
+  timestamp: number;
+  content?: string; // Extracted plain text for AI indexing & analysis
+  s3Key?: string;
+  s3Url?: string;
+}
+
+export interface GroupDiscussionReply {
+  id: string;
+  postId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  content: string;
+  timestamp: number;
+}
+
+export interface GroupDiscussionPost {
+  id: string;
+  groupId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  title?: string;
+  content: string;
+  timestamp: number;
+  attachments?: { fileName: string; fileUrl?: string; storagePath?: string; fileType?: string }[];
+  replies?: GroupDiscussionReply[];
+}
+
+export interface GroupActivity {
+  id: string;
+  groupId: string;
+  type: 'material_uploaded' | 'discussion_created' | 'discussion_reply' | 'member_joined' | 'ai_resource_generated' | 'announcement';
+  title: string;
+  description: string;
+  actorName: string;
+  actorId?: string;
+  timestamp: number;
+  link?: string;
+}
+
 export interface GroupMessage {
   id: string;
   sender: string;
@@ -120,12 +183,21 @@ export interface GroupMessage {
 }
 
 export interface SharedMaterial {
+  id?: string;
+  groupId?: string;
   courseId: string;
   courseCode: string;
   sharedBy: string;
+  uploadedBy?: string;
+  uploadedByName?: string;
+  uploadedAt?: string;
   timestamp: number;
   fileName?: string;
-  content?: string; // For direct uploads
+  fileType?: string;
+  fileSize?: string;
+  storagePath?: string;
+  downloadUrl?: string;
+  content?: string; // For direct uploads or extracted text
   s3Key?: string;   // Unique S3 object key
   s3Url?: string;   // Object storage URL (real-time generated or direct)
 }
@@ -134,11 +206,24 @@ export interface StudyGroup {
   id: string;
   name: string;
   description: string;
-  visibility: 'public' | 'private';
+  course: string; // Course / Subject
+  type: 'general' | 'private';
+  visibility?: 'public' | 'private'; // Backward compatibility fallback
   inviteCode: string;
-  members: string[];
+  department?: string;
+  level?: string;
+  university?: string;
+  academicSession?: string;
+  groupImage?: string;
+  ownerId: string;
+  members: (string | GroupMember)[]; // Supports string[] or rich GroupMember[]
+  memberCount?: number;
   messages: GroupMessage[];
   sharedMaterials: SharedMaterial[];
+  discussions?: GroupDiscussionPost[];
+  activityFeed?: GroupActivity[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type AppState = 'onboarding' | 'dashboard' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';

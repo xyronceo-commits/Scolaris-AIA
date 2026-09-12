@@ -64,19 +64,83 @@
     },
     "study_groups": {
       "title": "StudyGroup",
-      "description": "Study groups and circles",
+      "description": "Study groups and study communities",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "description": { "type": "string" },
-        "inviteCode": { "type": "string" },
+        "course": { "type": "string" },
+        "type": { "type": "string" },
         "visibility": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "department": { "type": "string" },
+        "level": { "type": "string" },
+        "university": { "type": "string" },
+        "academicSession": { "type": "string" },
+        "groupImage": { "type": "string" },
+        "ownerId": { "type": "string" },
         "members": { "type": "array" },
         "messages": { "type": "array" },
-        "sharedMaterials": { "type": "array" }
+        "sharedMaterials": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
       },
-      "required": ["id", "name"]
+      "required": ["id", "name", "course", "ownerId"]
+    },
+    "group_materials": {
+      "title": "GroupMaterial",
+      "description": "Shared learning materials uploaded to specific study group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "groupId": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "downloadUrl": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "uploadedByName": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "content": { "type": "string" }
+      },
+      "required": ["id", "groupId", "fileName", "uploadedBy", "storagePath"]
+    },
+    "group_discussions": {
+      "title": "GroupDiscussion",
+      "description": "Academic forum and discussion posts in a study group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "groupId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "attachments": { "type": "array" },
+        "replies": { "type": "array" }
+      },
+      "required": ["id", "groupId", "authorId", "content"]
+    },
+    "group_activity": {
+      "title": "GroupActivity",
+      "description": "Chronological audit log of activity within a study group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "groupId": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "actorName": { "type": "string" },
+        "actorId": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "groupId", "type", "title"]
     },
     "admins": {
       "title": "AdminUser",
@@ -149,6 +213,18 @@
     "/study_groups/{groupId}": {
       "schema": "study_groups",
       "description": "Study groups collection"
+    },
+    "/study_groups/{groupId}/materials/{materialId}": {
+      "schema": "group_materials",
+      "description": "Group materials subcollection"
+    },
+    "/study_groups/{groupId}/discussions/{discussionId}": {
+      "schema": "group_discussions",
+      "description": "Group discussions subcollection"
+    },
+    "/study_groups/{groupId}/activity/{activityId}": {
+      "schema": "group_activity",
+      "description": "Group activity feed subcollection"
     },
     "/admins/{adminId}": {
       "schema": "admins",

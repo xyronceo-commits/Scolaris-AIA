@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, StudyGroup, StudyHubData, GroupMessage, SharedMaterial, AppNotification, AppState } from '../types';
-import { ICONS } from '../constants';
-import { Globe, Lock, Link as LinkIcon, Check, Copy, Upload, Download, FileText, LogOut, Share2, Search, Plus, X, ArrowRight, MessageSquare, Files, Bot, Sparkles } from 'lucide-react';
-import { GeminiService } from '../services/gemini';
+import { UserProfile, StudyGroup, StudyHubData, GroupMessage, AppNotification, AppState, GroupMaterial, GroupDiscussionPost, GroupActivity, GroupMember } from '../types';
+import { 
+  Globe, Lock, Link as LinkIcon, Check, Copy, Upload, Download, FileText, 
+  LogOut, Share2, Search, Plus, X, ArrowRight, MessageSquare, Files, Bot, 
+  Sparkles, Users, BookOpen, School, ShieldAlert, Award, Send, RefreshCw, 
+  HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash
+} from 'lucide-react';
 import { DBService } from '../services/db';
 import { auth } from '../lib/firebase';
 import { UserAvatar } from './UserAvatar';
@@ -15,855 +18,1298 @@ interface StudyGroupsProps {
   addNotification: (type: AppNotification['type'], title: string, message: string, link?: AppState) => void;
 }
 
-const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, hubs, addNotification }) => {
+export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, hubs, addNotification }) => {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(groups[0]?.id || null);
   const [sidebarMode, setSidebarMode] = useState<'my' | 'explore'>('my');
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupDesc, setNewGroupDesc] = useState('');
-  const [newGroupVisibility, setNewGroupVisibility] = useState<'public' | 'private'>('private');
-  const [messageText, setMessageText] = useState('');
-  const [inviteCodeInput, setInviteCodeInput] = useState('');
-  const [activeTab, setActiveTab] = useState<'chat' | 'materials'>('chat');
-  const [copied, setCopied] = useState(false);
-  const [isAiThinking, setIsAiThinking] = useState(false);
-  const [isValidating, setIsValidating] = useState(false);
-  const [joinError, setJoinError] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showMemberModal, setShowMemberModal] = useState(false);
 
+  // Create Group Form State
+  const [createName, setCreateName] = useState('');
+  const [createDesc, setCreateDesc] = useState('');
+  const [createCourse, setCreateCourse] = useState('');
+  const [createType, setCreateType] = useState<'general' | 'private'>('general');
+  const [createDept, setCreateDept] = useState('');
+  const [createLevel, setCreateLevel] = useState('');
+  const [createUni, setCreateUni] = useState('');
+  const [createSession, setCreateSession] = useState('');
+  const [createImage, setCreateImage] = useState('');
+
+  // Join Group State
+  const [joinCode, setJoinCode] = useState('');
+  const [joinError, setJoinError] = useState('');
+
+  // Tabs inside Active Group
+  const [activeTab, setActiveTab] = useState<'ai' | 'materials' | 'discussions' | 'overview'>('ai');
+
+  // AI Assistant Chat State
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiMessages, setAiMessages] = useState<Array<{ sender: string; text: string; timestamp: number }>>([]);
+  const [isAiThinking, setIsAiThinking] = useState(false);
+  const [aiMode, setAiMode] = useState<'chat' | 'quiz' | 'summarize' | 'topics'>('chat');
+
+  // Discussions State
+  const [newDiscussionTitle, setNewDiscussionTitle] = useState('');
+  const [newDiscussionContent, setNewDiscussionContent] = useState('');
+  const [showNewDiscussion, setShowNewDiscussion] = useState(false);
+  const [activeReplyPostId, setActiveReplyPostId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+
+  // File Upload State
+  const [isUploading, setIsUploading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const currentUserId = auth.currentUser?.uid || profile.email || 'guest_user';
   const activeGroup = groups.find(g => g.id === activeGroupId);
 
-  const mockPublicGroups: StudyGroup[] = [
-    {
-      id: 'pub-1',
-      name: 'QUANTUM ETHICS',
-      description: 'Discussing the philosophical implications of observer effects.',
-      visibility: 'public',
-      inviteCode: 'ETHX-001',
-      members: ['Alice', 'Bob'],
-      messages: [],
-      sharedMaterials: []
-    },
-    {
-      id: 'pub-2',
-      name: 'NEURO-DYNAMICS',
-      description: 'Deep dive into computational neuroscience models.',
-      visibility: 'public',
-      inviteCode: 'BRAIN-99',
-      members: ['Charlie', 'Dana'],
-      messages: [],
-      sharedMaterials: []
-    }
-  ];
+  // Filtered Groups for My Circles vs Explore
+  const myGroups = groups.filter(g => {
+    const members = g.members || [];
+    const isMem = members.some(m => {
+      if (typeof m === 'string') {
+        return m === currentUserId || m === profile.name;
+      }
+      return m.userId === currentUserId || m.name === profile.name;
+    });
+    const isOwner = g.ownerId === currentUserId;
+    return isMem || isOwner;
+  });
 
-  const exploreGroups = mockPublicGroups.filter(pg => !groups.find(g => g.id === pg.id || g.name === pg.name));
+  const exploreGroups = groups.filter(g => {
+    const isGeneral = g.type === 'general' || g.visibility === 'public';
+    const isAlreadyMember = myGroups.some(mg => mg.id === g.id);
+    return isGeneral && !isAlreadyMember;
+  }).filter(g => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      g.name.toLowerCase().includes(q) ||
+      (g.course && g.course.toLowerCase().includes(q)) ||
+      (g.description && g.description.toLowerCase().includes(q)) ||
+      (g.department && g.department.toLowerCase().includes(q)) ||
+      (g.university && g.university.toLowerCase().includes(q))
+    );
+  });
 
   useEffect(() => {
-    if (activeTab === 'chat') {
+    if (!activeGroupId && groups.length > 0) {
+      setActiveGroupId(groups[0].id);
+    }
+  }, [groups]);
+
+  useEffect(() => {
+    if (activeGroup) {
+      if (activeGroup.messages && activeGroup.messages.length > 0) {
+        setAiMessages(activeGroup.messages.map(m => ({
+          sender: m.sender,
+          text: m.text,
+          timestamp: m.timestamp
+        })));
+      } else {
+        // Initialize default welcome AI chat message for active group
+        setAiMessages([
+          {
+            sender: 'Scolaris AI',
+            text: `Welcome to **${activeGroup.name}**! I am your group study companion. Upload course notes in the **Materials** tab, and I will analyze them to answer questions, generate quizzes, or summarize key topics for your study circle.`,
+            timestamp: Date.now()
+          }
+        ]);
+      }
+    }
+  }, [activeGroupId]);
+
+  useEffect(() => {
+    if (activeTab === 'ai') {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [activeGroup?.messages, activeTab]);
+  }, [aiMessages, activeTab]);
 
-  const generateInviteCode = () => Math.random().toString(36).substring(2, 10).toUpperCase();
+  // Handle Group Creation
+  const handleCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createName.trim() || !createCourse.trim()) return;
 
-  const createGroup = async () => {
-    if (!newGroupName.trim()) return;
     setIsAiThinking(true);
     try {
-      const userId = auth.currentUser?.uid || 'anonymous';
+      const createdGroup = await DBService.createGroup(
+        {
+          name: createName.trim(),
+          description: createDesc.trim(),
+          course: createCourse.trim(),
+          type: createType,
+          department: createDept.trim(),
+          level: createLevel.trim(),
+          university: createUni.trim(),
+          academicSession: createSession.trim(),
+          groupImage: createImage.trim()
+        },
+        currentUserId,
+        profile.name
+      );
 
-      const newGroup: StudyGroup = {
-        id: 'group-' + Math.random().toString(36).substring(2, 11),
-        name: newGroupName.toUpperCase(),
-        description: newGroupDesc,
-        visibility: newGroupVisibility,
-        inviteCode: generateInviteCode(),
-        members: [profile.name],
-        messages: [{
-          id: 'welcome',
-          sender: 'Scolaris AI',
-          text: `Study group established: ${newGroupName.toUpperCase()}. I am your academic assistant. Share materials or ask me anything to support your learning.`,
-          timestamp: Date.now()
-        }],
-        sharedMaterials: []
-      };
-
-      await DBService.saveGroup(newGroup, userId);
-      setGroups(prev => [...prev, newGroup]);
-      setActiveGroupId(newGroup.id);
+      setGroups(prev => [createdGroup, ...prev]);
+      setActiveGroupId(createdGroup.id);
       setShowCreateModal(false);
-      setNewGroupName('');
-      setNewGroupDesc('');
-      addNotification('message', 'Group Formed', `Study group ${newGroup.name} has been established.`, 'groups');
+
+      // Reset form
+      setCreateName('');
+      setCreateDesc('');
+      setCreateCourse('');
+      setCreateType('general');
+      setCreateDept('');
+      setCreateLevel('');
+      setCreateUni('');
+      setCreateSession('');
+      setCreateImage('');
+
+      addNotification('message', 'Group Formed', `Study group "${createdGroup.name}" is ready!`, 'groups');
     } catch (err) {
-      console.error('Error creating study group:', err);
+      console.error('Error creating group:', err);
     } finally {
       setIsAiThinking(false);
     }
   };
 
-  const joinByCode = async () => {
-    const code = inviteCodeInput.trim().toUpperCase();
-    if (!code) return;
+  // Handle Join by Code or Direct
+  const handleJoinByCode = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!joinCode.trim()) return;
     setJoinError('');
     setIsAiThinking(true);
 
     try {
-      const existing = groups.find(g => g.inviteCode === code);
-      if (existing) {
-        setActiveGroupId(existing.id);
-        setShowJoinModal(false);
-        setInviteCodeInput('');
+      const code = joinCode.trim().toUpperCase();
+      const groupFound = await DBService.findGroupByCode(code);
+
+      if (!groupFound) {
+        setJoinError('No active study group found matching this invite code.');
+        setIsAiThinking(false);
         return;
       }
 
-      // Try searching for the group in Firestore / DB
-      const groupFromDb = await DBService.findGroupByCode(code);
-      if (groupFromDb) {
-        const userId = auth.currentUser?.uid || 'anonymous';
-
-        const joinedGroup: StudyGroup = {
-          ...groupFromDb,
-          members: [profile.name]
-        };
-
-        await DBService.saveGroup(joinedGroup, userId);
-        setGroups(prev => [...prev, joinedGroup]);
-        setActiveGroupId(joinedGroup.id);
-        setShowJoinModal(false);
-        setInviteCodeInput('');
-        addNotification('message', 'Circle Joined', `Connected to the private circle: ${joinedGroup.name}`, 'groups');
-      } else {
-        // Fallback for simulation & mockup checks
-        if (code === 'ETHX-001' || code === 'BRAIN-99') {
-          const mockG = mockPublicGroups.find(m => m.inviteCode === code);
-          if (mockG) {
-            joinGroup(mockG);
-            setShowJoinModal(false);
-            setInviteCodeInput('');
-            return;
+      const res = await DBService.joinGroup(groupFound.id, code, currentUserId, profile.name);
+      if (res.success && res.group) {
+        setGroups(prev => {
+          const exists = prev.some(g => g.id === res.group!.id);
+          if (exists) {
+            return prev.map(g => g.id === res.group!.id ? res.group! : g);
           }
-        }
-        setJoinError('Invalid or expired access code. Please verify and try again.');
+          return [res.group!, ...prev];
+        });
+        setActiveGroupId(res.group.id);
+        setShowJoinModal(false);
+        setJoinCode('');
+        addNotification('message', 'Group Joined', `You joined "${res.group.name}"`, 'groups');
+      } else {
+        setJoinError(res.error || 'Failed to join group.');
       }
-    } catch (err) {
-      console.error('Error joining group by code:', err);
-      setJoinError('Failed to establish connection. Table or service schema exception.');
+    } catch (err: any) {
+      setJoinError('Error joining group. Please try again.');
     } finally {
       setIsAiThinking(false);
     }
   };
 
-  const regenerateCode = async () => {
-    if (!activeGroupId || !activeGroup) return;
-    const newCode = generateInviteCode();
-    
+  const handleJoinGeneralGroup = async (group: StudyGroup) => {
+    setIsAiThinking(true);
     try {
-      const userId = auth.currentUser?.uid || 'anonymous';
-
-      // 1. Update in local State
-      const updatedGroups = groups.map(g => g.id === activeGroupId ? { ...g, inviteCode: newCode } : g);
-      setGroups(updatedGroups);
-
-      // 2. Update in DB and Local Caching
-      await DBService.updateGroupInviteCode(activeGroupId, newCode, userId);
-
-      addNotification('message', 'Invite Code Regoverned', `Regenerated invite code for ${activeGroup.name}: ${newCode}`, 'groups');
-    } catch (err) {
-      console.error('Failed to regenerate code:', err);
-    }
-  };
-
-  const sendMessage = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!messageText.trim() || !activeGroupId || !activeGroup || isValidating) return;
-
-    setIsValidating(true);
-    const currentText = messageText;
-    setMessageText('');
-
-    try {
-      // Step 1: Validate relevance
-      const validation = await GeminiService.validateGroupMessage(currentText, activeGroup.name, activeGroup.description);
-      
-      const userMsg: GroupMessage = {
-        id: Math.random().toString(36).substr(2, 9),
-        sender: profile.name,
-        text: currentText,
-        timestamp: Date.now(),
-        isIrrelevant: !validation.isRelevant
-      };
-
-      setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, messages: [...g.messages, userMsg] } : g));
-
-      if (!validation.isRelevant) {
-        addNotification('message', 'Irrelevant Content', 'Your message was flagged as unrelated to the group purpose and has been obscured.', 'groups');
+      const res = await DBService.joinGroup(group.id, null, currentUserId, profile.name);
+      if (res.success && res.group) {
+        setGroups(prev => {
+          const exists = prev.some(g => g.id === res.group!.id);
+          if (exists) {
+            return prev.map(g => g.id === res.group!.id ? res.group! : g);
+          }
+          return [res.group!, ...prev];
+        });
+        setActiveGroupId(res.group.id);
+        setSidebarMode('my');
+        addNotification('message', 'Circle Joined', `Joined "${group.name}"`, 'groups');
       }
-
-      // Step 2: AI Bot Response (only if relevant)
-      if (validation.isRelevant) {
-        setIsAiThinking(true);
-        const response = await GeminiService.groupChat(
-          [...activeGroup.messages, userMsg].slice(-10), 
-          activeGroup.name,
-          activeGroup.description
-        );
-        
-        const botMsg: GroupMessage = {
-          id: Math.random().toString(36).substr(2, 9),
-          sender: 'Scolaris AI',
-          text: response || "I'm having trouble connecting to the knowledge base. Please try again.",
-          timestamp: Date.now()
-        };
-
-        setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, messages: [...g.messages, botMsg] } : g));
-        addNotification('message', 'New Message', `Scolaris AI: ${botMsg.text.substring(0, 50)}...`, 'groups');
-      }
-    } catch (error) {
-      console.error(error);
+    } catch (e) {
+      console.error('Join group error:', e);
     } finally {
-      setIsValidating(false);
       setIsAiThinking(false);
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload Material to Group
+  const handleMaterialUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !activeGroupId) return;
+    if (!file || !activeGroup) return;
 
     setIsUploading(true);
-    addNotification('message', 'S3 Uploading', `Initiating cloud transfer for ${file.name}...`, 'groups');
+    addNotification('message', 'Uploading Material', `Processing "${file.name}" for group library...`, 'groups');
 
     try {
-      const base64 = await fileToBase64(file);
+      const result = await DBService.uploadGroupMaterial(
+        activeGroup.id,
+        file,
+        currentUserId,
+        profile.name
+      );
 
-      const response = await fetch('/api/s3/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type,
-          contentBase64: base64
-        })
-      });
+      if (result.success && result.material) {
+        setGroups(prev => prev.map(g => {
+          if (g.id === activeGroup.id) {
+            const updatedMaterials = [result.material, ...(g.sharedMaterials || [])];
+            const updatedGroup = { ...g, sharedMaterials: updatedMaterials };
+            DBService.saveGroup(updatedGroup, currentUserId);
+            return updatedGroup;
+          }
+          return g;
+        }));
 
-      if (!response.ok) {
-        throw new Error('S3 Proxy endpoint returned status ' + response.status);
-      }
-
-      const uploadResult = await response.json();
-
-      if (uploadResult.success) {
-        const newMaterial: SharedMaterial = {
-          courseId: 'shared',
-          courseCode: 'SYNC',
-          sharedBy: profile.name,
-          timestamp: Date.now(),
-          fileName: file.name,
-          s3Key: uploadResult.key,
-          s3Url: uploadResult.publicUrl,
-          content: `Files hosted under S3 key: ${uploadResult.key}`
-        };
-
-        setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, sharedMaterials: [newMaterial, ...g.sharedMaterials] } : g));
-        addNotification('message', 'S3 Upload Complete', `${file.name} successfully committed to cloud storage!`, 'groups');
-
-        const msg: GroupMessage = {
-          id: Math.random().toString(36).substr(2, 9),
-          sender: 'Scolaris AI',
-          text: `${profile.name} uploaded a resource to Cloud Storage: ${file.name} (Key: ${uploadResult.key})`,
-          timestamp: Date.now()
-        };
-        setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, messages: [...g.messages, msg] } : g));
+        addNotification('message', 'Material Uploaded', `"${file.name}" is now available to all group members.`, 'groups');
       } else {
-        throw new Error(uploadResult.error || 'Unknown upload error');
+        addNotification('message', 'Upload Issue', result.error || 'Failed to upload document.', 'groups');
       }
-
     } catch (err: any) {
-      console.warn('S3 Storage upload failed, falling back to local simulation. Error:', err?.message);
-      
-      const newMaterial: SharedMaterial = {
-        courseId: 'shared',
-        courseCode: 'SYNC',
-        sharedBy: profile.name,
-        timestamp: Date.now(),
-        fileName: file.name,
-        content: `Simulated content for ${file.name}`
-      };
-      setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, sharedMaterials: [newMaterial, ...g.sharedMaterials] } : g));
-      addNotification('message', 'Local Upload (Simulation)', `${file.name} added (S3 credentials not active in environment)`, 'groups');
-
-      const msg: GroupMessage = {
-        id: Math.random().toString(36).substr(2, 9),
-        sender: 'Scolaris AI',
-        text: `${profile.name} shared a simulated resource: ${file.name}`,
-        timestamp: Date.now()
-      };
-      setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, messages: [...g.messages, msg] } : g));
+      console.error('Group upload error:', err);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleAccessFile = async (file: SharedMaterial) => {
-    if (file.s3Key) {
-      try {
-        addNotification('message', 'S3 Accessing', `Generating S3 dynamic authorization for ${file.fileName}...`, 'groups');
-        const response = await fetch('/api/s3/presign', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: file.s3Key })
-        });
-        const data = await response.json();
-        if (data.presignedUrl) {
-          const a = document.createElement('a');
-          a.href = data.presignedUrl;
-          a.download = file.fileName || 'download';
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          addNotification('message', 'S3 File Downloaded', `${file.fileName} accessed from Supabase S3 bucket!`, 'groups');
-        } else {
-          throw new Error("Presigned URL missing");
-        }
-      } catch (e: any) {
-        console.error(e);
-        addNotification('message', 'S3 Downloader Error', 'Could not retrieve safe S3 access token.', 'groups');
+  // AI Study Assistant Query grounded in group materials
+  const handleSendAiPrompt = async (e?: React.FormEvent, customPrompt?: string, modeOverride?: 'chat' | 'quiz' | 'summarize' | 'topics') => {
+    e?.preventDefault();
+    const promptToUse = customPrompt || aiPrompt;
+    if (!promptToUse.trim() || !activeGroup || isAiThinking) return;
+
+    const userMsgText = promptToUse;
+    setAiPrompt('');
+    
+    const userMsgObj: GroupMessage = {
+      id: `msg_${Date.now()}_u`,
+      sender: profile.name,
+      text: userMsgText,
+      timestamp: Date.now()
+    };
+
+    // Add user prompt to chat
+    setAiMessages(prev => [...prev, { sender: profile.name, text: userMsgText, timestamp: Date.now() }]);
+    setIsAiThinking(true);
+
+    // Save user message to group state and Firestore
+    setGroups(prev => prev.map(g => {
+      if (g.id === activeGroup.id) {
+        const updatedMsgs = [...(g.messages || []), userMsgObj];
+        const updatedGroup = { ...g, messages: updatedMsgs };
+        DBService.saveGroup(updatedGroup, currentUserId);
+        return updatedGroup;
       }
-    } else {
-      const blob = new Blob([file.content || ''], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file.fileName || 'material.txt';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      return g;
+    }));
+
+    try {
+      // Gather all text content from group materials
+      const materials = activeGroup.sharedMaterials || [];
+      const combinedMaterialsContent = materials
+        .map(m => `--- DOCUMENT: ${m.fileName} ---\n${m.content || 'No text content available.'}`)
+        .join('\n\n');
+
+      const response = await fetch('/api/groups/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupId: activeGroup.id,
+          groupName: activeGroup.name,
+          groupCourse: activeGroup.course,
+          materialsContent: combinedMaterialsContent,
+          prompt: userMsgText,
+          mode: modeOverride || aiMode
+        })
+      });
+
+      let aiRespText = "I am ready to help! Ensure your group has uploaded course files under the Materials tab so I can ground my responses in your curriculum.";
+      if (response.ok) {
+        const data = await response.json();
+        aiRespText = data.text || "I have analyzed your group materials.";
+      }
+
+      const aiMsgObj: GroupMessage = {
+        id: `msg_${Date.now()}_ai`,
+        sender: 'Scolaris AI',
+        text: aiRespText,
+        timestamp: Date.now()
+      };
+
+      setAiMessages(prev => [
+        ...prev,
+        {
+          sender: 'Scolaris AI',
+          text: aiRespText,
+          timestamp: Date.now()
+        }
+      ]);
+
+      // Save AI message to group state and Firestore
+      setGroups(prev => prev.map(g => {
+        if (g.id === activeGroup.id) {
+          const updatedMsgs = [...(g.messages || []), aiMsgObj];
+          const updatedGroup = { ...g, messages: updatedMsgs };
+          DBService.saveGroup(updatedGroup, currentUserId);
+          return updatedGroup;
+        }
+        return g;
+      }));
+    } catch (err) {
+      console.error('Group AI query error:', err);
+      const errMsg = "An internal exception occurred while parsing group files. Please try again.";
+      setAiMessages(prev => [
+        ...prev,
+        {
+          sender: 'Scolaris AI',
+          text: errMsg,
+          timestamp: Date.now()
+        }
+      ]);
+    } finally {
+      setIsAiThinking(false);
+    }
+  };
+
+  // Discussion forum operations
+  const handleCreateDiscussion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDiscussionContent.trim() || !activeGroup) return;
+
+    try {
+      const res = await DBService.createDiscussionPost(activeGroup.id, {
+        title: newDiscussionTitle.trim(),
+        content: newDiscussionContent.trim(),
+        authorId: currentUserId,
+        authorName: profile.name,
+        authorAvatar: profile.avatarIcon
+      });
+
+      if (res.success && res.discussionPost) {
+        setGroups(prev => prev.map(g => {
+          if (g.id === activeGroup.id) {
+            const updated = [res.discussionPost, ...(g.discussions || [])];
+            return { ...g, discussions: updated };
+          }
+          return g;
+        }));
+
+        setNewDiscussionTitle('');
+        setNewDiscussionContent('');
+        setShowNewDiscussion(false);
+        addNotification('message', 'Discussion Started', 'New topic posted to group forum.', 'groups');
+      }
+    } catch (e) {
+      console.error('Discussion creation error:', e);
+    }
+  };
+
+  const handleAddReply = async (postId: string) => {
+    if (!replyText.trim() || !activeGroup) return;
+
+    try {
+      const res = await DBService.addDiscussionReply(activeGroup.id, postId, {
+        authorId: currentUserId,
+        authorName: profile.name,
+        authorAvatar: profile.avatarIcon,
+        content: replyText.trim()
+      });
+
+      if (res.success) {
+        setGroups(prev => prev.map(g => {
+          if (g.id === activeGroup.id) {
+            const discussions = (g.discussions || []).map(p => {
+              if (p.id === postId) {
+                const newReply = {
+                  id: `reply_${Date.now()}`,
+                  postId,
+                  authorId: currentUserId,
+                  authorName: profile.name,
+                  authorAvatar: profile.avatarIcon,
+                  content: replyText.trim(),
+                  timestamp: Date.now()
+                };
+                return { ...p, replies: [...(p.replies || []), newReply] };
+              }
+              return p;
+            });
+            return { ...g, discussions };
+          }
+          return g;
+        }));
+
+        setReplyText('');
+        setActiveReplyPostId(null);
+      }
+    } catch (e) {
+      console.error('Reply submission error:', e);
+    }
+  };
+
+  // Member Management
+  const handleRemoveMember = async (targetUserId: string) => {
+    if (!activeGroup) return;
+    if (confirm("Are you sure you want to remove this student from the group?")) {
+      const res = await DBService.removeGroupMember(activeGroup.id, targetUserId, currentUserId);
+      if (res.success) {
+        setGroups(prev => prev.map(g => {
+          if (g.id === activeGroup.id) {
+            const updatedMembers = (g.members || []).filter(m => (typeof m === 'string' ? m : m.userId) !== targetUserId);
+            return { ...g, members: updatedMembers, memberCount: updatedMembers.length };
+          }
+          return g;
+        }));
+        addNotification('message', 'Member Removed', 'User has been removed from the group.', 'groups');
+      }
     }
   };
 
   const copyInvite = () => {
     if (!activeGroup) return;
-    navigator.clipboard.writeText(`https://scolaris.ai/join/${activeGroup.inviteCode}`);
+    const inviteUrl = `${window.location.origin}?joinGroup=${activeGroup.inviteCode}`;
+    navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const leaveGroup = () => {
-    if (!activeGroupId || !activeGroup) return;
-    if (confirm(`Leave ${activeGroup.name}?`)) {
-      setGroups(prev => prev.filter(g => g.id !== activeGroupId));
-      setActiveGroupId(null);
-    }
-  };
-
-  const joinGroup = (group: StudyGroup) => {
-    if (groups.find(g => g.id === group.id)) return;
-    const joinedGroup = {
-      ...group,
-      members: [...group.members, profile.name],
-      messages: [...group.messages, {
-        id: 'join-msg-' + Date.now(),
-        sender: 'Scolaris AI',
-        text: `${profile.name} has entered the circle. Welcome.`,
-        timestamp: Date.now()
-      }]
-    };
-    setGroups(prev => [...prev, joinedGroup]);
-    setActiveGroupId(group.id);
-    setSidebarMode('my');
+  const regenerateCode = async () => {
+    if (!activeGroup) return;
+    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    await DBService.updateGroupInviteCode(activeGroup.id, newCode, currentUserId);
+    setGroups(prev => prev.map(g => g.id === activeGroup.id ? { ...g, inviteCode: newCode } : g));
+    addNotification('message', 'Invite Code Updated', `New invite code: ${newCode}`, 'groups');
   };
 
   return (
-    <div className="h-[calc(100vh-160px)] xl:h-[calc(100vh-140px)] flex flex-col xl:flex-row gap-8 animate-in fade-in duration-700">
-        {/* Sidebar - Group Directory */}
+    <div className="h-[calc(100vh-140px)] flex flex-col xl:flex-row gap-6 animate-in fade-in duration-500">
+      
+      {/* SIDEBAR: Group Navigation & Discovery */}
       <div className="w-full xl:w-80 flex flex-col gap-4 shrink-0 h-auto xl:h-full">
-        <div className="glass-card p-6 rounded-[2rem] relative overflow-hidden bg-white border border-slate-100 shadow-sm">
-           <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 blur-[60px] rounded-full pointer-events-none" />
-           <div className="flex items-center justify-between relative z-10">
-              <div>
-                <h1 className="text-xl font-serif font-bold text-slate-900 tracking-tight">Study Circles</h1>
-                <p className="text-[10px] text-slate-400 font-medium italic">Collaborative Research</p>
-              </div>
-              <div className="flex gap-2">
-                 <button 
-                  onClick={() => setShowJoinModal(true)} 
-                  title="Join Group"
-                  className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 text-slate-600 flex items-center justify-center hover:bg-white hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm group"
-                 >
-                   <LinkIcon size={16} className="group-hover:rotate-12 transition-transform" />
-                 </button>
-                 <button 
-                  onClick={() => setShowCreateModal(true)} 
-                  title="Create Group"
-                  className="w-9 h-9 bg-slate-900 text-white rounded-xl flex items-center justify-center hover:bg-blue-700 hover:scale-105 active:scale-95 transition-all shadow-md group"
-                 >
-                   <Plus size={18} className="group-hover:rotate-90 transition-transform" />
-                 </button>
-              </div>
-           </div>
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-serif font-bold text-slate-900 tracking-tight">Study Groups</h1>
+            <p className="text-[11px] text-slate-500 font-medium">Collaborative Academic Circles</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowJoinModal(true)}
+              title="Join via Group Code"
+              className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 flex items-center justify-center hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all cursor-pointer"
+            >
+              <LinkIcon size={16} />
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              title="Create New Group"
+              className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 transition-all shadow-xs cursor-pointer"
+            >
+              <Plus size={18} />
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 bg-white rounded-[2rem] overflow-hidden flex flex-col border border-slate-100 shadow-sm min-h-[250px] xl:min-h-0">
-           <div className="p-1 border-b border-slate-50 bg-slate-50/30 flex">
-              <button 
-                onClick={() => setSidebarMode('my')}
-                className={`flex-1 py-3 text-[9px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${sidebarMode === 'my' ? 'bg-white text-slate-900 shadow-[2px_0_10px_rgba(0,0,0,0.02)]' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                My Circles
-              </button>
-              <button 
-                onClick={() => setSidebarMode('explore')}
-                className={`flex-1 py-3 text-[9px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${sidebarMode === 'explore' ? 'bg-white text-slate-900 shadow-[-2px_0_10px_rgba(0,0,0,0.02)]' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <Globe size={11} /> Explore
-              </button>
-           </div>
-           
-           <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-             {sidebarMode === 'my' ? (
-                groups.length === 0 ? (
-                  <div className="p-8 text-center space-y-4">
-                     <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-200 mx-auto border border-slate-100/50">
-                       <Search size={24} />
-                     </div>
-                     <div className="space-y-1">
-                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-tight">Registry Empty</p>
-                       <p className="text-[9px] text-slate-400 font-medium italic">Form a circle or enter an access code to begin.</p>
-                     </div>
+        {/* Directory Switcher Tabs */}
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs flex-1 flex flex-col overflow-hidden min-h-[280px] xl:min-h-0">
+          <div className="p-1 border-b border-slate-100 bg-slate-50/50 flex">
+            <button
+              onClick={() => setSidebarMode('my')}
+              className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-wider rounded-2xl transition-all flex items-center justify-center gap-1.5 ${
+                sidebarMode === 'my' 
+                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200/60' 
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Users size={12} /> My Circles ({myGroups.length})
+            </button>
+            <button
+              onClick={() => setSidebarMode('explore')}
+              className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-wider rounded-2xl transition-all flex items-center justify-center gap-1.5 ${
+                sidebarMode === 'explore' 
+                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200/60' 
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Globe size={12} /> Discover
+            </button>
+          </div>
+
+          {sidebarMode === 'explore' && (
+            <div className="p-3 border-b border-slate-100">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter general groups..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200/80 rounded-xl pl-8 pr-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white text-slate-800 placeholder:text-slate-400"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+            {sidebarMode === 'my' ? (
+              myGroups.length === 0 ? (
+                <div className="p-8 text-center space-y-3">
+                  <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center mx-auto">
+                    <Users size={22} />
                   </div>
-                ) : (
-                   groups.map(g => (
-                     <button 
-                       key={g.id} 
-                       onClick={() => setActiveGroupId(g.id)} 
-                       className={`w-full p-4 rounded-[1.5rem] text-left transition-all duration-300 relative overflow-hidden group border ${
-                         activeGroupId === g.id 
-                           ? 'bg-slate-900 border-slate-900 text-white shadow-xl translate-x-1' 
-                           : 'hover:bg-slate-50 text-slate-600 border-transparent hover:border-slate-100'
-                       }`}
-                     >
-                       <div className="flex items-center justify-between mb-1 relative z-10">
-                         <span className="font-bold text-sm tracking-tight truncate max-w-[140px] uppercase font-serif italic">{g.name}</span>
-                         {g.visibility === 'private' && <Lock size={10} className={activeGroupId === g.id ? 'text-blue-300' : 'text-slate-300'} />}
-                       </div>
-                       <div className="flex items-center gap-2 relative z-10">
-                         <div className={`w-1.5 h-1.5 rounded-full ${activeGroupId === g.id ? 'bg-blue-400 animate-pulse' : 'bg-emerald-400'}`} />
-                         <div className={`text-[9px] font-bold tracking-widest uppercase ${activeGroupId === g.id ? 'text-slate-400' : 'text-slate-400'}`}>{g.members.length} Researching</div>
-                       </div>
-                       {activeGroupId === g.id && (
-                         <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 blur-xl rounded-full" />
-                       )}
-                     </button>
-                   ))
-                )
-             ) : (
-                exploreGroups.length === 0 ? (
-                  <div className="p-8 text-center text-[10px] text-slate-400 font-medium italic">
-                    No new public circles discovered yet.
-                  </div>
-                ) : (
-                  exploreGroups.map(g => (
-                    <div 
-                      key={g.id} 
-                      className="w-full p-4 rounded-[1.5rem] text-left border border-slate-100/50 bg-slate-50/30 group hover:border-blue-200 transition-all"
+                  <p className="text-xs font-semibold text-slate-700">No Groups Joined Yet</p>
+                  <p className="text-[11px] text-slate-500">Create a group for your course or enter an invite code to join a study circle.</p>
+                  <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="mt-2 text-xs font-bold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                  >
+                    + Form a Study Circle
+                  </button>
+                </div>
+              ) : (
+                myGroups.map(g => {
+                  const isActive = activeGroupId === g.id;
+                  const isPrivate = g.type === 'private';
+                  const memberCount = (g.members || []).length;
+
+                  return (
+                    <button
+                      key={g.id}
+                      onClick={() => setActiveGroupId(g.id)}
+                      className={`w-full p-3.5 rounded-2xl text-left transition-all duration-200 border cursor-pointer ${
+                        isActive
+                          ? 'bg-indigo-900 border-indigo-900 text-white shadow-md'
+                          : 'bg-white hover:bg-slate-50 border-slate-200/70 text-slate-800'
+                      }`}
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-bold text-xs tracking-tight truncate uppercase font-serif italic">{g.name}</span>
-                        <Globe size={11} className="text-slate-300" />
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-xs font-bold uppercase tracking-tight truncate ${isActive ? 'text-white' : 'text-slate-900'}`}>
+                          {g.name}
+                        </span>
+                        {isPrivate ? (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 ${
+                            isActive ? 'bg-indigo-800 text-indigo-200' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            <Lock size={9} /> Private
+                          </span>
+                        ) : (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 ${
+                            isActive ? 'bg-indigo-800 text-indigo-200' : 'bg-emerald-50 text-emerald-700'
+                          }`}>
+                            <Globe size={9} /> General
+                          </span>
+                        )}
                       </div>
-                      <p className="text-[9px] text-slate-500 mb-3 line-clamp-2 italic">{g.description}</p>
-                      <button 
-                        onClick={() => joinGroup(g)}
-                        className="w-full py-2 bg-white border border-slate-200 rounded-xl text-[9px] font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className={`truncate ${isActive ? 'text-indigo-200' : 'text-slate-500'}`}>
+                          {g.course || 'General Subject'}
+                        </span>
+                        <span className={`font-medium ${isActive ? 'text-indigo-300' : 'text-slate-400'}`}>
+                          {memberCount} member{memberCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
+              )
+            ) : (
+              exploreGroups.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500 italic">
+                  No public general study groups discovered matching your query.
+                </div>
+              ) : (
+                exploreGroups.map(g => (
+                  <div key={g.id} className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-900 uppercase tracking-tight">{g.name}</span>
+                      <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-md font-bold">
+                        General
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 line-clamp-2">{g.description || `Group for ${g.course}`}</p>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] text-slate-500 font-medium">{g.course}</span>
+                      <button
+                        onClick={() => handleJoinGeneralGroup(g)}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-xl transition-all cursor-pointer"
                       >
-                        Join Collective
+                        Join Circle
                       </button>
                     </div>
-                  ))
-                )
-             )}
-           </div>
+                  </div>
+                ))
+              )
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Main Channel Workspace */}
-      <div className="flex-1 bg-white rounded-[2.5rem] flex flex-col border border-black/5 shadow-sm overflow-hidden relative">
-         {!activeGroup ? (
-           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-              <div className="w-16 h-16 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-300 mb-6 border border-slate-100">
-                <Globe size={32} />
-              </div>
-              <h2 className="text-2xl font-serif font-bold text-slate-900 tracking-tight mb-3">Select a Study Group</h2>
-              <p className="text-slate-500 max-w-sm font-medium text-sm">Choose a group from the sidebar or enter an access code to begin collaborating.</p>
-              <button 
-                onClick={() => setShowJoinModal(true)}
-                className="mt-6 px-6 py-3 bg-blue-700 text-white rounded-xl font-bold text-xs tracking-wide hover:scale-105 active:scale-95 transition-all shadow-md"
-              >
-                Join with Access Code
-              </button>
-           </div>
-         ) : (
-           <>
-              {/* Header */}
-              <div className="p-6 md:p-8 border-b border-slate-100 bg-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10 shadow-sm">
-                 <div className="space-y-0.5">
-                    <div className="flex items-center gap-3">
-                       <h2 className="text-xl md:text-2xl font-serif font-bold text-slate-900 tracking-tight uppercase italic">{activeGroup.name}</h2>
-                       <div className="flex gap-2">
-                          <button 
-                            onClick={copyInvite} 
-                            title="Copy Invite URL"
-                            className={`p-2 rounded-xl transition-all shadow-sm border ${copied ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-100'}`}
-                          >
-                            {copied ? <Check size={14} /> : <Share2 size={14} />}
-                          </button>
-                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap text-slate-500">
-                      <p className="text-[10px] text-slate-400 font-medium italic">{activeGroup.description}</p>
-                      <div className="w-1 h-1 bg-slate-200 rounded-full" />
-                      <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Access Link Code:</span>
-                      <span className="text-[10px] text-indigo-600 font-mono font-bold uppercase tracking-wider bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg shadow-xs">
-                        {activeGroup.inviteCode}
-                      </span>
-                      {activeGroup.visibility === 'private' && (
-                        <button 
-                          onClick={regenerateCode}
-                          title="Regenerate unique invite code for this private circle"
-                          className="text-[9px] font-bold uppercase tracking-wider text-rose-600 hover:text-rose-700 transition-colors flex items-center gap-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-2 py-1 ml-1 cursor-pointer"
-                        >
-                          <Sparkles size={10} />
-                          Regen Code
-                        </button>
-                      )}
-                    </div>
-                 </div>
-                 
-                 <div className="flex items-center gap-3 w-full md:w-auto">
-                    <div className="flex flex-1 md:flex-none bg-slate-50 p-1 rounded-2xl border border-slate-100">
-                       <button 
-                         onClick={() => setActiveTab('chat')}
-                         className={`flex-1 md:flex-none px-5 py-2.5 rounded-[1rem] text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'chat' ? 'bg-white text-slate-900 shadow-md border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
-                       >
-                         <MessageSquare size={12} /> Discussion
-                       </button>
-                       <button 
-                         onClick={() => setActiveTab('materials')}
-                         className={`flex-1 md:flex-none px-5 py-2.5 rounded-[1rem] text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === 'materials' ? 'bg-white text-slate-900 shadow-md border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
-                       >
-                         <Files size={12} /> Library
-                       </button>
-                    </div>
-                    <button 
-                      onClick={leaveGroup} 
-                      className="hidden md:flex p-3 text-slate-400 hover:text-rose-500 transition-colors"
-                      title="Abandon Circle"
+      {/* MAIN WORKSPACE: Active Group Workspace */}
+      <div className="flex-1 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex flex-col overflow-hidden">
+        {!activeGroup ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mb-4">
+              <Users size={32} />
+            </div>
+            <h2 className="text-xl font-serif font-bold text-slate-900 mb-2">Select a Study Group</h2>
+            <p className="text-sm text-slate-500 max-w-md">Choose a circle from your directory on the left or enter an invite code to join a new group.</p>
+            <button
+              onClick={() => setShowJoinModal(true)}
+              className="mt-6 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-xs transition-all cursor-pointer"
+            >
+              Enter Invite Code
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Header Header */}
+            <div className="p-5 border-b border-slate-100 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="text-lg md:text-xl font-serif font-bold text-slate-900 uppercase tracking-tight">
+                    {activeGroup.name}
+                  </h2>
+                  {activeGroup.type === 'private' ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
+                      <Lock size={10} /> Private Group
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                      <Globe size={10} /> General Group
+                    </span>
+                  )}
+                  <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-semibold">
+                    {activeGroup.course}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
+                  <span>{activeGroup.description || 'Collaborative Academic Circle'}</span>
+                  <span className="text-slate-300">•</span>
+                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                    Code: {activeGroup.inviteCode}
+                  </span>
+                  <button
+                    onClick={copyInvite}
+                    title="Copy Shareable Invite Link"
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                    {copied ? 'Link Copied!' : 'Copy Link'}
+                  </button>
+                  {activeGroup.ownerId === currentUserId && (
+                    <button
+                      onClick={regenerateCode}
+                      title="Generate new invite code"
+                      className="text-[10px] text-slate-500 hover:text-slate-800 underline flex items-center gap-1 cursor-pointer"
                     >
-                      <LogOut size={18} />
+                      <RefreshCw size={10} /> Regen Code
                     </button>
-                 </div>
+                  )}
+                </div>
               </div>
 
-              {/* Feed Content */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-10 bg-white">
-                 {activeTab === 'chat' ? (
-                   <div className="space-y-8 max-w-4xl mx-auto">
-                      {activeGroup.messages.map(msg => {
-                        const isMe = msg.sender === profile.name;
-                        const isSystem = msg.sender === 'Scolaris AI';
-                        return (
-                          <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} gap-1.5 animate-in slide-in-from-bottom-2 duration-400`}>
-                             <div className={`flex items-center gap-2 px-1 ${isMe ? 'flex-row-reverse' : ''}`}>
-                                {isMe ? (
-                                  <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="xs" />
-                                ) : isSystem ? (
-                                  <UserAvatar avatarIcon="brain" name="Scolaris AI" size="xs" />
-                                ) : (
-                                  <UserAvatar avatarIcon="user-circle" name={msg.sender} size="xs" />
-                                )}
-                                <span className={`text-[9px] font-bold uppercase tracking-widest ${isMe ? 'text-blue-600' : isSystem ? 'text-indigo-600' : 'text-slate-500'}`}>
-                                  {isSystem ? 'Scolaris Analysis' : msg.sender}
-                                </span>
-                                {isSystem && <Sparkles size={10} className="text-indigo-500" />}
-                             </div>
-                              <div className={`p-4 md:p-6 rounded-[1.8rem] max-w-[85%] md:max-w-xl text-[14px] leading-relaxed shadow-sm border relative overflow-hidden ${
-                               isMe 
-                                 ? 'bg-slate-900 text-white border-slate-900 rounded-tr-none' 
-                                 : isSystem 
-                                   ? 'bg-indigo-50/30 border-indigo-100 text-slate-800 rounded-tl-none font-medium' 
-                                   : 'bg-slate-50 border-slate-100 text-slate-700 rounded-tl-none'
-                              } ${msg.isIrrelevant ? 'opacity-90' : ''}`}>
-                                {msg.isIrrelevant ? (
-                                  <div className="relative group/irrelevant">
-                                    <div className="blur-sm select-none grayscale contrast-125">
-                                      {msg.text.split('').map(() => 'X').join('')}
-                                    </div>
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                       <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-rose-100 shadow-sm flex items-center gap-2">
-                                          <Bot size={12} className="text-rose-500" />
-                                          <span className="text-[10px] font-bold text-rose-600 uppercase tracking-widest">Irrelevant Content Flagged</span>
-                                       </div>
-                                    </div>
-                                    <div className="mt-4 p-3 bg-rose-50 rounded-xl border border-rose-100 text-[11px] text-rose-700 italic">
-                                       "This node emitted data unrelated to our collective objective. Transmission obscured."
-                                    </div>
+              {/* Navigation Tabs */}
+              <div className="flex items-center gap-2">
+                <div className="bg-slate-100 p-1 rounded-2xl flex border border-slate-200/80">
+                  <button
+                    onClick={() => setActiveTab('ai')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeTab === 'ai'
+                        ? 'bg-white text-indigo-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Bot size={14} className="text-indigo-600" /> Scolaris AI
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('materials')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeTab === 'materials'
+                        ? 'bg-white text-indigo-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Files size={14} /> Materials ({(activeGroup.sharedMaterials || []).length})
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('discussions')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeTab === 'discussions'
+                        ? 'bg-white text-indigo-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <MessageSquare size={14} /> Forum
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('overview')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeTab === 'overview'
+                        ? 'bg-white text-indigo-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Users size={14} /> Info
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* TAB CONTENT */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-slate-50/30">
+              
+              {/* 1. SCOLARIS AI TAB */}
+              {activeTab === 'ai' && (
+                <div className="max-w-4xl mx-auto space-y-6 flex flex-col h-full">
+                  
+                  {/* Preset AI Action Badges */}
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={16} className="text-indigo-600" />
+                        <span className="text-xs font-bold text-slate-800">Group AI Study Assistant</span>
+                        <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">
+                          Grounded in Group Materials
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500">
+                        {(activeGroup.sharedMaterials || []).length} Document(s) Indexed
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      <button
+                        onClick={() => handleSendAiPrompt(undefined, "Generate a 5-question study quiz based on all uploaded group notes.", 'quiz')}
+                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-indigo-100"
+                      >
+                        <HelpCircle size={13} /> Quiz Practice
+                      </button>
+                      <button
+                        onClick={() => handleSendAiPrompt(undefined, "Synthesize and summarize all uploaded group study materials.", 'summarize')}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-emerald-100"
+                      >
+                        <FileText size={13} /> Group Summary
+                      </button>
+                      <button
+                        onClick={() => handleSendAiPrompt(undefined, "Identify top 5 high-yield exam topics from our group materials.", 'topics')}
+                        className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-amber-100"
+                      >
+                        <Lightbulb size={13} /> High-Yield Revision
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Chat Messages Log */}
+                  <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+                    {aiMessages.map((msg, idx) => {
+                      const isAi = msg.sender === 'Scolaris AI';
+                      return (
+                        <div key={idx} className={`flex gap-3 ${isAi ? 'items-start' : 'items-end justify-end'}`}>
+                          {isAi && (
+                            <div className="w-8 h-8 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-1">
+                              <Bot size={18} />
+                            </div>
+                          )}
+                          <div className={`p-4 rounded-2xl max-w-[85%] text-sm leading-relaxed shadow-xs ${
+                            isAi 
+                              ? 'bg-white border border-slate-200/80 text-slate-800 font-normal' 
+                              : 'bg-indigo-900 text-white font-medium'
+                          }`}>
+                            <div className="flex items-center justify-between mb-1 pb-1 border-b border-slate-100/50">
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${isAi ? 'text-indigo-600' : 'text-indigo-200'}`}>
+                                {msg.sender}
+                              </span>
+                              <span className="text-[9px] text-slate-400">
+                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="whitespace-pre-wrap">{msg.text}</div>
+                          </div>
+                          {!isAi && (
+                            <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="sm" />
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {isAiThinking && (
+                      <div className="flex items-center gap-3 text-indigo-600 font-medium text-xs bg-indigo-50/80 p-3.5 rounded-2xl border border-indigo-100 animate-pulse">
+                        <Sparkles size={16} className="animate-spin" />
+                        Scolaris AI is analyzing group materials and generating response...
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Prompt Input Field */}
+                  <form onSubmit={e => handleSendAiPrompt(e)} className="bg-white p-2 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={`Ask Scolaris AI about materials in "${activeGroup.name}"...`}
+                      value={aiPrompt}
+                      onChange={e => setAiPrompt(e.target.value)}
+                      disabled={isAiThinking}
+                      className="flex-1 px-4 py-2.5 text-xs outline-none text-slate-800 placeholder:text-slate-400 bg-transparent"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!aiPrompt.trim() || isAiThinking}
+                      className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl disabled:opacity-50 transition-all cursor-pointer shrink-0"
+                    >
+                      <Send size={16} />
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* 2. SHARED MATERIALS TAB */}
+              {activeTab === 'materials' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-base font-serif font-bold text-slate-900">Group Learning Repository</h3>
+                      <p className="text-xs text-slate-500">Shared lecture slides, PDF notes, and course documents accessible to group members.</p>
+                    </div>
+                    <div>
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isUploading ? <Sparkles size={14} className="animate-spin" /> : <Upload size={14} />}
+                        {isUploading ? 'Uploading & Indexing...' : 'Upload Study Material'}
+                      </button>
+                      <input type="file" ref={fileInputRef} onChange={handleMaterialUpload} className="hidden" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {(activeGroup.sharedMaterials || []).length === 0 ? (
+                      <div className="col-span-full py-16 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8 space-y-3">
+                        <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
+                          <Files size={24} />
+                        </div>
+                        <p className="text-xs font-bold text-slate-700">No Study Materials Uploaded</p>
+                        <p className="text-xs text-slate-500">Upload your PDF course notes or slides so Scolaris AI can answer questions for your group!</p>
+                      </div>
+                    ) : (
+                      (activeGroup.sharedMaterials || []).map((mat, idx) => (
+                        <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between space-y-4">
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 font-bold text-xs">
+                              PDF
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-xs font-bold text-slate-900 truncate" title={mat.fileName}>
+                                {mat.fileName}
+                              </h4>
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                Uploaded by {mat.sharedBy || mat.uploadedByName || 'Group Member'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                            <span>{new Date(mat.timestamp || Date.now()).toLocaleDateString()}</span>
+                            {mat.downloadUrl ? (
+                              <a
+                                href={mat.downloadUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl flex items-center gap-1 transition-all"
+                              >
+                                <Download size={11} /> Download
+                              </a>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 font-bold">Indexed for AI</span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. DISCUSSIONS / FORUM TAB */}
+              {activeTab === 'discussions' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-serif font-bold text-slate-900">Academic Forum</h3>
+                      <p className="text-xs text-slate-500">Ask questions, share study tips, and collaborate on assignments.</p>
+                    </div>
+                    <button
+                      onClick={() => setShowNewDiscussion(!showNewDiscussion)}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Plus size={14} /> New Post
+                    </button>
+                  </div>
+
+                  {/* Create Discussion Form */}
+                  {showNewDiscussion && (
+                    <form onSubmit={handleCreateDiscussion} className="bg-white p-5 rounded-3xl border border-indigo-100 shadow-xs space-y-3 animate-in slide-in-from-top-2">
+                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Start Discussion Thread</h4>
+                      <input
+                        type="text"
+                        placeholder="Thread Topic / Question Title"
+                        value={newDiscussionTitle}
+                        onChange={e => setNewDiscussionTitle(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                      />
+                      <textarea
+                        rows={3}
+                        placeholder="Detailed discussion prompt or question..."
+                        value={newDiscussionContent}
+                        onChange={e => setNewDiscussionContent(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 resize-none"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowNewDiscussion(false)}
+                          className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                        >
+                          Post Discussion
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Discussions List */}
+                  <div className="space-y-4">
+                    {(activeGroup.discussions || []).length === 0 ? (
+                      <div className="py-12 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8">
+                        <MessageSquare size={24} className="text-slate-400 mx-auto mb-2" />
+                        <p className="text-xs font-bold text-slate-700">No Discussions Started Yet</p>
+                        <p className="text-xs text-slate-500">Be the first to post a study topic or ask a course question!</p>
+                      </div>
+                    ) : (
+                      (activeGroup.discussions || []).map(post => (
+                        <div key={post.id} className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <UserAvatar avatarIcon={post.authorAvatar || 'graduation-cap'} name={post.authorName} size="xs" />
+                              <span className="text-xs font-bold text-slate-900">{post.authorName}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400">
+                              {new Date(post.timestamp).toLocaleDateString()}
+                            </span>
+                          </div>
+
+                          {post.title && <h4 className="text-xs font-bold text-indigo-900">{post.title}</h4>}
+                          <p className="text-xs text-slate-700 whitespace-pre-wrap">{post.content}</p>
+
+                          {/* Replies */}
+                          {(post.replies || []).length > 0 && (
+                            <div className="pl-4 border-l-2 border-indigo-100 space-y-2 pt-2">
+                              {post.replies.map(reply => (
+                                <div key={reply.id} className="bg-slate-50 p-2.5 rounded-xl text-xs space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-bold text-slate-800 text-[11px]">{reply.authorName}</span>
+                                    <span className="text-[9px] text-slate-400">{new Date(reply.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
-                                ) : (
-                                  msg.text
-                                )}
-                                <div className={`text-[8px] mt-3 font-bold uppercase tracking-[0.1em] flex items-center gap-2 ${isMe ? 'text-slate-400' : 'text-slate-400'}`}>
-                                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  <div className="w-1 h-1 bg-current opacity-30 rounded-full" />
-                                  <span>{msg.isIrrelevant ? 'ANOMALY DETECTED' : 'VERIFIED NODE'}</span>
+                                  <p className="text-slate-600">{reply.content}</p>
                                 </div>
-                             </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Reply Trigger */}
+                          {activeReplyPostId === post.id ? (
+                            <div className="flex gap-2 pt-2">
+                              <input
+                                type="text"
+                                placeholder="Write a reply..."
+                                value={replyText}
+                                onChange={e => setReplyText(e.target.value)}
+                                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                              />
+                              <button
+                                onClick={() => handleAddReply(post.id)}
+                                className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                              >
+                                Reply
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setActiveReplyPostId(post.id)}
+                              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 pt-1 cursor-pointer"
+                            >
+                              + Reply to thread
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. OVERVIEW / GROUP INFO TAB */}
+              {activeTab === 'overview' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+                    <h3 className="text-base font-serif font-bold text-slate-900">Group Metadata & Access</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Group Type</span>
+                        <span className="font-bold text-slate-800 capitalize">{activeGroup.type} Circle</span>
+                      </div>
+                      <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Course / Subject</span>
+                        <span className="font-bold text-slate-800">{activeGroup.course || 'General'}</span>
+                      </div>
+                      {activeGroup.department && (
+                        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Department</span>
+                          <span className="font-bold text-slate-800">{activeGroup.department}</span>
+                        </div>
+                      )}
+                      {activeGroup.level && (
+                        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Academic Level</span>
+                          <span className="font-bold text-slate-800">{activeGroup.level}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Members List */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-serif font-bold text-slate-900">Group Members ({(activeGroup.members || []).length})</h3>
+                      {activeGroup.ownerId === currentUserId && (
+                        <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">
+                          Owner Controls Active
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="divide-y divide-slate-100">
+                      {(activeGroup.members || []).map((mem: any, i) => {
+                        const mName = typeof mem === 'string' ? mem : mem.name;
+                        const mRole = typeof mem === 'string' ? (activeGroup.ownerId === currentUserId ? 'owner' : 'member') : (mem.role || 'member');
+                        const mUid = typeof mem === 'string' ? mem : mem.userId;
+
+                        return (
+                          <div key={i} className="py-3 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2.5">
+                              <UserAvatar avatarIcon="graduation-cap" name={mName} size="xs" />
+                              <div>
+                                <span className="font-bold text-slate-900 block">{mName}</span>
+                                <span className="text-[10px] text-slate-400 capitalize">{mRole}</span>
+                              </div>
+                            </div>
+
+                            {activeGroup.ownerId === currentUserId && mUid !== currentUserId && (
+                              <button
+                                onClick={() => handleRemoveMember(mUid)}
+                                className="text-rose-600 hover:text-rose-800 text-[11px] font-bold cursor-pointer"
+                              >
+                                Remove
+                              </button>
+                            )}
                           </div>
                         );
                       })}
-                      {isAiThinking && (
-                        <div className="flex flex-col items-start gap-1.5 animate-pulse">
-                           <div className="flex items-center gap-2 px-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 leading-none">Neural Processing</span>
-                              <div className="flex gap-0.5">
-                                <div className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <div className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <div className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                              </div>
-                           </div>
-                           <div className="p-5 bg-indigo-50/50 border border-indigo-100 text-indigo-700/60 rounded-[1.8rem] rounded-tl-none font-serif italic text-xs shadow-sm">
-                             Scolaris is synthesizing collective intelligence...
-                           </div>
-                        </div>
-                      )}
-                      <div ref={chatEndRef} />
-                   </div>
-                 ) : (
-                    <div className="space-y-8 max-w-5xl mx-auto">
-                       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 mb-8 relative overflow-hidden group">
-                          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                          <div className="space-y-1 relative z-10">
-                             <div className="px-2 py-0.5 bg-blue-100 text-blue-700 border border-blue-200 rounded-full text-[8px] font-black uppercase tracking-widest inline-block mb-1">Knowledge Repository</div>
-                             <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-250 text-indigo-700 text-[8px] font-bold tracking-wider font-mono rounded-full leading-none inline-block ml-2 mb-1">● Supabase S1 S3 Protocol Active</span>
-                             <h3 className="text-2xl font-serif font-bold text-slate-900 tracking-tight italic">Group Library</h3>
-                             <p className="text-xs text-slate-500 font-medium">Shared study materials and collective research briefings.</p>
-                             <div className="text-[9px] text-slate-400 font-mono italic mt-1 leading-relaxed">
-                               S3 Endpoint: <span className="text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded leading-none select-all font-semibold">https://ijvttbxphdntffmdggvv.storage.supabase.co/storage/v1/s3</span> (Region: eu-north-1)
-                             </div>
-                          </div>
-                          <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={isUploading}
-                            className="w-full md:w-auto mt-6 md:mt-0 px-8 py-4 bg-slate-900 text-white rounded-[1.2rem] font-bold text-xs tracking-widest uppercase hover:bg-blue-700 active:scale-95 transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3 group/btn disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                             {isUploading ? (
-                               <>
-                                 <Sparkles size={18} className="animate-spin text-indigo-400" /> S3 Transmitting...
-                               </>
-                             ) : (
-                               <>
-                                 <Upload size={18} className="group-hover:-translate-y-1 transition-transform" /> Contribute Material
-                               </>
-                             )}
-                          </button>
-                          <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-                       </div>
-
-                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                          {activeGroup.sharedMaterials.length === 0 ? (
-                            <div className="col-span-full py-24 text-center bg-slate-50/50 rounded-[3rem] border border-dashed border-slate-200 group hover:bg-slate-50 transition-colors">
-                               <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center text-slate-200 mx-auto mb-6 shadow-sm group-hover:scale-110 transition-transform">
-                                 <FileText size={32} />
-                               </div>
-                               <div className="space-y-1">
-                                 <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest">Library Empty</p>
-                                 <p className="text-slate-400 text-[11px] font-medium italic">Upload scholarly resources to build your collective knowledge.</p>
-                               </div>
-                            </div>
-                          ) : (
-                            activeGroup.sharedMaterials.map((file, idx) => (
-                              <div key={idx} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col justify-between group hover:border-blue-400/30 hover:shadow-xl transition-all duration-300 relative overflow-hidden">
-                                 <div className="flex items-center gap-4 mb-6">
-                                    <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 border border-blue-100 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                       <FileText size={20} />
-                                    </div>
-                                    <div className="space-y-0.5 flex-1 min-w-0">
-                                       <div className="text-sm font-bold text-slate-900 tracking-tight truncate uppercase font-serif italic" title={file.fileName}>{file.fileName}</div>
-                                       <div className="flex items-center gap-1.5 flex-wrap">
-                                          <div className={`w-1 h-1 rounded-full ${file.s3Key ? 'bg-indigo-400' : 'bg-emerald-400'}`} />
-                                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">By {file.sharedBy}</div>
-                                          {file.s3Key && (
-                                            <span className="text-[7px] bg-indigo-50 text-indigo-700 font-mono px-1 py-0.5 rounded border border-indigo-100 font-extrabold leading-none">
-                                              S3
-                                            </span>
-                                          )}
-                                       </div>
-                                    </div>
-                                 </div>
-                                 <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                                    <span className="text-[8px] font-medium text-slate-300 uppercase tracking-widest">{new Date(file.timestamp).toLocaleDateString()}</span>
-                                    <button 
-                                      onClick={() => handleAccessFile(file)}
-                                      className="flex items-center gap-2 px-3 py-2 bg-slate-50 text-slate-600 hover:bg-slate-950 hover:text-white rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all cursor-pointer"
-                                    >
-                                       <Download size={12} /> Access
-                                    </button>
-                                 </div>
-                              </div>
-                            ))
-                          )}
-                       </div>
                     </div>
-                 )}
-              </div>
-
-               {/* Input Rail */}
-              {activeTab === 'chat' && (
-                <div className="p-6 md:p-8 bg-white border-t border-slate-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
-                   <form onSubmit={sendMessage} className="flex gap-4 max-w-5xl mx-auto items-center">
-                      <div className="flex-1 relative group">
-                        <input 
-                          disabled={isValidating}
-                          className={`w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-8 py-4 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white text-slate-700 placeholder:text-slate-400 transition-all pr-16 ${isValidating ? 'bg-indigo-50/30' : ''}`} 
-                          placeholder={isValidating ? "AI is validating transmission..." : "Contribute to educational discussion..."} 
-                          value={messageText} 
-                          onChange={e => setMessageText(e.target.value)} 
-                        />
-                        <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                           {isValidating ? (
-                              <div className="flex gap-1">
-                                <div className="w-1 h-1 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                <div className="w-1 h-1 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                <div className="w-1 h-1 bg-blue-400 rounded-full animate-bounce" />
-                              </div>
-                           ) : (
-                             <>
-                               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                               <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest hidden sm:inline">Active Hive</span>
-                             </>
-                           )}
-                        </div>
-                      </div>
-                      <button 
-                        type="submit" 
-                        disabled={!messageText.trim() || isAiThinking || isValidating} 
-                        className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center shrink-0 hover:bg-blue-700 hover:scale-105 active:scale-95 transition-all shadow-lg disabled:opacity-50"
-                      >
-                         <ArrowRight size={20} />
-                      </button>
-                   </form>
+                  </div>
                 </div>
               )}
-           </>
-         )}
+
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Modals */}
-      {showJoinModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-500">
-           <div className="bg-white w-full max-w-md p-10 rounded-[3rem] border border-slate-100 shadow-2xl space-y-8 animate-in zoom-in duration-300 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-indigo-600" />
-              <div className="flex justify-between items-center">
-                 <div>
-                   <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight italic leading-none">Join Circle</h1>
-                   <p className="text-[10px] text-slate-400 font-medium mt-1 uppercase tracking-widest">Collective Access Request</p>
-                 </div>
-                 <button onClick={() => { setShowJoinModal(false); setJoinError(''); }} className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-50 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"><X size={20} /></button>
+      {/* CREATE GROUP MODAL */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="text-lg font-serif font-bold text-slate-900">Create New Study Group</h3>
+              <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateGroup} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Organic Chemistry Study Circle"
+                  value={createName}
+                  onChange={e => setCreateName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                />
               </div>
-              <div className="space-y-6">
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-4">Registry Access Code</label>
-                    <div className="relative">
-                      <input 
-                        required 
-                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-5 text-2xl font-bold tracking-[0.3em] outline-none focus:ring-4 focus:ring-blue-500/10 focus:bg-white uppercase text-center placeholder:text-slate-200" 
-                        placeholder="XXXX-XXXX" 
-                        value={inviteCodeInput} 
-                        onChange={e => { setInviteCodeInput(e.target.value); setJoinError(''); }} 
-                      />
-                      <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-200">
-                         <Lock size={18} />
-                      </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Course / Subject *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. CHM 301"
+                  value={createCourse}
+                  onChange={e => setCreateCourse(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="Brief overview of group goals..."
+                  value={createDesc}
+                  onChange={e => setCreateDesc(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Privacy / Type *</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCreateType('general')}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                      createType === 'general'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Globe size={14} /> General Group
                     </div>
-                    {joinError && (
-                      <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider ml-4 mt-2 leading-normal">
-                        {joinError}
-                      </p>
-                    )}
-                 </div>
-                 <button 
-                  onClick={joinByCode} 
-                  disabled={!inviteCodeInput.trim() || isAiThinking} 
-                  className="w-full py-5 bg-slate-900 text-white rounded-2xl font-bold text-sm tracking-[0.2em] uppercase hover:bg-blue-700 transition-all shadow-xl shadow-blue-900/10 disabled:opacity-50"
-                 >
-                    {isAiThinking && <Sparkles size={14} className="animate-spin" />} Establish Connection
-                 </button>
+                    <p className="text-[10px] font-normal opacity-80">Discoverable by all students to join freely.</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCreateType('private')}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                      createType === 'private'
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Lock size={14} /> Private Group
+                    </div>
+                    <p className="text-[10px] font-normal opacity-80">Restricted to members with invite code/link.</p>
+                  </button>
+                </div>
               </div>
-           </div>
+
+              {/* Optional Fields */}
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Department (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Biochemistry"
+                    value={createDept}
+                    onChange={e => setCreateDept(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Level (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 300 Level"
+                    value={createLevel}
+                    onChange={e => setCreateLevel(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!createName.trim() || !createCourse.trim()}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl disabled:opacity-50 transition-all cursor-pointer"
+                >
+                  Create Study Group
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-500">
-           <div className="bg-white w-full max-w-xl p-10 rounded-[3rem] border border-slate-100 shadow-2xl space-y-8 animate-in zoom-in duration-300 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-blue-600" />
-              <div className="flex justify-between items-center">
-                 <div>
-                   <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight italic leading-none">Form Study Circle</h1>
-                   <p className="text-[10px] text-slate-400 font-medium mt-1 uppercase tracking-widest">Collective Initiation</p>
-                 </div>
-                 <button onClick={() => setShowCreateModal(false)} className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-50 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"><X size={20} /></button>
+      {/* JOIN GROUP MODAL */}
+      {showJoinModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="text-lg font-serif font-bold text-slate-900">Join via Invite Code</h3>
+              <button onClick={() => { setShowJoinModal(false); setJoinError(''); }} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleJoinByCode} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Code / Link Code</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. X7K29A"
+                  value={joinCode}
+                  onChange={e => { setJoinCode(e.target.value); setJoinError(''); }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-center text-sm font-mono font-bold tracking-widest outline-none focus:ring-2 focus:ring-indigo-500/20 text-indigo-900 uppercase"
+                />
+                {joinError && <p className="text-[11px] text-rose-600 font-bold mt-1.5">{joinError}</p>}
               </div>
-              <div className="space-y-6">
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-4">Collective Identifier</label>
-                    <input required className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold font-serif italic outline-none focus:ring-4 focus:ring-emerald-500/10 focus:bg-white text-slate-700 placeholder:text-slate-300" placeholder="e.g. Advanced Quantum Mechanics 402" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} />
-                 </div>
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-4">Research Scope</label>
-                    <textarea className="w-full h-32 bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium outline-none focus:ring-4 focus:ring-emerald-500/10 focus:bg-white text-slate-700 resize-none placeholder:text-slate-300" placeholder="Define the primary learning objectives and collaborative focus..." value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)} />
-                 </div>
-                 <div className="flex items-center gap-4 px-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <button type="button" onClick={() => setNewGroupVisibility(v => v === 'public' ? 'private' : 'public')} className="flex items-center gap-4 group w-full">
-                       <div className={`w-12 h-6 rounded-full relative transition-all duration-500 ${newGroupVisibility === 'private' ? 'bg-slate-900' : 'bg-slate-200'}`}>
-                          <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-all duration-500 shadow-sm ${newGroupVisibility === 'private' ? 'left-6.5' : 'left-0.5'}`} />
-                       </div>
-                       <div className="flex flex-col items-start">
-                          <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Restricted Access Circle</span>
-                          <span className="text-[9px] text-slate-400 font-medium italic">Requires invite code for entry</span>
-                       </div>
-                    </button>
-                 </div>
-                 <button 
-                  onClick={createGroup} 
-                  disabled={!newGroupName.trim()} 
-                  className="w-full py-5 bg-slate-900 text-white rounded-2xl font-bold text-sm tracking-[0.2em] uppercase hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-900/10 disabled:opacity-50"
-                 >
-                    Deploy New Collaborative Node
-                 </button>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowJoinModal(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!joinCode.trim()}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl disabled:opacity-50 transition-all cursor-pointer"
+                >
+                  Join Circle
+                </button>
               </div>
-           </div>
+            </form>
+          </div>
         </div>
       )}
+
     </div>
   );
 };
