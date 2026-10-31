@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
 import { Course, UserProfile, StudySession, AppState, StudyHubData, StudyGroup, AppNotification } from './types';
 import { ICONS } from './constants';
 import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock, Sun, Moon, CheckCheck, Trash2 } from 'lucide-react';
@@ -21,9 +20,8 @@ import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import { ScolarisChatWidget } from './components/ScolarisChatWidget';
 import Auth from './components/Auth';
-import { EmailVerification } from './components/EmailVerification';
-import { auth } from './lib/firebase';
-import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import type { Session } from '@supabase/supabase-js';
+import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
 import { DBService } from './services/db';
 import ScolarisLogo from './components/ScolarisLogo';
 
@@ -60,7 +58,7 @@ const App: React.FC = () => {
   
   // Auth State Management
   const [authLoading, setAuthLoading] = useState(true);
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [sessionExpiredMsg, setSessionExpiredMsg] = useState<string | null>(null);
@@ -126,8 +124,8 @@ const App: React.FC = () => {
     }
   }, [activeTab, authUser, showAuth, authMode, showAdminLoginForm]);
 
-  // Load User Data & Profile from Firestore
-  const loadUserData = async (user: User) => {
+  // Load User Data & Profile from Supabase
+  const loadUserData = async (user: AuthUser) => {
     try {
       const uid = user.uid;
       let dbProfile = await DBService.getProfile(uid);
@@ -168,42 +166,57 @@ const App: React.FC = () => {
     }
   };
 
-  // Firebase Auth Observer
+  // Supabase Auth Observer
+  const loadedUidRef = useRef<string | null>(null);
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setAuthLoading(true);
+    let cancelled = false;
 
-      if (user) {
-        await user.reload().catch(() => {});
-        const currentUser = auth.currentUser || user;
-        setAuthUser(currentUser);
-        setSessionExpiredMsg(null);
+    const applySession = async (session: Session | null) => {
+      const user = session?.user ? toAuthUser(session.user) : null;
 
-        // Check for admin custom claim
-        try {
-          const idTokenResult = await currentUser.getIdTokenResult(true);
-          if (idTokenResult.claims.admin === true || idTokenResult.claims.role === 'admin') {
-            setIsClaimAdmin(true);
-          } else {
-            setIsClaimAdmin(false);
-          }
-        } catch {
-          setIsClaimAdmin(false);
-        }
-
-        if (currentUser.emailVerified) {
-          await loadUserData(currentUser);
-        }
-      } else {
+      if (!user || !user.emailVerified) {
+        loadedUidRef.current = null;
+        setCurrentUserId(undefined);
         setAuthUser(null);
         setProfile(null);
         setIsClaimAdmin(false);
+        setAuthLoading(false);
+        return;
       }
 
-      setAuthLoading(false);
+      setCurrentUserId(user.uid);
+      setAuthUser(user);
+      setSessionExpiredMsg(null);
+
+      // Token refreshes re-fire this handler: only load data once per signed-in user
+      if (loadedUidRef.current === user.uid) {
+        setAuthLoading(false);
+        return;
+      }
+      loadedUidRef.current = user.uid;
+      setAuthLoading(true);
+
+      // Admin status comes from the admins table (readable by the user for their own row)
+      try {
+        const { data } = await supabase.from('admins').select('user_id').eq('user_id', user.uid).maybeSingle();
+        if (!cancelled) setIsClaimAdmin(!!data);
+      } catch {
+        if (!cancelled) setIsClaimAdmin(false);
+      }
+
+      await loadUserData(user);
+      if (!cancelled) setAuthLoading(false);
+    };
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Defer: calling Supabase APIs synchronously inside this callback can deadlock the client
+      setTimeout(() => { if (!cancelled) applySession(session); }, 0);
     });
 
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   // DB Connection Health Checker
@@ -297,7 +310,9 @@ const App: React.FC = () => {
   };
 
   const handleSignOut = async () => {
-    await firebaseSignOut(auth).catch(() => {});
+    await supabase.auth.signOut().catch(() => {});
+    loadedUidRef.current = null;
+    setCurrentUserId(undefined);
     setAuthUser(null);
     setProfile(null);
     setCourses([]);
@@ -501,23 +516,6 @@ const App: React.FC = () => {
           setAuthMode('signin');
           setShowAuth(true);
         }} 
-      />
-    );
-  }
-
-  // 3. Email Unverified State (for Email/Password Accounts)
-  if (authUser && !authUser.emailVerified) {
-    return (
-      <EmailVerification
-        userEmail={authUser.email || ''}
-        onVerified={async () => {
-          await authUser.reload();
-          if (auth.currentUser?.emailVerified) {
-            setAuthUser(auth.currentUser);
-            await loadUserData(auth.currentUser);
-          }
-        }}
-        onSignOut={handleSignOut}
       />
     );
   }

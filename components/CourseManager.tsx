@@ -3,7 +3,7 @@ import { Course, Difficulty, UserProfile } from '../types';
 import { DIFFICULTY_COLORS } from '../constants';
 import { GeminiService } from '../services/gemini';
 import { RecentFiles } from './RecentFiles';
-import { auth } from '../lib/firebase';
+import { getCurrentUserId } from '../lib/supabase';
 import { 
   Plus, 
   Sparkles, 
@@ -638,7 +638,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
       {/* Recent Uploaded Files */}
       <section className="pt-4">
         <RecentFiles 
-          userId={auth.currentUser?.uid || ''} 
+          userId={getCurrentUserId() || ''} 
           courses={courses} 
         />
       </section>

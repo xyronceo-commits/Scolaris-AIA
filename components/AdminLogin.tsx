@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { Shield, Lock, Mail, ArrowLeft, KeyRound, AlertCircle, Loader2 } from 'lucide-react';
-import { signInWithCustomToken } from 'firebase/auth';
-import { auth } from '../lib/firebase';
 import ScolarisLogo from './ScolarisLogo';
 
 interface AdminLoginProps {
@@ -37,15 +35,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Authentication failed. Incorrect administrator password.');
-      }
-
-      // If customToken returned, sign in with Firebase Auth for rules evaluation
-      if (data.customToken) {
-        try {
-          await signInWithCustomToken(auth, data.customToken);
-        } catch (fbErr) {
-          console.warn('Firebase Custom Token sign-in warning:', fbErr);
-        }
       }
 
       // Store session token in sessionStorage for administrator session lifecycle

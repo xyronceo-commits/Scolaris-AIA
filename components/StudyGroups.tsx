@@ -7,7 +7,7 @@ import {
   HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash
 } from 'lucide-react';
 import { DBService } from '../services/db';
-import { auth } from '../lib/firebase';
+import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 import { UserAvatar } from './UserAvatar';
 
 interface StudyGroupsProps {
@@ -66,7 +66,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const currentUserId = auth.currentUser?.uid || profile.email || 'guest_user';
+  const currentUserId = getCurrentUserId() || profile.email || 'guest_user';
   const activeGroup = groups.find(g => g.id === activeGroupId);
 
   // Filtered Groups for My Circles vs Explore
@@ -299,7 +299,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
     setAiMessages(prev => [...prev, { sender: profile.name, text: userMsgText, timestamp: Date.now() }]);
     setIsAiThinking(true);
 
-    // Save user message to group state and Firestore
+    // Save user message to group state and database
     setGroups(prev => prev.map(g => {
       if (g.id === activeGroup.id) {
         const updatedMsgs = [...(g.messages || []), userMsgObj];
@@ -317,7 +317,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         .map(m => `--- DOCUMENT: ${m.fileName} ---\n${m.content || 'No text content available.'}`)
         .join('\n\n');
 
-      const token = await auth.currentUser?.getIdToken();
+      const token = await getAccessToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -358,7 +358,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         }
       ]);
 
-      // Save AI message to group state and Firestore
+      // Save AI message to group state and database
       setGroups(prev => prev.map(g => {
         if (g.id === activeGroup.id) {
           const updatedMsgs = [...(g.messages || []), aiMsgObj];

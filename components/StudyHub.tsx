@@ -5,7 +5,7 @@ import { ICONS } from '../constants';
 import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
-import { auth } from '../lib/firebase';
+import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import { RecentFiles } from './RecentFiles';
 
@@ -93,7 +93,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   useEffect(() => {
     const fetchUserFiles = async () => {
-      const userId = auth.currentUser?.uid;
+      const userId = getCurrentUserId();
       if (userId) {
         try {
           const files = await DBService.getUserFiles(userId);
@@ -104,7 +104,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       }
     };
     fetchUserFiles();
-  }, [auth.currentUser?.uid, refreshFilesTrigger]);
+  }, [getCurrentUserId(), refreshFilesTrigger]);
 
   const handleSelectRecentFile = (file: UserFile) => {
     if (file.courseId) {
@@ -143,7 +143,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
     try {
       const activeCourse = courses.find(c => c.id === activeCourseId);
-      const userId = auth.currentUser?.uid || 'user_anonymous';
+      const userId = getCurrentUserId() || 'user_anonymous';
 
       const userFile = await DBService.uploadFileToStorage(
         userId,
@@ -187,7 +187,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
     if (file.s3Url && !file.s3Key.startsWith('simulated/')) {
       try {
         addNotification('content', 'Retrieving File', `Generating dynamic authorization for ${file.fileName}...`, 'hub');
-        const token = await auth.currentUser?.getIdToken();
+        const token = await getAccessToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
@@ -320,8 +320,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
         setFileContent(content);
         const name = file.name;
 
-        // Save file to user-isolated Firebase Storage & Firestore
-        const userId = auth.currentUser?.uid;
+        // Save file to user-isolated Supabase Storage & database
+        const userId = getCurrentUserId();
         if (userId && activeCourseId) {
           const activeCourse = courses.find(c => c.id === activeCourseId);
           try {
@@ -1700,7 +1700,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       {/* User Isolated Storage Recent Files */}
       <section id="recent-files-section" className="pt-8 border-t border-slate-100 mt-8 scroll-mt-6">
         <RecentFiles 
-          userId={auth.currentUser?.uid || ''} 
+          userId={getCurrentUserId() || ''} 
           courses={courses} 
           onSelectFile={handleSelectRecentFile}
           refreshTrigger={refreshFilesTrigger}

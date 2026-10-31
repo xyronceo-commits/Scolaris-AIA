@@ -2,14 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import crypto from 'crypto';
-import { initializeApp, getApps, App } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import Groq from 'groq-sdk';
 import { GoogleGenAI } from '@google/genai';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import firebaseConfig from './firebase-applet-config.json';
 import { 
   processDocumentBuffer, 
   normalizeExtractedText, 
@@ -17,28 +14,47 @@ import {
   selectRelevantChunks 
 } from './lib/documentProcessor';
 
-// Initialize Firebase Admin SDK
-let adminApp: App | null = null;
-try {
-  const existingApps = getApps();
-  if (!existingApps.length) {
-    adminApp = initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
-  } else {
-    adminApp = existingApps[0]!;
-  }
-} catch (e) {
-  console.warn("Firebase Admin initialize warning:", e);
+// Load .env for local development (hosting platforms inject real environment variables instead)
+try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
+
+// Supabase configuration
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+const supabaseClientOptions = { auth: { persistSession: false, autoRefreshToken: false } } as const;
+
+// Used only to verify user access tokens
+const supabaseAuthClient: SupabaseClient | null =
+  SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, supabaseClientOptions) : null;
+
+// Service-role client: bypasses RLS. Server-only, never expose to the browser.
+const supabaseAdmin: SupabaseClient | null =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, supabaseClientOptions)
+    : null;
+
+if (!supabaseAuthClient) {
+  console.warn('Supabase auth is not configured: set SUPABASE_URL (or VITE_SUPABASE_URL) and SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY).');
+}
+if (!supabaseAdmin) {
+  console.warn('SUPABASE_SERVICE_ROLE_KEY is not set: admin dashboard data and audit logging are disabled.');
 }
 
-function getAdminFirestore() {
-  if (!adminApp) return null;
-  const dbId = firebaseConfig.firestoreDatabaseId;
-  if (dbId && dbId !== '(default)') {
-    return getFirestore(adminApp, dbId);
+// Storage S3 endpoint for the shared library bucket (override with SUPABASE_S3_ENDPOINT if needed)
+function getSupabaseS3Endpoint(): string {
+  if (process.env.SUPABASE_S3_ENDPOINT) return process.env.SUPABASE_S3_ENDPOINT;
+  try {
+    const ref = new URL(SUPABASE_URL).hostname.split('.')[0];
+    return `https://${ref}.storage.supabase.co/storage/v1/s3`;
+  } catch {
+    return '';
   }
-  return getFirestore(adminApp);
+}
+
+function getSupabasePublicObjectBase(): string {
+  const s3 = getSupabaseS3Endpoint();
+  return s3 ? s3.replace(/\/s3$/, '/object/public') : '';
 }
 
 // Server-side Secret for Administrator Access (Fails closed if env var is missing)
@@ -119,7 +135,7 @@ async function startServer() {
   const userApiRequests = new Map<string, number[]>();
 
   const requireAuth = async (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
-    if (!adminApp) {
+    if (!supabaseAuthClient) {
       return res.status(503).json({ success: false, error: 'Authentication service unavailable' });
     }
 
@@ -130,15 +146,19 @@ async function startServer() {
 
     const token = authHeader.substring(7).trim();
     if (!token) {
-      return res.status(401).json({ success: false, error: 'Unauthorized: Missing ID token' });
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing access token' });
     }
 
     try {
-      const decodedToken = await getAuth(adminApp).verifyIdToken(token);
-      req.user = decodedToken;
+      // getUser validates the JWT against the Supabase Auth server
+      const { data, error } = await supabaseAuthClient.auth.getUser(token);
+      if (error || !data.user || !data.user.email_confirmed_at) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
+      }
+      req.user = { uid: data.user.id, email: data.user.email };
       next();
     } catch (err: any) {
-      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired ID token' });
+      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
     }
   };
 
@@ -429,8 +449,8 @@ async function startServer() {
         throw new Error('Supabase S3 access keys SUPABASE_S3_ACCESS_KEY_ID and SUPABASE_S3_SECRET_ACCESS_KEY are not configured.');
       }
       s3Client = new S3Client({
-        endpoint: 'https://ijvttbxphdntffmdggvv.storage.supabase.co/storage/v1/s3',
-        region: 'eu-north-1',
+        endpoint: getSupabaseS3Endpoint(),
+        region: process.env.SUPABASE_S3_REGION || 'eu-west-2',
         forcePathStyle: true,
         credentials: {
           accessKeyId,
@@ -461,8 +481,8 @@ async function startServer() {
   app.get('/api/s3/config', (req, res) => {
     res.json({
       configured: !!(process.env.SUPABASE_S3_ACCESS_KEY_ID && process.env.SUPABASE_S3_SECRET_ACCESS_KEY),
-      endpoint: 'https://ijvttbxphdntffmdggvv.storage.supabase.co/storage/v1/s3',
-      region: 'eu-north-1',
+      endpoint: getSupabaseS3Endpoint(),
+      region: process.env.SUPABASE_S3_REGION || 'eu-west-2',
       bucket: process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library'
     });
   });
@@ -496,7 +516,7 @@ async function startServer() {
         fileName,
         key: fileKey,
         bucket,
-        publicUrl: `https://ijvttbxphdntffmdggvv.storage.supabase.co/storage/v1/object/public/${bucket}/${fileKey}`
+        publicUrl: `${getSupabasePublicObjectBase()}/${bucket}/${fileKey}`
       });
     } catch (error: any) {
       console.error('S3 Upload Error:', error);
@@ -1600,45 +1620,14 @@ Strictly NO markdown formatting.`;
       const rawIp = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1') : '127.0.0.1';
       const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
       const userAgent = req ? (req.headers['user-agent'] || 'Unknown Client') : 'Internal';
-      const logDoc = {
-        event,
-        status,
-        timestamp: new Date().toISOString(),
-        details,
-        ip,
-        userAgent
-      };
+      if (!supabaseAdmin) return;
 
-      const db = getAdminFirestore();
-      if (db) {
-        try {
-          await db.collection('admin_logs').add(logDoc);
-          return;
-        } catch (err: any) {
-          console.warn("Firestore Admin SDK log write warning:", err?.message || err);
-        }
-      }
-
-      // Fallback REST write
-      try {
-        const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/documents/admin_logs`;
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: {
-              event: { stringValue: logDoc.event },
-              status: { stringValue: logDoc.status },
-              timestamp: { stringValue: logDoc.timestamp },
-              details: { stringValue: logDoc.details },
-              ip: { stringValue: logDoc.ip },
-              userAgent: { stringValue: logDoc.userAgent }
-            }
-          })
-        });
-      } catch (e) {
-        console.warn("REST audit log write fallback error:", e);
-      }
+      const { error } = await supabaseAdmin.from('admin_logs').insert({
+        action: event,
+        actor: 'admin',
+        details: { status, message: details, ip, userAgent },
+      });
+      if (error) console.warn('Audit log write warning:', error.message);
     } catch (err) {
       console.warn("Failed to record admin audit log:", err);
     }
@@ -1711,42 +1700,7 @@ Strictly NO markdown formatting.`;
         });
       }
 
-      let customToken = '';
-      let firebaseUid = 'scolaris_admin_system_uid';
-
-      if (adminApp) {
-        try {
-          let userRecord;
-          try {
-            userRecord = await getAuth().getUserByEmail(adminEmail);
-          } catch {
-            userRecord = await getAuth().createUser({
-              email: adminEmail,
-              emailVerified: true,
-              displayName: 'Scolaris Administrator'
-            });
-          }
-          firebaseUid = userRecord.uid;
-          await getAuth().setCustomUserClaims(firebaseUid, { admin: true, role: 'admin' });
-          customToken = await getAuth().createCustomToken(firebaseUid, { admin: true });
-
-          // Synchronize admin document in Firestore
-          const db = getAdminFirestore();
-          if (db) {
-            try {
-              await db.collection('admins').doc(firebaseUid).set({
-                email: adminEmail,
-                role: 'admin',
-                updatedAt: new Date().toISOString()
-              }, { merge: true });
-            } catch (dbErr: any) {
-              console.warn("Firestore admin doc write notice:", dbErr?.message || dbErr);
-            }
-          }
-        } catch (authErr: any) {
-          console.warn("Firebase Admin Auth note (using HMAC session):", authErr?.message || 'IdentityToolkit API unavailable');
-        }
-      }
+      const adminUid = 'scolaris_admin_system_uid';
 
       const adminToken = generateAdminToken(adminEmail);
 
@@ -1760,9 +1714,8 @@ Strictly NO markdown formatting.`;
       res.json({
         success: true,
         adminToken,
-        customToken,
         user: {
-          uid: firebaseUid,
+          uid: adminUid,
           email: adminEmail,
           role: 'admin'
         }
@@ -1789,13 +1742,20 @@ Strictly NO markdown formatting.`;
       return next();
     }
 
-    // 2. Try verifying Firebase ID Token
-    if (adminApp) {
+    // 2. Try verifying a Supabase user token belonging to a listed admin
+    if (supabaseAuthClient && supabaseAdmin) {
       try {
-        const decoded = await getAuth().verifyIdToken(token);
-        if (decoded.admin === true || decoded.role === 'admin') {
-          (req as any).adminUser = { email: decoded.email || 'admin@scolaris.ai', role: 'admin' };
-          return next();
+        const { data: userData, error: userError } = await supabaseAuthClient.auth.getUser(token);
+        if (!userError && userData.user) {
+          const { data: adminRow } = await supabaseAdmin
+            .from('admins')
+            .select('user_id')
+            .eq('user_id', userData.user.id)
+            .maybeSingle();
+          if (adminRow) {
+            (req as any).adminUser = { email: userData.user.email || 'admin@scolaris.ai', role: 'admin' };
+            return next();
+          }
         }
       } catch (err) {
         // Fallback check failed
@@ -1814,43 +1774,21 @@ Strictly NO markdown formatting.`;
     });
   });
 
-  // Helper to fetch Firestore collection docs safely
-  async function fetchCollectionDocs(collectionName: string): Promise<any[]> {
-    const db = getAdminFirestore();
-    if (db) {
-      try {
-        const snap = await db.collection(collectionName).get();
-        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      } catch (err: any) {
-        console.warn(`Admin Firestore SDK get for ${collectionName} notice, attempting REST fallback:`, err?.message || err);
+  // Fetch every row of a table with the service role (paged past the 1000-row API limit)
+  async function fetchTableRows(table: string): Promise<any[]> {
+    if (!supabaseAdmin) return [];
+    const pageSize = 1000;
+    const rows: any[] = [];
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabaseAdmin.from(table).select('*').range(from, from + pageSize - 1);
+      if (error) {
+        console.warn(`Admin fetch for ${table} warning:`, error.message);
+        break;
       }
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
     }
-
-    try {
-      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/documents/${collectionName}`;
-      const resp = await fetch(url);
-      if (resp.ok) {
-        const data = await resp.json();
-        const documents = data.documents || [];
-        return documents.map((docItem: any) => {
-          const docId = docItem.name ? docItem.name.split('/').pop() : 'doc';
-          const fields = docItem.fields || {};
-          const parsed: any = { id: docId };
-          for (const key of Object.keys(fields)) {
-            const valObj = fields[key];
-            if (valObj.stringValue !== undefined) parsed[key] = valObj.stringValue;
-            else if (valObj.integerValue !== undefined) parsed[key] = parseInt(valObj.integerValue, 10);
-            else if (valObj.doubleValue !== undefined) parsed[key] = parseFloat(valObj.doubleValue);
-            else if (valObj.booleanValue !== undefined) parsed[key] = valObj.booleanValue;
-            else parsed[key] = valObj;
-          }
-          return parsed;
-        });
-      }
-    } catch (e) {
-      console.warn(`REST fetch fallback for ${collectionName} warning:`, e);
-    }
-    return [];
+    return rows;
   }
 
   // Admin Overview Statistics
@@ -1859,11 +1797,11 @@ Strictly NO markdown formatting.`;
       await recordAdminAuditLog('DASHBOARD_OVERVIEW_VIEW', 'Viewed system overview metrics and user telemetry', 'SUCCESS', req);
 
       const [profiles, courses, hubs, groups, sessions] = await Promise.all([
-        fetchCollectionDocs('profiles'),
-        fetchCollectionDocs('courses'),
-        fetchCollectionDocs('study_hubs'),
-        fetchCollectionDocs('study_groups'),
-        fetchCollectionDocs('study_sessions')
+        fetchTableRows('profiles'),
+        fetchTableRows('courses'),
+        fetchTableRows('study_hubs'),
+        fetchTableRows('study_groups'),
+        fetchTableRows('study_sessions')
       ]);
 
       const now = Date.now();
@@ -1871,8 +1809,8 @@ Strictly NO markdown formatting.`;
 
       const totalUsers = profiles.length;
       const newUsers = profiles.filter(p => {
-        if (!p.updatedAt && !p.createdAt) return false;
-        const time = new Date(p.updatedAt || p.createdAt).getTime();
+        if (!p.created_at) return false;
+        const time = new Date(p.created_at).getTime();
         return time >= sevenDaysAgo;
       }).length;
 
@@ -1884,7 +1822,7 @@ Strictly NO markdown formatting.`;
         if (Array.isArray(h.flashcards)) totalAIConversations += h.flashcards.length;
         if (Array.isArray(h.quizzes)) totalAIConversations += h.quizzes.length;
         if (h.transcript) totalAIConversations += 1;
-        if (h.fileName || h.fileContent) totalMaterials += 1;
+        if (h.file_name || h.file_content) totalMaterials += 1;
       });
 
       res.json({
@@ -1912,17 +1850,17 @@ Strictly NO markdown formatting.`;
     try {
       await recordAdminAuditLog('USERS_DIRECTORY_VIEW', 'Accessed user accounts directory', 'SUCCESS', req);
 
-      const profiles = await fetchCollectionDocs('profiles');
+      const profiles = await fetchTableRows('profiles');
       const userList = profiles.map(p => ({
-        uid: p.id || p.userId || 'unknown',
+        uid: p.id || 'unknown',
         name: p.name || 'Scholar User',
         email: p.email || 'N/A',
-        institution: p.institution || p.university || 'Not Specified',
+        institution: p.institution || 'Not Specified',
         level: p.level || 'Undergraduate',
         tier: p.tier || 'scholar',
-        isPro: p.isPro ?? p.is_pro ?? true,
+        isPro: p.is_pro ?? true,
         onboarded: p.onboarded ?? false,
-        updatedAt: p.updatedAt || new Date().toISOString()
+        updatedAt: p.updated_at || new Date().toISOString()
       }));
 
       res.json({
@@ -1939,7 +1877,7 @@ Strictly NO markdown formatting.`;
     try {
       await recordAdminAuditLog('AI_ANALYTICS_VIEW', 'Viewed AI model analytics and generation usage metrics', 'SUCCESS', req);
 
-      const hubs = await fetchCollectionDocs('study_hubs');
+      const hubs = await fetchTableRows('study_hubs');
 
       let summariesCount = 0;
       let flashcardsCount = 0;
@@ -1950,7 +1888,7 @@ Strictly NO markdown formatting.`;
         if (h.summary) summariesCount++;
         if (Array.isArray(h.flashcards)) flashcardsCount += h.flashcards.length;
         if (Array.isArray(h.quizzes)) quizzesCount += h.quizzes.length;
-        if (h.podcastUrl || h.transcript) podcastCount++;
+        if (h.podcast_url || h.transcript) podcastCount++;
       });
 
       res.json({
@@ -1986,9 +1924,9 @@ Strictly NO markdown formatting.`;
           heapTotal: Math.round(memory.heapTotal / (1024 * 1024))
         },
         database: {
-          status: 'Connected',
-          projectId: firebaseConfig.projectId,
-          firestoreDatabaseId: firebaseConfig.firestoreDatabaseId
+          status: supabaseAdmin ? 'Connected' : 'Service key not configured',
+          projectId: (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return 'not-configured'; } })(),
+          firestoreDatabaseId: 'public (Postgres)'
         },
         aiEngines: {
           groq: 'Online',
@@ -2003,12 +1941,18 @@ Strictly NO markdown formatting.`;
   app.get('/api/admin/logs', authenticateAdminToken, async (req, res) => {
     try {
       await recordAdminAuditLog('AUDIT_LOGS_VIEW', 'Fetched administrative security audit trail', 'SUCCESS', req);
-      const rawLogs = await fetchCollectionDocs('admin_logs');
-      const sortedLogs = rawLogs.sort((a, b) => {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeB - timeA;
-      });
+      const rawLogs = await fetchTableRows('admin_logs');
+      const sortedLogs = rawLogs
+        .map((l) => ({
+          id: l.id,
+          event: l.action,
+          status: l.details?.status || 'SUCCESS',
+          timestamp: l.created_at,
+          details: l.details?.message || '',
+          ip: l.details?.ip || '',
+          userAgent: l.details?.userAgent || ''
+        }))
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       res.json({
         success: true,
