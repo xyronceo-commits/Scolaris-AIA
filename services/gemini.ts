@@ -1,6 +1,6 @@
 
 
-import { auth } from '../lib/firebase';
+import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 
 // Standard decoding for binary audio
 function decode(base64: string) {
@@ -72,7 +72,7 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
 
 const getHeaders = async (): Promise<HeadersInit> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = await auth.currentUser?.getIdToken();
+  const token = await getAccessToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }

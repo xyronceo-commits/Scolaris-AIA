@@ -1,489 +1,452 @@
-import { db, auth, storage } from '../lib/firebase';
-import { 
-  doc, 
-  getDoc, 
-  setDoc, 
-  getDocs, 
-  collection, 
-  query, 
-  where, 
-  deleteDoc, 
-  writeBatch 
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { UserProfile, Course, StudySession, StudyGroup, StudyHubData, Difficulty, SubscriptionTier, UserFile } from '../types';
+import { supabase, getAccessToken, getCurrentUserId } from '../lib/supabase';
+import {
+  UserProfile,
+  Course,
+  StudySession,
+  StudyGroup,
+  StudyHubData,
+  Difficulty,
+  SubscriptionTier,
+  UserFile,
+  GroupMember,
+} from '../types';
 
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
+const USER_FILES_BUCKET = 'user-files';
+const GROUP_MATERIALS_BUCKET = 'group-materials';
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+// ---------- local cache helpers (offline fallback, scoped per user) ----------
+const cacheKey = (kind: string, userId: string) => `scolaris_user_private_v1_${kind}_${userId}`;
+
+function readCache<T>(kind: string, userId: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(cacheKey(kind, userId));
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
+function writeCache(kind: string, userId: string, value: unknown) {
+  try {
+    localStorage.setItem(cacheKey(kind, userId), JSON.stringify(value));
+  } catch {
+    /* storage full or unavailable */
+  }
+}
+
+const formatSize = (bytes: number) => {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+const sanitizeFileName = (name: string) => name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+const rand = (len = 5) => Math.random().toString(36).substring(2, 2 + len);
+
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',')[1] : result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function signedUrlMap(bucket: string, paths: string[]): Promise<Record<string, string>> {
+  const unique = Array.from(new Set(paths.filter(Boolean)));
+  if (unique.length === 0) return {};
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) return {};
+  const map: Record<string, string> = {};
+  data.forEach((entry) => {
+    if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
+  });
+  return map;
+}
+
+// ---------- row <-> model mappers ----------
+function rowToUserFile(row: any, urls: Record<string, string> = {}): UserFile {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    courseId: row.course_id || '',
+    fileName: row.file_name || '',
+    fileType: row.file_type || '',
+    fileSize: row.file_size || '',
+    storagePath: row.storage_path || '',
+    downloadUrl: urls[row.storage_path] || '',
+    uploadedAt: row.uploaded_at || new Date().toISOString(),
+    timestamp: Number(row.ts) || Date.now(),
+    courseCode: row.course_code || '',
+    courseTitle: row.course_title || '',
   };
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
+function rowToMaterial(row: any, urls: Record<string, string> = {}) {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    courseId: row.course_id || 'group_material',
+    courseCode: row.course_code || row.file_name || '',
+    sharedBy: row.uploaded_by_name || 'Member',
+    uploadedBy: row.uploaded_by || '',
+    uploadedByName: row.uploaded_by_name || 'Member',
+    uploadedAt: row.uploaded_at || new Date().toISOString(),
+    timestamp: Number(row.ts) || Date.now(),
+    fileName: row.file_name || 'Document',
+    fileType: row.file_type || 'application/pdf',
+    fileSize: row.file_size || '',
+    storagePath: row.storage_path || '',
+    downloadUrl: urls[row.storage_path] || '',
+    content: row.content || '',
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+}
+
+function rowToGroup(row: any, materials: any[] = []): StudyGroup {
+  const members = (row.members || []) as (string | GroupMember)[];
+  return {
+    id: row.id,
+    name: row.name || '',
+    description: row.description || '',
+    course: row.course || 'General Study',
+    type: row.type || 'private',
+    visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
+    inviteCode: row.invite_code || '',
+    department: row.department || '',
+    level: row.level || '',
+    university: row.university || '',
+    academicSession: row.academic_session || '',
+    groupImage: row.group_image || '',
+    ownerId: row.owner_id || '',
+    members,
+    memberCount: row.member_count || members.length,
+    messages: row.messages || [],
+    sharedMaterials: materials,
+    discussions: row.discussions || [],
+    activityFeed: row.activity_feed || [],
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+
+async function loadGroupMaterials(groupIds: string[]): Promise<Record<string, any[]>> {
+  if (groupIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('group_materials')
+    .select('*')
+    .in('group_id', groupIds)
+    .order('ts', { ascending: false });
+  if (error || !data) return {};
+
+  const urls = await signedUrlMap(GROUP_MATERIALS_BUCKET, data.map((m) => m.storage_path));
+  const byGroup: Record<string, any[]> = {};
+  data.forEach((row) => {
+    (byGroup[row.group_id] ||= []).push(rowToMaterial(row, urls));
+  });
+  return byGroup;
+}
+
+async function fetchGroupRow(groupId: string) {
+  const { data, error } = await supabase.from('study_groups').select('*').eq('id', groupId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+function newActivity(groupId: string, type: string, title: string, description: string, actorName: string, actorId: string) {
+  return {
+    id: `act_${Date.now()}_${rand(3)}`,
+    groupId,
+    type,
+    title,
+    description,
+    actorName,
+    actorId,
+    timestamp: Date.now(),
+  };
 }
 
 export const DBService = {
-  // Profiles
+  // ---------------- Profiles ----------------
   async getProfile(userId: string): Promise<UserProfile | null> {
-    const cacheKey = `scolaris_user_private_v1_profile_${userId}`;
     try {
-      const docRef = doc(db, 'profiles', userId);
-      const docSnap = await getDoc(docRef);
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+      if (error) throw error;
 
-      if (!docSnap.exists()) {
-        console.warn('getProfile: profile not found in Firestore. Checking private local cache...');
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          try { return JSON.parse(cached); } catch { return null; }
-        }
-        return null;
+      if (!data) {
+        return readCache<UserProfile | null>('profile', userId, null);
       }
 
-      const data = docSnap.data();
       const profile: UserProfile = {
         name: data.name || '',
         email: data.email || '',
         university: data.institution || '',
         level: data.level || '',
         age: data.age || 18,
-        semesterEnd: data.semesterEnd || '',
-        targetCGPA: typeof data.targetCGPA === 'number' ? data.targetCGPA : (typeof data.target_cgpa === 'number' ? data.target_cgpa : 4.50),
-        avatarIcon: data.avatarIcon || data.avatar_icon || 'graduation-cap',
+        semesterEnd: data.semester_end || '',
+        targetCGPA: typeof data.target_cgpa === 'number' ? data.target_cgpa : Number(data.target_cgpa) || 4.5,
+        avatarIcon: data.avatar_icon || 'graduation-cap',
         onboarded: data.onboarded ?? false,
         tutorialSeen: data.tutorial_seen ?? false,
         isPro: data.is_pro ?? false,
         tier: (data.tier || 'free') as SubscriptionTier,
-        notifications: data.notifications || { messages: true, sessions: true, aiContent: true }
+        notifications: data.notifications || { messages: true, sessions: true, aiContent: true },
       };
-
-      // Sync to private local cache
-      localStorage.setItem(cacheKey, JSON.stringify(profile));
+      writeCache('profile', userId, profile);
       return profile;
     } catch (err) {
-      console.error('getProfile Firestore error:', err);
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        try { return JSON.parse(cached); } catch { return null; }
-      }
-      return null;
+      console.error('getProfile error:', err);
+      return readCache<UserProfile | null>('profile', userId, null);
     }
   },
 
   async saveProfile(userId: string, profile: UserProfile) {
-    const cacheKey = `scolaris_user_private_v1_profile_${userId}`;
-    localStorage.setItem(cacheKey, JSON.stringify(profile));
-
+    writeCache('profile', userId, profile);
     try {
-      const docRef = doc(db, 'profiles', userId);
-      await setDoc(docRef, {
-        userId,
-        name: profile.name,
-        email: profile.email,
-        institution: profile.university,
-        level: profile.level,
-        age: profile.age,
-        targetCGPA: profile.targetCGPA ?? 4.50,
-        avatarIcon: profile.avatarIcon || 'graduation-cap',
-        onboarded: profile.onboarded,
-        tutorial_seen: profile.tutorialSeen,
-        is_pro: profile.isPro,
-        tier: profile.tier,
-        notifications: profile.notifications,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      const { error } = await supabase.from('profiles').upsert(
+        {
+          id: userId,
+          name: profile.name,
+          email: profile.email,
+          institution: profile.university,
+          level: profile.level,
+          age: profile.age,
+          semester_end: profile.semesterEnd || '',
+          target_cgpa: profile.targetCGPA ?? 4.5,
+          avatar_icon: profile.avatarIcon || 'graduation-cap',
+          onboarded: profile.onboarded,
+          tutorial_seen: profile.tutorialSeen,
+          is_pro: profile.isPro,
+          tier: profile.tier,
+          notifications: profile.notifications,
+        },
+        { onConflict: 'id' }
+      );
+      if (error) throw error;
       return { error: null };
     } catch (err) {
-      console.error('saveProfile Firestore error:', err);
+      console.error('saveProfile error:', err);
       return { error: err };
     }
   },
 
-  // Courses
+  // ---------------- Courses ----------------
   async getCourses(userId: string): Promise<Course[]> {
-    const cacheKey = `scolaris_user_private_v1_courses_${userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    let cachedCourses: Course[] = [];
-    if (cached) {
-      try { cachedCourses = JSON.parse(cached); } catch { cachedCourses = []; }
-    }
-
     try {
-      const q = query(collection(db, 'courses'), where('userId', '==', userId));
-      const querySnap = await getDocs(q);
+      const { data, error } = await supabase.from('courses').select('*').eq('user_id', userId);
+      if (error) throw error;
 
-      if (querySnap.empty && cachedCourses.length > 0) {
-        return cachedCourses;
-      }
-
-      const courses: Course[] = [];
-      querySnap.forEach((docSnap) => {
-        const c = docSnap.data();
-        courses.push({
-          id: docSnap.id,
-          code: c.code || '',
-          title: c.name || c.title || '',
-          units: c.credits || c.units || 3,
-          difficulty: (c.difficulty || 'Medium') as Difficulty,
-          description: c.description || ''
-        });
-      });
-
-      if (courses.length > 0) {
-        localStorage.setItem(cacheKey, JSON.stringify(courses));
-        return courses;
-      }
-      return cachedCourses;
+      const courses: Course[] = (data || []).map((c) => ({
+        id: c.id,
+        code: c.code || '',
+        title: c.name || '',
+        units: c.credits || 3,
+        difficulty: (c.difficulty || 'Medium') as Difficulty,
+        description: c.description || '',
+      }));
+      writeCache('courses', userId, courses);
+      return courses;
     } catch (err) {
-      console.error('getCourses Firestore error:', err);
-      return cachedCourses;
+      console.error('getCourses error:', err);
+      return readCache<Course[]>('courses', userId, []);
     }
   },
 
   async saveCourse(userId: string, course: Course) {
     try {
-      const cacheKey = `scolaris_user_private_v1_courses_${userId}`;
-      const cached = localStorage.getItem(cacheKey);
-      let list: Course[] = [];
-      if (cached) {
-        try { list = JSON.parse(cached); } catch { list = []; }
-      }
-      const idx = list.findIndex(c => c.id === course.id);
-      if (idx >= 0) {
-        list[idx] = course;
-      } else {
-        list.push(course);
-      }
-      localStorage.setItem(cacheKey, JSON.stringify(list));
-
+      const list = readCache<Course[]>('courses', userId, []);
       const courseId = course.id || `course_${Date.now()}`;
-      const docRef = doc(db, 'courses', courseId);
-      await setDoc(docRef, {
-        id: courseId,
-        userId,
-        code: course.code,
-        name: course.title,
-        difficulty: course.difficulty,
-        credits: course.units,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      const merged = { ...course, id: courseId };
+      const idx = list.findIndex((c) => c.id === courseId);
+      if (idx >= 0) list[idx] = merged;
+      else list.push(merged);
+      writeCache('courses', userId, list);
 
+      const { error } = await supabase.from('courses').upsert(
+        {
+          id: courseId,
+          user_id: userId,
+          code: course.code,
+          name: course.title,
+          difficulty: course.difficulty,
+          credits: course.units,
+          description: course.description || '',
+        },
+        { onConflict: 'id' }
+      );
+      if (error) throw error;
       return { error: null };
     } catch (err) {
-      console.error('saveCourse Firestore error:', err);
+      console.error('saveCourse error:', err);
       return { error: err };
     }
   },
 
   async saveCourses(userId: string, courses: Course[]) {
     try {
-      const cacheKey = `scolaris_user_private_v1_courses_${userId}`;
-      localStorage.setItem(cacheKey, JSON.stringify(courses));
+      writeCache('courses', userId, courses);
+      if (courses.length === 0) return { error: null };
 
-      const batch = writeBatch(db);
-      courses.forEach((c) => {
-        const courseId = c.id || `course_${Math.random().toString(36).substring(2, 10)}`;
-        const docRef = doc(db, 'courses', courseId);
-        batch.set(docRef, {
-          id: courseId,
-          userId,
-          code: c.code,
-          name: c.title,
-          difficulty: c.difficulty,
-          credits: c.units,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      });
-
-      await batch.commit();
+      const rows = courses.map((c) => ({
+        id: c.id || `course_${rand(8)}`,
+        user_id: userId,
+        code: c.code,
+        name: c.title,
+        difficulty: c.difficulty,
+        credits: c.units,
+        description: c.description || '',
+      }));
+      const { error } = await supabase.from('courses').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
       return { error: null };
     } catch (err) {
-      console.error('saveCourses Firestore error:', err);
+      console.error('saveCourses error:', err);
       return { error: err };
     }
   },
 
-  // Schedule
+  // ---------------- Schedule ----------------
   async saveSchedule(userId: string, sessions: StudySession[]) {
     try {
-      const cacheKey = `scolaris_user_private_v1_schedule_${userId}`;
-      localStorage.setItem(cacheKey, JSON.stringify(sessions));
+      writeCache('schedule', userId, sessions);
+      if (sessions.length === 0) return { error: null };
 
-      const batch = writeBatch(db);
-      sessions.forEach((s) => {
-        const sessionId = s.id || `session_${Math.random().toString(36).substring(2, 10)}`;
-        const docRef = doc(db, 'study_sessions', sessionId);
-        batch.set(docRef, {
-          id: sessionId,
-          userId,
-          courseId: s.courseId,
-          day: s.day,
-          duration: s.duration,
-          mode: s.mode,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      });
-
-      await batch.commit();
+      const rows = sessions.map((s) => ({
+        id: s.id || `session_${rand(8)}`,
+        user_id: userId,
+        course_id: s.courseId,
+        day: s.day,
+        duration: s.duration,
+        mode: s.mode,
+      }));
+      const { error } = await supabase.from('study_sessions').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
       return { error: null };
     } catch (err) {
-      console.error('saveSchedule Firestore error:', err);
+      console.error('saveSchedule error:', err);
       return { error: err };
     }
   },
 
-  // Health Check
+  async getSchedule(userId: string): Promise<StudySession[]> {
+    try {
+      const { data, error } = await supabase.from('study_sessions').select('*').eq('user_id', userId);
+      if (error) throw error;
+
+      const sessions: StudySession[] = (data || []).map((s) => ({
+        id: s.id,
+        courseId: s.course_id || '',
+        day: s.day || '',
+        duration: s.duration || 30,
+        mode: s.mode as StudySession['mode'],
+      }));
+      writeCache('schedule', userId, sessions);
+      return sessions;
+    } catch (err) {
+      console.error('getSchedule error:', err);
+      return readCache<StudySession[]>('schedule', userId, []);
+    }
+  },
+
+  // ---------------- Health check ----------------
   async checkConnection(): Promise<boolean> {
     try {
-      return !!db;
+      const { error } = await supabase.from('profiles').select('id', { head: true, count: 'exact' }).limit(1);
+      // An RLS-filtered empty result is still a healthy connection
+      return !error;
     } catch {
       return false;
     }
   },
 
-  // Schedule
-  async getSchedule(userId: string): Promise<StudySession[]> {
-    const cacheKey = `scolaris_user_private_v1_schedule_${userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    let cachedSchedule: StudySession[] = [];
-    if (cached) {
-      try { cachedSchedule = JSON.parse(cached); } catch { cachedSchedule = []; }
-    }
-
-    try {
-      const q = query(collection(db, 'study_sessions'), where('userId', '==', userId));
-      const querySnap = await getDocs(q);
-
-      if (querySnap.empty && cachedSchedule.length > 0) {
-        return cachedSchedule;
-      }
-
-      const sessions: StudySession[] = [];
-      querySnap.forEach((docSnap) => {
-        const s = docSnap.data();
-        sessions.push({
-          id: docSnap.id,
-          courseId: s.courseId || '',
-          day: s.day || '',
-          duration: s.duration || 30,
-          mode: s.mode as any
-        });
-      });
-
-      if (sessions.length > 0) {
-        localStorage.setItem(cacheKey, JSON.stringify(sessions));
-        return sessions;
-      }
-      return cachedSchedule;
-    } catch (err) {
-      console.error('getSchedule Firestore error:', err);
-      return cachedSchedule;
-    }
-  },
-
-  // Study Hubs
+  // ---------------- Study Hubs ----------------
   async getHubs(userId: string): Promise<Record<string, StudyHubData>> {
-    const cacheKey = `scolaris_user_private_v1_hubs_${userId}`;
-    const cachedRaw = localStorage.getItem(cacheKey);
-    let cachedHubs: Record<string, StudyHubData> = {};
-    if (cachedRaw) {
-      try { cachedHubs = JSON.parse(cachedRaw); } catch { cachedHubs = {}; }
-    }
-
+    const cachedHubs = readCache<Record<string, StudyHubData>>('hubs', userId, {});
     try {
-      const q = query(collection(db, 'study_hubs'), where('userId', '==', userId));
-      const querySnap = await getDocs(q);
+      const { data, error } = await supabase.from('study_hubs').select('*').eq('user_id', userId);
+      if (error) throw error;
 
       const hubMap: Record<string, StudyHubData> = { ...cachedHubs };
-      querySnap.forEach((docSnap) => {
-        const h = docSnap.data();
-        if (h.courseId) {
-          hubMap[h.courseId] = {
-            courseId: h.courseId,
-            summary: h.summary || hubMap[h.courseId]?.summary,
-            flashcards: h.flashcards || hubMap[h.courseId]?.flashcards,
-            quizzes: h.quizzes || h.quiz || hubMap[h.courseId]?.quizzes,
-            podcastUrl: h.podcastUrl || h.podcast_url || hubMap[h.courseId]?.podcastUrl,
-            transcript: h.transcript || hubMap[h.courseId]?.transcript,
-            fileContent: h.fileContent || h.file_content || hubMap[h.courseId]?.fileContent,
-            fileName: h.fileName || h.file_name || hubMap[h.courseId]?.fileName
-          };
-        }
+      (data || []).forEach((h) => {
+        hubMap[h.course_id] = {
+          ...hubMap[h.course_id],
+          courseId: h.course_id,
+          summary: h.summary || hubMap[h.course_id]?.summary,
+          flashcards: (h.flashcards as any[])?.length ? h.flashcards : hubMap[h.course_id]?.flashcards,
+          quizzes: (h.quizzes as any[])?.length ? h.quizzes : hubMap[h.course_id]?.quizzes,
+          tests: (h.tests as any[])?.length ? h.tests : hubMap[h.course_id]?.tests,
+          podcastUrl: h.podcast_url || hubMap[h.course_id]?.podcastUrl,
+          transcript: h.transcript || hubMap[h.course_id]?.transcript,
+          fileContent: h.file_content || hubMap[h.course_id]?.fileContent,
+          fileName: h.file_name || hubMap[h.course_id]?.fileName,
+        };
       });
-
-      localStorage.setItem(cacheKey, JSON.stringify(hubMap));
+      writeCache('hubs', userId, hubMap);
       return hubMap;
     } catch (err) {
-      console.error('getHubs Firestore error:', err);
+      console.error('getHubs error:', err);
       return cachedHubs;
     }
   },
 
   async saveHub(hub: StudyHubData, explicitUserId?: string) {
+    const userId = explicitUserId || getCurrentUserId();
+    if (!userId) {
+      console.warn('saveHub skipped: no signed-in user.');
+      return { error: null };
+    }
+
+    // 1. Local backup first so work is never lost
+    const cachedHubs = readCache<Record<string, StudyHubData>>('hubs', userId, {});
+    cachedHubs[hub.courseId] = { ...cachedHubs[hub.courseId], ...hub };
+    writeCache('hubs', userId, cachedHubs);
+
+    // 2. Persist
     try {
-      const user = auth.currentUser;
-      let userId = explicitUserId || user?.uid;
-      if (!userId) {
-        const sim = localStorage.getItem('supabase_simulated_user');
-        if (sim) {
-          try { userId = JSON.parse(sim).id; } catch {}
-        }
-      }
-      if (!userId) userId = 'anonymous';
-
-      // 1. Immediately backup/persist to local storage
-      const cacheKey = `scolaris_user_private_v1_hubs_${userId}`;
-      const cachedRaw = localStorage.getItem(cacheKey);
-      let cachedHubs: Record<string, StudyHubData> = {};
-      if (cachedRaw) {
-        try { cachedHubs = JSON.parse(cachedRaw); } catch { cachedHubs = {}; }
-      }
-      cachedHubs[hub.courseId] = {
-        ...cachedHubs[hub.courseId],
-        ...hub
-      };
-      localStorage.setItem(cacheKey, JSON.stringify(cachedHubs));
-
-      // 2. Save to Firestore
-      const docId = `${userId}_${hub.courseId}`;
-      const docRef = doc(db, 'study_hubs', docId);
-      await setDoc(docRef, {
-        userId,
-        courseId: hub.courseId,
-        summary: hub.summary || '',
-        flashcards: hub.flashcards || [],
-        quizzes: hub.quizzes || [],
-        podcastUrl: hub.podcastUrl || '',
-        transcript: hub.transcript || '',
-        fileContent: hub.fileContent || '',
-        fileName: hub.fileName || '',
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-
+      const { error } = await supabase.from('study_hubs').upsert(
+        {
+          user_id: userId,
+          course_id: hub.courseId,
+          summary: hub.summary || '',
+          flashcards: hub.flashcards || [],
+          quizzes: hub.quizzes || [],
+          tests: hub.tests || [],
+          podcast_url: hub.podcastUrl || '',
+          transcript: hub.transcript || '',
+          file_content: hub.fileContent || '',
+          file_name: hub.fileName || '',
+        },
+        { onConflict: 'user_id,course_id' }
+      );
+      if (error) throw error;
       return { error: null };
     } catch (err) {
-      console.warn('saveHub Firestore warning:', err);
+      console.warn('saveHub warning:', err);
       return { error: null };
     }
   },
 
-  // Study Groups
+  // ---------------- Study Groups ----------------
   async getGroups(userId: string): Promise<StudyGroup[]> {
-    const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    let cachedGroups: StudyGroup[] = [];
-    if (cached) {
-      try { cachedGroups = JSON.parse(cached); } catch { cachedGroups = []; }
-    }
-
+    const cachedGroups = readCache<StudyGroup[]>('groups', userId, []);
     try {
-      const querySnap = await getDocs(collection(db, 'study_groups'));
-      if (querySnap.empty) {
-        return cachedGroups;
-      }
+      // Row-level security already limits this to public groups + groups the user belongs to
+      const { data, error } = await supabase
+        .from('study_groups')
+        .select('*')
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
 
-      const syncedGroups: StudyGroup[] = [];
-      querySnap.forEach((docSnap) => {
-        const g = docSnap.data();
-        const membersList: any[] = g.members || [];
-        const memberIds = membersList.map(m => typeof m === 'string' ? m : (m.userId || m.uid));
-        
-        const isGeneral = g.type === 'general' || g.visibility === 'public';
-        const isMember = memberIds.includes(userId) || g.ownerId === userId;
-
-        if (isGeneral || isMember) {
-          syncedGroups.push({
-            id: docSnap.id,
-            name: g.name || '',
-            description: g.description || '',
-            course: g.course || g.subject || 'General Study',
-            type: g.type || (g.visibility === 'public' ? 'general' : 'private'),
-            visibility: g.visibility || (g.type === 'general' ? 'public' : 'private'),
-            inviteCode: g.inviteCode || '',
-            department: g.department || '',
-            level: g.level || '',
-            university: g.university || '',
-            academicSession: g.academicSession || '',
-            groupImage: g.groupImage || '',
-            ownerId: g.ownerId || '',
-            members: membersList,
-            memberCount: g.memberCount || membersList.length,
-            messages: (g.messages || []).map((m: any) => ({
-              id: m.id || Math.random().toString(36).substring(2),
-              sender: m.sender || m.sender_id || '',
-              text: m.text || '',
-              timestamp: m.timestamp || Date.now(),
-              isIrrelevant: m.isIrrelevant || false
-            })),
-            sharedMaterials: (g.sharedMaterials || []).map((sm: any) => ({
-              id: sm.id || Math.random().toString(36).substring(2),
-              groupId: docSnap.id,
-              courseId: sm.courseId || sm.course_id || '',
-              courseCode: sm.courseCode || sm.course_code || '',
-              sharedBy: sm.sharedBy || sm.uploadedByName || sm.uploader_id || 'Member',
-              uploadedBy: sm.uploadedBy || sm.sharedBy || '',
-              uploadedByName: sm.uploadedByName || sm.sharedBy || 'Member',
-              uploadedAt: sm.uploadedAt || new Date().toISOString(),
-              timestamp: sm.timestamp || Date.now(),
-              fileName: sm.fileName || sm.file_name || 'Document',
-              fileType: sm.fileType || 'application/pdf',
-              fileSize: sm.fileSize || '1 MB',
-              storagePath: sm.storagePath || '',
-              downloadUrl: sm.downloadUrl || sm.s3Url || '',
-              content: sm.content || ''
-            })),
-            discussions: g.discussions || [],
-            activityFeed: g.activityFeed || [],
-            createdAt: g.createdAt || new Date().toISOString(),
-            updatedAt: g.updatedAt || new Date().toISOString()
-          });
-        }
-      });
-
-      if (syncedGroups.length > 0) {
-        localStorage.setItem(cacheKey, JSON.stringify(syncedGroups));
-        return syncedGroups;
-      }
-      return cachedGroups;
+      const rows = data || [];
+      const materialsByGroup = await loadGroupMaterials(rows.map((r) => r.id));
+      const groups = rows.map((row) => rowToGroup(row, materialsByGroup[row.id] || []));
+      writeCache('groups', userId, groups);
+      return groups;
     } catch (err) {
-      console.error('getGroups Firestore error:', err);
+      console.error('getGroups error:', err);
       return cachedGroups;
     }
   },
@@ -499,177 +462,91 @@ export const DBService = {
       university?: string;
       academicSession?: string;
       groupImage?: string;
-    }, 
+    },
     userId: string,
     userName: string
   ): Promise<StudyGroup> {
-    const groupId = `group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const groupId = `group_${Date.now()}_${rand()}`;
     const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const createdAt = new Date().toISOString();
 
-    const initialMember = {
+    const initialMember: GroupMember = {
       userId,
       name: userName || 'Group Creator',
-      role: 'owner' as const,
-      joinedAt: createdAt
+      role: 'owner',
+      joinedAt: createdAt,
     };
-
-    const initialActivity = {
-      id: `act_${Date.now()}`,
+    const initialActivity = newActivity(
       groupId,
-      type: 'announcement' as const,
-      title: 'Group Created',
-      description: `Welcome to ${groupData.name}! Study group initialized by ${userName}.`,
-      actorName: userName,
-      actorId: userId,
-      timestamp: Date.now()
+      'announcement',
+      'Group Created',
+      `Welcome to ${groupData.name}! Study group initialized by ${userName}.`,
+      userName,
+      userId
+    );
+    const welcomeMessage = {
+      id: 'welcome',
+      sender: 'Scolaris AI',
+      text: `Welcome to ${groupData.name}! Upload study materials or start a discussion to collaborate.`,
+      timestamp: Date.now(),
     };
 
-    const newGroup: StudyGroup = {
-      id: groupId,
-      name: groupData.name,
-      description: groupData.description,
-      course: groupData.course,
-      type: groupData.type,
-      visibility: groupData.type === 'general' ? 'public' : 'private',
-      inviteCode,
-      department: groupData.department || '',
-      level: groupData.level || '',
-      university: groupData.university || '',
-      academicSession: groupData.academicSession || '',
-      groupImage: groupData.groupImage || '',
-      ownerId: userId,
-      members: [initialMember, userId],
-      memberCount: 1,
-      messages: [{
-        id: 'welcome',
-        sender: 'Scolaris AI',
-        text: `Welcome to ${groupData.name}! Upload study materials or start a discussion to collaborate.`,
-        timestamp: Date.now()
-      }],
-      sharedMaterials: [],
-      discussions: [],
-      activityFeed: [initialActivity],
-      createdAt,
-      updatedAt: createdAt
-    };
+    const { data, error } = await supabase
+      .from('study_groups')
+      .insert({
+        id: groupId,
+        name: groupData.name,
+        description: groupData.description,
+        course: groupData.course,
+        type: groupData.type,
+        visibility: groupData.type === 'general' ? 'public' : 'private',
+        invite_code: inviteCode,
+        department: groupData.department || '',
+        level: groupData.level || '',
+        university: groupData.university || '',
+        academic_session: groupData.academicSession || '',
+        group_image: groupData.groupImage || '',
+        owner_id: userId,
+        members: [initialMember],
+        member_count: 1,
+        messages: [welcomeMessage],
+        discussions: [],
+        activity_feed: [initialActivity],
+      })
+      .select('*')
+      .single();
 
-    try {
-      const docRef = doc(db, 'study_groups', groupId);
-      await setDoc(docRef, newGroup, { merge: true });
-
-      // Create activity subcollection record
-      try {
-        const actRef = doc(db, 'study_groups', groupId, 'activity', initialActivity.id);
-        await setDoc(actRef, initialActivity);
-      } catch (e) {
-        console.warn('Activity subcollection write notice:', e);
-      }
-    } catch (err) {
-      console.error('createGroup Firestore error:', err);
+    if (error || !data) {
+      console.error('createGroup error:', error);
+      throw new Error(error?.message || 'Failed to create group.');
     }
 
-    // Cache update
-    const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    let list: StudyGroup[] = [];
-    if (cached) {
-      try { list = JSON.parse(cached); } catch { list = []; }
-    }
-    list.unshift(newGroup);
-    localStorage.setItem(cacheKey, JSON.stringify(list));
-
+    const newGroup = rowToGroup(data, []);
+    const list = readCache<StudyGroup[]>('groups', userId, []);
+    writeCache('groups', userId, [newGroup, ...list.filter((g) => g.id !== newGroup.id)]);
     return newGroup;
   },
 
-  async joinGroup(groupId: string, inviteCode: string | null, userId: string, userName: string): Promise<{ success: boolean; error?: string; group?: StudyGroup }> {
+  async joinGroup(
+    groupId: string,
+    inviteCode: string | null,
+    userId: string,
+    userName: string
+  ): Promise<{ success: boolean; error?: string; group?: StudyGroup }> {
     try {
-      const docRef = doc(db, 'study_groups', groupId);
-      const docSnap = await getDoc(docRef);
-
-      if (!docSnap.exists()) {
-        return { success: false, error: 'Group not found.' };
-      }
-
-      const g = docSnap.data();
-      const type = g.type || (g.visibility === 'public' ? 'general' : 'private');
-
-      if (type === 'private' && inviteCode) {
-        if ((g.inviteCode || '').trim().toUpperCase() !== inviteCode.trim().toUpperCase()) {
-          return { success: false, error: 'Invalid invite code.' };
-        }
-      }
-
-      const membersList: any[] = g.members || [];
-      const alreadyMember = membersList.some(m => {
-        if (typeof m === 'string') return m === userId || m === userName;
-        return m.userId === userId || m.name === userName;
+      const { data, error } = await supabase.rpc('join_group', {
+        p_group_id: groupId,
+        p_invite_code: inviteCode || '',
+        p_name: userName,
       });
+      if (error) throw error;
 
-      if (!alreadyMember) {
-        const newMember = {
-          userId,
-          name: userName || 'Student',
-          role: 'member' as const,
-          joinedAt: new Date().toISOString()
-        };
-
-        const updatedMembers = [...membersList, newMember, userId];
-        const newActivity = {
-          id: `act_${Date.now()}`,
-          groupId,
-          type: 'member_joined' as const,
-          title: 'New Member Joined',
-          description: `${userName} joined the study group.`,
-          actorName: userName,
-          actorId: userId,
-          timestamp: Date.now()
-        };
-
-        const existingActivity: any[] = g.activityFeed || [];
-        const updatedActivity = [newActivity, ...existingActivity];
-
-        await setDoc(docRef, {
-          members: updatedMembers,
-          memberCount: updatedMembers.length,
-          activityFeed: updatedActivity,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        try {
-          const actRef = doc(db, 'study_groups', groupId, 'activity', newActivity.id);
-          await setDoc(actRef, newActivity);
-        } catch (e) {}
+      if (!data?.success) {
+        return { success: false, error: data?.error || 'Failed to join group.' };
       }
 
-      const updatedSnap = await getDoc(docRef);
-      const data = updatedSnap.data()!;
-
-      const fullGroup: StudyGroup = {
-        id: groupId,
-        name: data.name || '',
-        description: data.description || '',
-        course: data.course || 'General Study',
-        type: data.type || 'general',
-        visibility: data.visibility || 'public',
-        inviteCode: data.inviteCode || '',
-        department: data.department || '',
-        level: data.level || '',
-        university: data.university || '',
-        academicSession: data.academicSession || '',
-        groupImage: data.groupImage || '',
-        ownerId: data.ownerId || '',
-        members: data.members || [],
-        memberCount: data.memberCount || (data.members || []).length,
-        messages: data.messages || [],
-        sharedMaterials: data.sharedMaterials || [],
-        discussions: data.discussions || [],
-        activityFeed: data.activityFeed || [],
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString()
-      };
-
-      return { success: true, group: fullGroup };
+      const materials = (await loadGroupMaterials([groupId]))[groupId] || [];
+      return { success: true, group: rowToGroup(data.group, materials) };
     } catch (err: any) {
       console.error('joinGroup error:', err);
       return { success: false, error: err?.message || 'Failed to join group.' };
@@ -683,116 +560,83 @@ export const DBService = {
     uploaderName: string
   ): Promise<{ success: boolean; material?: any; error?: string }> {
     try {
-      const materialId = `mat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-      const storagePath = `groups/${groupId}/materials/${materialId}_${sanitizedFileName}`;
+      const materialId = `mat_${Date.now()}_${rand()}`;
+      const storagePath = `groups/${groupId}/materials/${materialId}_${sanitizeFileName(file.name)}`;
 
-      let downloadUrl = '';
-      try {
-        const fileRef = ref(storage, storagePath);
-        await uploadBytes(fileRef, file);
-        downloadUrl = await getDownloadURL(fileRef);
-      } catch (sErr) {
-        console.warn('Group material storage upload warning:', sErr);
-      }
+      const { error: uploadError } = await supabase.storage
+        .from(GROUP_MATERIALS_BUCKET)
+        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream' });
+      if (uploadError) throw uploadError;
 
-      // Convert file to base64 to extract text server-side
+      // Extract plain text server-side so the group AI can use the material
       let extractedText = '';
       try {
-        const arrayBuf = await file.arrayBuffer();
-        const base64 = Buffer.from(arrayBuf).toString('base64');
-        const token = await auth.currentUser?.getIdToken();
+        const token = await getAccessToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-        const extractResp = await fetch('/api/files/extract', {
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch('/api/files/extract', {
           method: 'POST',
           headers,
           body: JSON.stringify({
             fileName: file.name,
             fileType: file.type,
-            contentBase64: base64
-          })
+            contentBase64: await fileToBase64(file),
+          }),
         });
-        if (extractResp.ok) {
-          const resData = await extractResp.json();
-          if (resData.success && resData.extractedText) {
-            extractedText = resData.extractedText;
-          }
+        if (resp.ok) {
+          const resData = await resp.json();
+          if (resData.success && resData.extractedText) extractedText = resData.extractedText;
         }
       } catch (extErr) {
         console.warn('Material text extraction warning:', extErr);
       }
 
-      const formatSize = (bytes: number) => {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-      };
+      const { data: row, error: insertError } = await supabase
+        .from('group_materials')
+        .insert({
+          id: materialId,
+          group_id: groupId,
+          file_name: file.name,
+          file_type: file.type || 'application/octet-stream',
+          file_size: formatSize(file.size),
+          storage_path: storagePath,
+          uploaded_by: uploaderId,
+          uploaded_by_name: uploaderName,
+          content: extractedText,
+          course_id: 'group_material',
+          course_code: file.name,
+        })
+        .select('*')
+        .single();
+      if (insertError || !row) {
+        // Don't leave an orphaned object behind
+        await supabase.storage.from(GROUP_MATERIALS_BUCKET).remove([storagePath]).catch(() => {});
+        throw insertError || new Error('Failed to save material record.');
+      }
 
-      const materialRecord = {
-        id: materialId,
-        groupId,
-        fileName: file.name,
-        fileType: file.type || 'application/octet-stream',
-        fileSize: formatSize(file.size),
-        storagePath,
-        downloadUrl,
-        uploadedBy: uploaderId,
-        uploadedByName: uploaderName,
-        uploadedAt: new Date().toISOString(),
-        timestamp: Date.now(),
-        content: extractedText,
-        // SharedMaterial backwards compatibility
-        courseId: 'group_material',
-        courseCode: file.name,
-        sharedBy: uploaderName
-      };
-
-      // Write to subcollection /study_groups/{groupId}/materials/{materialId}
+      // Activity feed entry
       try {
-        const matRef = doc(db, 'study_groups', groupId, 'materials', materialId);
-        await setDoc(matRef, materialRecord);
+        const group = await fetchGroupRow(groupId);
+        if (group) {
+          const activity = newActivity(
+            groupId,
+            'material_uploaded',
+            'New Study Material Uploaded',
+            `${uploaderName} uploaded "${file.name}"`,
+            uploaderName,
+            uploaderId
+          );
+          await supabase
+            .from('study_groups')
+            .update({ activity_feed: [activity, ...(group.activity_feed || [])] })
+            .eq('id', groupId);
+        }
       } catch (e) {
-        console.warn('Material subcollection write warning:', e);
+        console.warn('Activity feed update warning:', e);
       }
 
-      // Update parent document's sharedMaterials and activityFeed
-      const docRef = doc(db, 'study_groups', groupId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const g = docSnap.data();
-        const existingMaterials = g.sharedMaterials || [];
-        const updatedMaterials = [materialRecord, ...existingMaterials];
-
-        const newActivity = {
-          id: `act_${Date.now()}`,
-          groupId,
-          type: 'material_uploaded' as const,
-          title: 'New Study Material Uploaded',
-          description: `${uploaderName} uploaded "${file.name}"`,
-          actorName: uploaderName,
-          actorId: uploaderId,
-          timestamp: Date.now()
-        };
-
-        const existingActivity = g.activityFeed || [];
-        const updatedActivity = [newActivity, ...existingActivity];
-
-        await setDoc(docRef, {
-          sharedMaterials: updatedMaterials,
-          activityFeed: updatedActivity,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        try {
-          const actRef = doc(db, 'study_groups', groupId, 'activity', newActivity.id);
-          await setDoc(actRef, newActivity);
-        } catch (e) {}
-      }
-
-      return { success: true, material: materialRecord };
+      const urls = await signedUrlMap(GROUP_MATERIALS_BUCKET, [storagePath]);
+      return { success: true, material: rowToMaterial(row, urls) };
     } catch (err: any) {
       console.error('uploadGroupMaterial error:', err);
       return { success: false, error: err?.message || 'Failed to upload material.' };
@@ -804,9 +648,8 @@ export const DBService = {
     post: { title?: string; content: string; authorId: string; authorName: string; authorAvatar?: string }
   ): Promise<{ success: boolean; discussionPost?: any; error?: string }> {
     try {
-      const postId = `post_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const postRecord = {
-        id: postId,
+        id: `post_${Date.now()}_${rand()}`,
         groupId,
         authorId: post.authorId,
         authorName: post.authorName,
@@ -814,47 +657,29 @@ export const DBService = {
         title: post.title || '',
         content: post.content,
         timestamp: Date.now(),
-        replies: []
+        replies: [],
       };
 
-      try {
-        const discRef = doc(db, 'study_groups', groupId, 'discussions', postId);
-        await setDoc(discRef, postRecord);
-      } catch (e) {}
+      const group = await fetchGroupRow(groupId);
+      if (!group) return { success: false, error: 'Group not found.' };
 
-      const docRef = doc(db, 'study_groups', groupId);
-      const docSnap = await getDoc(docRef);
+      const activity = newActivity(
+        groupId,
+        'discussion_created',
+        'New Discussion Topic',
+        `${post.authorName} started: "${(post.title || post.content).slice(0, 45)}..."`,
+        post.authorName,
+        post.authorId
+      );
 
-      if (docSnap.exists()) {
-        const g = docSnap.data();
-        const existingDiscussions = g.discussions || [];
-        const updatedDiscussions = [postRecord, ...existingDiscussions];
-
-        const newActivity = {
-          id: `act_${Date.now()}`,
-          groupId,
-          type: 'discussion_created' as const,
-          title: 'New Discussion Topic',
-          description: `${post.authorName} started: "${(post.title || post.content).slice(0, 45)}..."`,
-          actorName: post.authorName,
-          actorId: post.authorId,
-          timestamp: Date.now()
-        };
-
-        const existingActivity = g.activityFeed || [];
-        const updatedActivity = [newActivity, ...existingActivity];
-
-        await setDoc(docRef, {
-          discussions: updatedDiscussions,
-          activityFeed: updatedActivity,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        try {
-          const actRef = doc(db, 'study_groups', groupId, 'activity', newActivity.id);
-          await setDoc(actRef, newActivity);
-        } catch (e) {}
-      }
+      const { error } = await supabase
+        .from('study_groups')
+        .update({
+          discussions: [postRecord, ...(group.discussions || [])],
+          activity_feed: [activity, ...(group.activity_feed || [])],
+        })
+        .eq('id', groupId);
+      if (error) throw error;
 
       return { success: true, discussionPost: postRecord };
     } catch (err: any) {
@@ -870,32 +695,26 @@ export const DBService = {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const replyRecord = {
-        id: `reply_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: `reply_${Date.now()}_${rand(4)}`,
         postId,
         authorId: reply.authorId,
         authorName: reply.authorName,
         authorAvatar: reply.authorAvatar || 'user',
         content: reply.content,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
-      const docRef = doc(db, 'study_groups', groupId);
-      const docSnap = await getDoc(docRef);
+      const group = await fetchGroupRow(groupId);
+      if (!group) return { success: false, error: 'Group not found.' };
 
-      if (docSnap.exists()) {
-        const g = docSnap.data();
-        const discussions: any[] = g.discussions || [];
-        const postIdx = discussions.findIndex(p => p.id === postId);
+      const discussions: any[] = group.discussions || [];
+      const postIdx = discussions.findIndex((p) => p.id === postId);
+      if (postIdx < 0) return { success: false, error: 'Discussion not found.' };
 
-        if (postIdx >= 0) {
-          const post = discussions[postIdx];
-          const updatedReplies = [...(post.replies || []), replyRecord];
-          discussions[postIdx] = { ...post, replies: updatedReplies };
+      discussions[postIdx] = { ...discussions[postIdx], replies: [...(discussions[postIdx].replies || []), replyRecord] };
 
-          await setDoc(docRef, { discussions, updatedAt: new Date().toISOString() }, { merge: true });
-        }
-      }
-
+      const { error } = await supabase.from('study_groups').update({ discussions }).eq('id', groupId);
+      if (error) throw error;
       return { success: true };
     } catch (err: any) {
       console.error('addDiscussionReply error:', err);
@@ -903,295 +722,253 @@ export const DBService = {
     }
   },
 
-  async removeGroupMember(groupId: string, targetUserId: string, requesterId: string): Promise<{ success: boolean; error?: string }> {
+  async removeGroupMember(
+    groupId: string,
+    targetUserId: string,
+    requesterId: string
+  ): Promise<{ success: boolean; error?: string }> {
     try {
-      const docRef = doc(db, 'study_groups', groupId);
-      const docSnap = await getDoc(docRef);
+      const group = await fetchGroupRow(groupId);
+      if (!group) return { success: false, error: 'Group not found.' };
 
-      if (!docSnap.exists()) return { success: false, error: 'Group not found.' };
-
-      const g = docSnap.data();
-      if (g.ownerId !== requesterId && requesterId !== 'admin') {
-        return { success: false, error: 'Only the group owner or admin can remove members.' };
+      if (group.owner_id !== requesterId) {
+        return { success: false, error: 'Only the group owner can remove members.' };
+      }
+      if (targetUserId === group.owner_id) {
+        return { success: false, error: 'The group owner cannot be removed.' };
       }
 
-      const members: any[] = g.members || [];
-      const updatedMembers = members.filter(m => (typeof m === 'string' ? m : m.userId) !== targetUserId);
-
-      await setDoc(docRef, {
-        members: updatedMembers,
-        memberCount: updatedMembers.length,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-
+      const members = ((group.members || []) as any[]).filter(
+        (m) => (typeof m === 'string' ? m : m.userId) !== targetUserId
+      );
+      const { error } = await supabase
+        .from('study_groups')
+        .update({ members, member_count: members.length })
+        .eq('id', groupId);
+      if (error) throw error;
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to remove member.' };
     }
   },
 
+  /**
+   * Persists group details and the shared AI chat. Members, discussions, activity and materials are
+   * written through their own methods so a stale local copy can never overwrite other people's changes.
+   */
   async saveGroup(group: StudyGroup, userId: string): Promise<void> {
     try {
-      const docRef = doc(db, 'study_groups', group.id);
-      await setDoc(docRef, {
-        id: group.id,
-        name: group.name,
-        description: group.description,
-        course: group.course,
-        type: group.type,
-        visibility: group.type === 'general' ? 'public' : 'private',
-        inviteCode: group.inviteCode,
-        department: group.department || '',
-        level: group.level || '',
-        university: group.university || '',
-        academicSession: group.academicSession || '',
-        groupImage: group.groupImage || '',
-        ownerId: group.ownerId || userId,
-        members: group.members || [],
-        memberCount: (group.members || []).length,
-        messages: group.messages || [],
-        sharedMaterials: group.sharedMaterials || [],
-        discussions: group.discussions || [],
-        activityFeed: group.activityFeed || [],
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      const { data, error } = await supabase
+        .from('study_groups')
+        .update({
+          name: group.name,
+          description: group.description,
+          course: group.course,
+          department: group.department || '',
+          level: group.level || '',
+          university: group.university || '',
+          academic_session: group.academicSession || '',
+          group_image: group.groupImage || '',
+          messages: group.messages || [],
+        })
+        .eq('id', group.id)
+        .select('id');
+      if (error) throw error;
 
-      // Sync to private local cache
-      const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
-      const cached = localStorage.getItem(cacheKey);
-      let list: StudyGroup[] = [];
-      if (cached) {
-        try { list = JSON.parse(cached); } catch { list = []; }
+      if ((!data || data.length === 0) && (group.ownerId || userId) === userId) {
+        const { error: insertError } = await supabase.from('study_groups').insert({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          course: group.course,
+          type: group.type,
+          visibility: group.type === 'general' ? 'public' : 'private',
+          invite_code: group.inviteCode,
+          department: group.department || '',
+          level: group.level || '',
+          university: group.university || '',
+          academic_session: group.academicSession || '',
+          group_image: group.groupImage || '',
+          owner_id: userId,
+          members: group.members || [],
+          member_count: (group.members || []).length,
+          messages: group.messages || [],
+          discussions: group.discussions || [],
+          activity_feed: group.activityFeed || [],
+        });
+        if (insertError) throw insertError;
       }
-      const idx = list.findIndex(g => g.id === group.id);
-      if (idx >= 0) {
-        list[idx] = group;
-      } else {
-        list.push(group);
-      }
-      localStorage.setItem(cacheKey, JSON.stringify(list));
+
+      const list = readCache<StudyGroup[]>('groups', userId, []);
+      const idx = list.findIndex((g) => g.id === group.id);
+      if (idx >= 0) list[idx] = group;
+      else list.push(group);
+      writeCache('groups', userId, list);
     } catch (err) {
-      console.error('saveGroup Firestore error:', err);
+      console.error('saveGroup error:', err);
     }
   },
 
   async updateGroupInviteCode(groupId: string, newCode: string, userId: string): Promise<void> {
     try {
-      const docRef = doc(db, 'study_groups', groupId);
-      await setDoc(docRef, { inviteCode: newCode, updatedAt: new Date().toISOString() }, { merge: true });
+      const { error } = await supabase.from('study_groups').update({ invite_code: newCode }).eq('id', groupId);
+      if (error) throw error;
 
-      // Sync to local cache
-      const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        try {
-          const list: StudyGroup[] = JSON.parse(cached);
-          const updated = list.map(g => g.id === groupId ? { ...g, inviteCode: newCode } : g);
-          localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (err) {
-          console.error('updateGroupInviteCode cache update error:', err);
-        }
-      }
+      const list = readCache<StudyGroup[]>('groups', userId, []);
+      writeCache('groups', userId, list.map((g) => (g.id === groupId ? { ...g, inviteCode: newCode } : g)));
     } catch (err) {
-      console.error('updateGroupInviteCode Firestore error:', err);
+      console.error('updateGroupInviteCode error:', err);
     }
   },
 
   async findGroupByCode(inviteCode: string): Promise<StudyGroup | null> {
     try {
-      const cleanCode = inviteCode.trim().toUpperCase();
-      const q = query(collection(db, 'study_groups'), where('inviteCode', '==', cleanCode));
-      const querySnap = await getDocs(q);
-
-      if (querySnap.empty) {
-        return null;
-      }
-
-      const docSnap = querySnap.docs[0];
-      const data = docSnap.data();
+      const { data, error } = await supabase.rpc('find_group_by_code', { p_code: inviteCode.trim() });
+      if (error) throw error;
+      if (!data) return null;
 
       return {
-        id: docSnap.id,
+        id: data.id,
         name: data.name || '',
         description: data.description || '',
         course: data.course || 'General Study',
         type: data.type || 'private',
         visibility: data.visibility || 'private',
-        inviteCode: data.inviteCode,
-        ownerId: data.ownerId || '',
-        members: data.members || [],
-        memberCount: data.memberCount || (data.members || []).length,
-        messages: [{
-          id: 'welcome',
-          sender: 'Scolaris AI',
-          text: `You have found ${(data.name || '').toUpperCase()}. Join this group to view materials and collaborate!`,
-          timestamp: Date.now()
-        }],
-        sharedMaterials: data.sharedMaterials || [],
-        discussions: data.discussions || [],
-        activityFeed: data.activityFeed || []
+        inviteCode: data.invite_code,
+        department: data.department || '',
+        level: data.level || '',
+        university: data.university || '',
+        ownerId: data.owner_id || '',
+        members: [],
+        memberCount: data.member_count || 0,
+        messages: [
+          {
+            id: 'welcome',
+            sender: 'Scolaris AI',
+            text: `You have found ${(data.name || '').toUpperCase()}. Join this group to view materials and collaborate!`,
+            timestamp: Date.now(),
+          },
+        ],
+        sharedMaterials: [],
+        discussions: [],
+        activityFeed: [],
       };
     } catch (err) {
-      console.error('findGroupByCode Firestore error:', err);
+      console.error('findGroupByCode error:', err);
       return null;
     }
   },
 
   async deleteGroupLocal(groupId: string, userId: string): Promise<void> {
     try {
-      const docRef = doc(db, 'study_groups', groupId);
-      await deleteDoc(docRef).catch(() => {});
-
-      const cacheKey = `scolaris_user_private_v1_groups_${userId}`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        try {
-          const list: StudyGroup[] = JSON.parse(cached);
-          const filtered = list.filter(g => g.id !== groupId);
-          localStorage.setItem(cacheKey, JSON.stringify(filtered));
-        } catch (err) {
-          console.error('deleteGroupLocal cache error:', err);
-        }
-      }
+      await supabase.from('study_groups').delete().eq('id', groupId);
+      const list = readCache<StudyGroup[]>('groups', userId, []);
+      writeCache('groups', userId, list.filter((g) => g.id !== groupId));
     } catch (err) {
       console.error('deleteGroupLocal error:', err);
     }
   },
 
-  // User Isolated File Storage
+  // ---------------- User Files ----------------
   async getUserFiles(userId: string): Promise<UserFile[]> {
     if (!userId) return [];
-    const cacheKey = `scolaris_user_private_v1_files_${userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    let cachedFiles: UserFile[] = [];
-    if (cached) {
-      try { cachedFiles = JSON.parse(cached); } catch { cachedFiles = []; }
-    }
-
     try {
-      const q = query(collection(db, 'user_files'), where('userId', '==', userId));
-      const querySnap = await getDocs(q);
+      const { data, error } = await supabase
+        .from('user_files')
+        .select('*')
+        .eq('user_id', userId)
+        .order('ts', { ascending: false });
+      if (error) throw error;
 
-      const files: UserFile[] = [];
-      querySnap.forEach((docSnap) => {
-        const d = docSnap.data();
-        files.push({
-          id: docSnap.id,
-          userId: d.userId,
-          courseId: d.courseId || '',
-          fileName: d.fileName || '',
-          fileType: d.fileType || '',
-          fileSize: d.fileSize || '',
-          storagePath: d.storagePath || '',
-          downloadUrl: d.downloadUrl || '',
-          uploadedAt: d.uploadedAt || new Date().toISOString(),
-          timestamp: d.timestamp || Date.now(),
-          courseCode: d.courseCode || '',
-          courseTitle: d.courseTitle || ''
-        });
-      });
-
-      // Sort by timestamp descending (most recent first)
-      files.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-      if (files.length > 0) {
-        localStorage.setItem(cacheKey, JSON.stringify(files));
-        return files;
-      }
-      return cachedFiles;
+      const rows = data || [];
+      const urls = await signedUrlMap(USER_FILES_BUCKET, rows.map((r) => r.storage_path));
+      const files = rows.map((r) => rowToUserFile(r, urls));
+      writeCache('files', userId, files);
+      return files;
     } catch (err) {
-      console.error('getUserFiles Firestore error:', err);
-      return cachedFiles;
+      console.error('getUserFiles error:', err);
+      return readCache<UserFile[]>('files', userId, []);
     }
   },
 
   async uploadFileToStorage(
-    userId: string, 
-    courseId: string, 
-    file: File, 
-    courseCode?: string, 
+    userId: string,
+    courseId: string,
+    file: File,
+    courseCode?: string,
     courseTitle?: string
   ): Promise<UserFile> {
-    if (!userId) {
-      throw new Error('User must be authenticated to upload files');
+    if (!userId) throw new Error('User must be authenticated to upload files');
+
+    const fileId = `file_${Date.now()}_${rand()}`;
+    // Isolated per-user path: users/{userId}/courses/{courseId}/{fileId}_{fileName}
+    const storagePath = `users/${userId}/courses/${courseId}/${fileId}_${sanitizeFileName(file.name)}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(USER_FILES_BUCKET)
+      .upload(storagePath, file, { contentType: file.type || 'application/octet-stream' });
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      throw new Error(uploadError.message || 'File upload failed.');
     }
 
-    const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-    // Isolated storage path: users/{userId}/courses/{courseId}/{fileId}_{fileName}
-    const storagePath = `users/${userId}/courses/${courseId}/${fileId}_${sanitizedFileName}`;
-
-    let downloadUrl = '';
-    try {
-      const fileRef = ref(storage, storagePath);
-      await uploadBytes(fileRef, file);
-      downloadUrl = await getDownloadURL(fileRef);
-    } catch (storageErr) {
-      console.warn('Firebase Storage upload warning (metadata stored):', storageErr);
+    const { data: row, error: insertError } = await supabase
+      .from('user_files')
+      .insert({
+        id: fileId,
+        user_id: userId,
+        course_id: courseId,
+        file_name: file.name,
+        file_type: file.type || 'application/octet-stream',
+        file_size: formatSize(file.size),
+        storage_path: storagePath,
+        course_code: courseCode || '',
+        course_title: courseTitle || '',
+      })
+      .select('*')
+      .single();
+    if (insertError || !row) {
+      await supabase.storage.from(USER_FILES_BUCKET).remove([storagePath]).catch(() => {});
+      console.error('Save user_files error:', insertError);
+      throw new Error(insertError?.message || 'Failed to save file record.');
     }
 
-    const formatSize = (bytes: number) => {
-      if (bytes < 1024) return bytes + ' B';
-      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    };
+    const urls = await signedUrlMap(USER_FILES_BUCKET, [storagePath]);
+    const userFile = rowToUserFile(row, urls);
 
-    const userFile: UserFile = {
-      id: fileId,
-      userId: userId,
-      courseId: courseId,
-      fileName: file.name,
-      fileType: file.type || 'application/octet-stream',
-      fileSize: formatSize(file.size),
-      storagePath: storagePath,
-      downloadUrl: downloadUrl,
-      uploadedAt: new Date().toISOString(),
-      timestamp: Date.now(),
-      courseCode: courseCode || '',
-      courseTitle: courseTitle || ''
-    };
-
-    // Save metadata record in Firestore under user_files collection
-    try {
-      const docRef = doc(db, 'user_files', fileId);
-      await setDoc(docRef, userFile, { merge: true });
-    } catch (dbErr) {
-      console.error('Save user_files Firestore error:', dbErr);
-      handleFirestoreError(dbErr, OperationType.WRITE, `user_files/${fileId}`);
-    }
-
-    // Update local cache
-    const cacheKey = `scolaris_user_private_v1_files_${userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    let cachedFiles: UserFile[] = [];
-    if (cached) {
-      try { cachedFiles = JSON.parse(cached); } catch { cachedFiles = []; }
-    }
-    cachedFiles = [userFile, ...cachedFiles.filter(f => f.id !== fileId)];
-    localStorage.setItem(cacheKey, JSON.stringify(cachedFiles));
-
+    const cached = readCache<UserFile[]>('files', userId, []);
+    writeCache('files', userId, [userFile, ...cached.filter((f) => f.id !== fileId)]);
     return userFile;
   },
 
   async saveUserFileRecord(fileRecord: UserFile): Promise<{ error: any }> {
     try {
-      const docRef = doc(db, 'user_files', fileRecord.id);
-      await setDoc(docRef, fileRecord, { merge: true });
+      const { error } = await supabase.from('user_files').upsert(
+        {
+          id: fileRecord.id,
+          user_id: fileRecord.userId,
+          course_id: fileRecord.courseId,
+          file_name: fileRecord.fileName,
+          file_type: fileRecord.fileType,
+          file_size: fileRecord.fileSize,
+          storage_path: fileRecord.storagePath,
+          uploaded_at: fileRecord.uploadedAt,
+          ts: fileRecord.timestamp,
+          course_code: fileRecord.courseCode || '',
+          course_title: fileRecord.courseTitle || '',
+        },
+        { onConflict: 'id' }
+      );
+      if (error) throw error;
 
-      const cacheKey = `scolaris_user_private_v1_files_${fileRecord.userId}`;
-      const cached = localStorage.getItem(cacheKey);
-      let list: UserFile[] = [];
-      if (cached) {
-        try { list = JSON.parse(cached); } catch { list = []; }
-      }
-      const idx = list.findIndex(f => f.id === fileRecord.id);
+      const list = readCache<UserFile[]>('files', fileRecord.userId, []);
+      const idx = list.findIndex((f) => f.id === fileRecord.id);
       if (idx >= 0) list[idx] = fileRecord;
       else list.unshift(fileRecord);
-      localStorage.setItem(cacheKey, JSON.stringify(list));
-
+      writeCache('files', fileRecord.userId, list);
       return { error: null };
     } catch (err) {
-      console.error('saveUserFileRecord Firestore error:', err);
+      console.error('saveUserFileRecord error:', err);
       return { error: err };
     }
   },
@@ -1199,29 +976,18 @@ export const DBService = {
   async deleteUserFile(fileId: string, userId: string, storagePath?: string): Promise<void> {
     try {
       if (storagePath) {
-        try {
-          const fileRef = ref(storage, storagePath);
-          await deleteObject(fileRef);
-        } catch (e) {
-          console.warn('Storage file deletion warning:', e);
-        }
+        const { error: removeError } = await supabase.storage.from(USER_FILES_BUCKET).remove([storagePath]);
+        if (removeError) console.warn('Storage file deletion warning:', removeError);
       }
 
-      const docRef = doc(db, 'user_files', fileId);
-      await deleteDoc(docRef);
+      const { error } = await supabase.from('user_files').delete().eq('id', fileId);
+      if (error) throw error;
 
-      const cacheKey = `scolaris_user_private_v1_files_${userId}`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        try {
-          const list: UserFile[] = JSON.parse(cached);
-          const filtered = list.filter(f => f.id !== fileId);
-          localStorage.setItem(cacheKey, JSON.stringify(filtered));
-        } catch {}
-      }
+      const list = readCache<UserFile[]>('files', userId, []);
+      writeCache('files', userId, list.filter((f) => f.id !== fileId));
     } catch (err) {
       console.error('deleteUserFile error:', err);
-      handleFirestoreError(err, OperationType.DELETE, `user_files/${fileId}`);
+      throw err;
     }
-  }
+  },
 };

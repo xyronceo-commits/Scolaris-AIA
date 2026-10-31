@@ -530,7 +530,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="flex items-center justify-between text-slate-300">
                     <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
                       <Database className="w-4 h-4 text-emerald-400" />
-                      <span>Firestore Database</span>
+                      <span>Supabase Database</span>
                     </span>
                     <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full">
                       {systemStatus.database.status}
