@@ -108,9 +108,74 @@ function verifyAdminToken(token: string): { email: string; role: string } | null
   }
 }
 
+const OCR_MODEL = 'gemini-3.5-flash';
+const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
+
+function pickGeminiKey(customKey?: string | null): string | null {
+  if (customKey && customKey.startsWith('AIzaSy')) return customKey;
+  const envKey = process.env.GEMINI_API_KEY;
+  return envKey && envKey.startsWith('AIzaSy') ? envKey : null;
+}
+
+/** Reads a scanned / image-only PDF with Gemini's native PDF vision. Returns '' when it can't. */
+async function ocrPdfWithGemini(buffer: Buffer, apiKey: string): Promise<string> {
+  if (buffer.length > OCR_MAX_PDF_BYTES) {
+    console.warn(`OCR skipped: PDF is ${(buffer.length / 1048576).toFixed(1)} MB (limit ${OCR_MAX_PDF_BYTES / 1048576} MB).`);
+    return '';
+  }
+  try {
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+    const response = await ai.models.generateContent({
+      model: OCR_MODEL,
+      contents: [
+        { inlineData: { data: buffer.toString('base64'), mimeType: 'application/pdf' } },
+        'Transcribe all text in this scanned document exactly as written, in reading order, page by page. ' +
+          'Include handwritten text. Do not summarize, translate, or add commentary. ' +
+          'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
+      ],
+      config: { temperature: 0 }
+    });
+    return normalizeExtractedText(response.text || '');
+  } catch (err: any) {
+    console.warn('Gemini PDF OCR failed:', err?.message || err);
+    return '';
+  }
+}
+
+/** Normal extraction first; if a PDF turns out to be scanned, fall back to Gemini OCR. */
+async function extractDocumentWithOcrFallback(
+  buffer: Buffer,
+  fileName: string,
+  fileType: string,
+  customKey?: string | null
+) {
+  const result = await processDocumentBuffer(buffer, fileName, fileType);
+  if (result.success || !result.isScannedPdf) return { ...result, usedOcr: false };
+
+  const key = pickGeminiKey(customKey);
+  if (!key) return { ...result, usedOcr: false };
+
+  const text = await ocrPdfWithGemini(buffer, key);
+  if (text.length >= 20 && validateExtractedText(text, 'txt').isValid) {
+    return {
+      success: true,
+      extractedText: text,
+      fileTypeDetected: 'pdf',
+      pageCount: result.pageCount,
+      usedOcr: true
+    };
+  }
+
+  return {
+    ...result,
+    error: "This PDF looks scanned and we couldn't read the text from it. Try a clearer scan, or use the Vision Document Scanner with photos of the pages.",
+    usedOcr: false
+  };
+}
+
 async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   try {
-    const res = await processDocumentBuffer(buffer, 'document.pdf', 'application/pdf');
+    const res = await extractDocumentWithOcrFallback(buffer, 'document.pdf', 'application/pdf');
     if (res.success && res.extractedText) {
       return res.extractedText;
     }
@@ -1196,7 +1261,7 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       const buffer = Buffer.from(contentBase64, 'base64');
-      const result = await processDocumentBuffer(buffer, fileName || 'document', fileType || '');
+      const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '', getCustomKey(req));
 
       if (!result.success) {
         return res.status(200).json({
@@ -1212,7 +1277,8 @@ CRITICAL SECURITY & CONTEXT RULES:
         fileName,
         fileTypeDetected: result.fileTypeDetected,
         extractedText: result.extractedText,
-        pageCount: result.pageCount
+        pageCount: result.pageCount,
+        usedOcr: result.usedOcr
       });
     } catch (error: any) {
       console.error('File extraction backend failed:', error);
