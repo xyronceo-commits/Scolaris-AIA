@@ -1,18 +1,21 @@
-# Scolaris AI Robots Configuration
+# KorsIQ Robots Configuration
 User-agent: *
-Allow: /$
-Allow: /index.html
+Allow: /
+Allow: /favicon.ico
+Allow: /favicon.svg
+Allow: /favicon.png
+Allow: /favicon-48x48.png
+Allow: /apple-touch-icon.png
+Allow: /korsiq-logo-192.png
+Allow: /korsiq-logo-512.png
+Allow: /og-image.png
+Allow: /manifest.json
+Allow: /sitemap.xml
+Allow: /assets/
 
-# Disallow private user workspace, dashboard, courses, files, and admin routes
-Disallow: /dashboard
-Disallow: /courses
-Disallow: /hub
-Disallow: /schedule
-Disallow: /groups
-Disallow: /analytics
-Disallow: /profile
-Disallow: /admin
+# Disallow private user workspace, dashboard, and internal APIs
 Disallow: /api/
-Disallow: /auth
+Disallow: /dashboard/
+Disallow: /admin/
 
 Sitemap: https://ais-dev-yahxa4uuxs5gx2wzqqd3t5-417290327349.europe-west2.run.app/sitemap.xml

@@ -123,7 +123,7 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
       'X-WR-CALNAME:KorsIQ Study Schedule',
-      'X-WR-TIMEZONE:UTC'
+      `X-WR-TIMEZONE:${Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}`
     ];
 
     schedule.forEach((session, index) => {
@@ -141,12 +141,12 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
 
       const endDate = new Date(sessionDate.getTime() + (session.duration || 60) * 60 * 1000);
 
-      const title = `${course?.code || 'CS'}: ${course?.title || 'Study Session'} (${session.mode || 'Review'})`;
-      const description = `KorsIQ Study Session\\nMode: ${session.mode}\\nCourse: ${course?.title || 'Course'}\\nDuration: ${session.duration} minutes.`;
+      const title = `${course?.code || 'Course'}: ${session.topic || course?.title || 'Study Session'} (${session.mode || 'Review'})`;
+      const description = `KorsIQ Academic Study Session\\nCourse: ${course?.code || ''} - ${course?.title || ''}\\nTopic: ${session.topic || 'Core Concept Review'}\\nTechnique: ${session.technique || 'Active Recall'}\\nDuration: ${session.duration} minutes.`;
 
       icsLines.push(
         'BEGIN:VEVENT',
-        `UID:scolaris-session-${index}-${Date.now()}@scolaris.ai`,
+        `UID:korsiq-session-${index}-${Date.now()}@korsiq.ai`,
         `DTSTAMP:${formatDateISO(now)}`,
         `DTSTART:${formatDateISO(sessionDate)}`,
         `DTEND:${formatDateISO(endDate)}`,
@@ -154,6 +154,11 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
         `SUMMARY:${title}`,
         `DESCRIPTION:${description}`,
         'STATUS:CONFIRMED',
+        'BEGIN:VALARM',
+        'TRIGGER:-PT30M',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:KorsIQ Reminder: Your ${course?.code || 'study'} session starts in 30 minutes. Focus: ${session.topic || 'Core Concept Review'}.`,
+        'END:VALARM',
         'END:VEVENT'
       );
     });
@@ -193,8 +198,8 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
     const pad = (n: number) => n < 10 ? '0' + n : '' + n;
     const formatGCalDate = (d: Date) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
 
-    const title = encodeURIComponent(`${course?.code || 'CS'}: ${course?.title || 'Study Session'} (${session.mode})`);
-    const details = encodeURIComponent(`KorsIQ Weekly Study Session\nMode: ${session.mode}\nDuration: ${session.duration} mins\nCourse: ${course?.title}`);
+    const title = encodeURIComponent(`${course?.code || 'Course'}: ${session.topic || course?.title || 'Study Session'} (${session.mode || 'Review'})`);
+    const details = encodeURIComponent(`KorsIQ Academic Study Session\nCourse: ${course?.code || ''} - ${course?.title || ''}\nTopic: ${session.topic || 'Core Concept Mastery'}\nReading Technique: ${session.technique || 'Active Recall'}\nDuration: ${session.duration} mins\nMode: ${session.mode}`);
     const dates = `${formatGCalDate(sessionDate)}/${formatGCalDate(endDate)}`;
 
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}&recur=RRULE:FREQ=WEEKLY`;

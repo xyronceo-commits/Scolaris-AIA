@@ -22,6 +22,9 @@ export interface NotificationSettings {
   messages: boolean;
   sessions: boolean;
   aiContent: boolean;
+  browserPush?: boolean;
+  reminderIntervalMinutes?: number;
+  examReminders?: boolean;
 }
 
 export type NotificationType = 'message' | 'session' | 'content';
@@ -64,6 +67,12 @@ export interface StudySession {
   day: string; // 'Monday', 'Tuesday', etc.
   duration: number; // in minutes
   mode: 'Deep Dive' | 'Review' | 'Practice' | 'Reading';
+  topic?: string;
+  startTime?: string;
+  endTime?: string;
+  technique?: string;
+  completed?: boolean;
+  notes?: string;
 }
 
 export interface Flashcard {
@@ -215,6 +224,7 @@ export interface StudyGroup {
   type: 'general' | 'private';
   visibility?: 'public' | 'private'; // Backward compatibility fallback
   inviteCode: string;
+  inviteCodeActive?: boolean;
   department?: string;
   level?: string;
   university?: string;
@@ -232,3 +242,74 @@ export interface StudyGroup {
 }
 
 export type AppState = 'onboarding' | 'dashboard' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';
+
+export interface CGPACourseRecord {
+  code: string;
+  title?: string;
+  creditUnits: number;
+  grade: string; // 'A', 'B', 'C', 'D', 'E', 'F'
+  score?: number;
+}
+
+export interface CGPASemester {
+  id: number;
+  label: string;
+  gpa: number;
+  totalCredits?: number;
+  courses?: CGPACourseRecord[];
+}
+
+export interface CGPAAcademicConfig {
+  gradingScale: 4.0 | 5.0;
+  currentLevel: string;
+  currentSemester: string;
+  totalSemesters: number;
+  completedSemesters: number;
+  difficultCourses: string[];
+  preferredStudyHours: number;
+  examDate?: string;
+}
+
+export interface AICgpaAnalysisResult {
+  currentCgpa: number;
+  targetCgpa: number;
+  gradingScale: number;
+  gap: number;
+  isAchievable: boolean;
+  maxPossibleCgpa: number;
+  requiredSemesterGpa: number;
+  alternativeTarget?: number;
+  advisorySummary: string;
+  strategicSteps: string[];
+  highCreditPriorities: { code: string; units: number; reason: string }[];
+  weakAreas: string[];
+  strengths: string[];
+  studyPlanRecommendations: string[];
+}
+
+export interface AIStudyTimetableEntry {
+  id: string;
+  day: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+  startTime: string;
+  endTime: string;
+  courseCode: string;
+  courseTitle: string;
+  topic: string;
+  activity: string;
+  recommendedTechnique: 'Active Recall' | 'Spaced Repetition' | 'Feynman Technique' | 'Past Question Practice' | 'Pomodoro Technique' | 'Interleaved Learning' | 'Practice-Based Learning';
+  instructions?: string;
+  completed?: boolean;
+}
+
+export interface AIRepetitionPlan {
+  courseCode: string;
+  courseTitle: string;
+  creditUnits: number;
+  priority: 'high' | 'medium' | 'low';
+  readingTechnique: string;
+  topicsToPrioritize: string[];
+  revisionFrequency: string;
+  practiceStrategy: string;
+  assessmentMethod: string;
+  countdownDays?: number;
+}

@@ -511,5 +511,61 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         error: err?.message || 'Vision document scan failed.'
       };
     }
+  },
+
+  async parseTranscript(text: string): Promise<{ success: boolean; courses?: any[]; error?: string }> {
+    try {
+      const response = await fetch('/api/ai/transcript-parse', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify({ text })
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('parseTranscript error:', err);
+      return { success: false, error: err?.message || 'Failed to parse transcript.' };
+    }
+  },
+
+  async analyzeCgpa(payload: any): Promise<{ success: boolean; analysis?: any; error?: string }> {
+    try {
+      const response = await fetch('/api/ai/cgpa-analysis', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('analyzeCgpa error:', err);
+      return { success: false, error: err?.message || 'Failed to analyze CGPA.' };
+    }
+  },
+
+  async generateAcademicPlan(payload: any): Promise<{ success: boolean; timetable?: any[]; revisionPlans?: any[]; error?: string }> {
+    try {
+      const response = await fetch('/api/ai/academic-planner', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('generateAcademicPlan error:', err);
+      return { success: false, error: err?.message || 'Failed to generate academic plan.' };
+    }
+  },
+
+  async sendAcademicChat(messages: any[], academicContext: any): Promise<{ text: string }> {
+    try {
+      const response = await fetch('/api/ai/academic-chat', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify({ messages, academicContext })
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('sendAcademicChat error:', err);
+      return { text: "Focus on mastering high-credit units with active recall practice problem sets." };
+    }
   }
 };

@@ -653,6 +653,173 @@ async function startServer() {
     return generated;
   };
 
+  const getTranscriptFallback = (text: string) => {
+    const courses: any[] = [];
+    const lines = (text || '').split('\n');
+    const regex = /([A-Z]{2,4})\s*(\d{3})\s*[:\-\|]?\s*(.*?)(?:\s+(\d)\s*(?:units?|cr|credits?)?)?\s+([A-F][\+\-]?)/i;
+
+    for (const line of lines) {
+      const match = line.match(regex);
+      if (match) {
+        const code = (match[1] + match[2]).toUpperCase();
+        const rawTitle = (match[3] || '').trim().replace(/^[:\-\|,\s]+|[:\-\|,\s]+$/g, '');
+        const units = match[4] ? parseInt(match[4], 10) : 3;
+        const grade = (match[5] || 'A').toUpperCase();
+        if (!courses.some(c => c.code === code)) {
+          courses.push({
+            code,
+            title: rawTitle || `Course ${code}`,
+            creditUnits: isNaN(units) ? 3 : units,
+            grade
+          });
+        }
+      } else {
+        const codeMatch = line.match(/([A-Z]{2,4}\s*\d{3})/i);
+        const gradeMatch = line.match(/\b([A-F][\+\-]?)\b/);
+        if (codeMatch && gradeMatch) {
+          const code = codeMatch[1].replace(/\s+/g, '').toUpperCase();
+          if (!courses.some(c => c.code === code)) {
+            courses.push({
+              code,
+              title: `Course ${code}`,
+              creditUnits: 3,
+              grade: gradeMatch[1].toUpperCase()
+            });
+          }
+        }
+      }
+    }
+    return courses;
+  };
+
+  const getCgpaAnalysisFallback = (data: any) => {
+    const current = typeof data.currentCgpa === 'number' ? data.currentCgpa : 0;
+    const target = typeof data.targetCgpa === 'number' ? data.targetCgpa : 0;
+    const scale = data.gradingScale === 4 ? 4.0 : 5.0;
+    const remainingSemesters = Math.max(1, data.remainingSemesters || 2);
+    const completedSemesters = Math.max(1, data.completedSemesters || 2);
+    const totalSemesters = completedSemesters + remainingSemesters;
+
+    const gap = parseFloat((target - current).toFixed(2));
+    const completedCredits = completedSemesters * 20;
+    const remainingCredits = remainingSemesters * 20;
+    const totalCredits = completedCredits + remainingCredits;
+
+    const totalPointsNeeded = target * totalCredits;
+    const currentPointsEarned = current * completedCredits;
+    const remainingPointsNeeded = totalPointsNeeded - currentPointsEarned;
+    const requiredSemesterGpa = parseFloat((remainingPointsNeeded / remainingCredits).toFixed(2));
+
+    const maxPossiblePoints = currentPointsEarned + (scale * remainingCredits);
+    const maxPossibleCgpa = parseFloat((maxPossiblePoints / totalCredits).toFixed(2));
+    const isAchievable = target <= 0 || (requiredSemesterGpa <= scale && target <= maxPossibleCgpa);
+    const alternativeTarget = isAchievable ? undefined : parseFloat((maxPossibleCgpa * 0.95).toFixed(2));
+
+    const courses = data.courses || [];
+    const highCreditPriorities = courses
+      .filter((c: any) => (c.units || c.creditUnits || 3) >= 3)
+      .slice(0, 4)
+      .map((c: any) => ({
+        code: c.code || 'Course',
+        units: c.units || c.creditUnits || 3,
+        reason: `${c.units || c.creditUnits || 3} credit units carry significant mathematical weight toward your semester GPA.`
+      }));
+
+    return {
+      currentCgpa: current,
+      targetCgpa: target,
+      gradingScale: scale,
+      gap,
+      isAchievable,
+      maxPossibleCgpa,
+      requiredSemesterGpa: Math.max(0, requiredSemesterGpa),
+      alternativeTarget,
+      advisorySummary: target <= 0 
+        ? "You have not configured a target CGPA yet. Setting a target allows KorsIQ to calculate your required semester GPA and prioritize high-weight courses."
+        : isAchievable
+          ? `Your target CGPA of ${target.toFixed(2)} is mathematically achievable! To reach your goal on a ${scale.toFixed(2)} scale across your remaining ${remainingSemesters} semester(s), you must maintain an average semester GPA of approximately ${requiredSemesterGpa.toFixed(2)}. Prioritizing your 3-credit and 4-credit courses will give you the strongest upward momentum.`
+          : `Your target CGPA of ${target.toFixed(2)} is mathematically unattainable based on your remaining ${remainingSemesters} semester(s), because it requires an average semester GPA of ${requiredSemesterGpa.toFixed(2)} (exceeding the ${scale.toFixed(2)} maximum grading scale). The highest possible CGPA you can graduate with by earning perfect ${scale.toFixed(2)} GPAs is ${maxPossibleCgpa.toFixed(2)}. We recommend setting your target to ${alternativeTarget?.toFixed(2) || maxPossibleCgpa.toFixed(2)}.`,
+      strategicSteps: [
+        "Dedicate priority study blocks to 3-unit and 4-unit courses early in each week.",
+        "Apply active recall and weekly past-question practice rather than passive textbook reading.",
+        "Schedule consistent 2-hour daily study sessions with 10-minute breaks to maintain retention.",
+        "Track weekly quiz scores to verify comprehension before midterm examinations."
+      ],
+      highCreditPriorities,
+      weakAreas: data.difficultCourses && data.difficultCourses.length > 0 ? data.difficultCourses : ["Heavy calculation and theoretical coursework"],
+      strengths: ["Structured study timetable compliance", "Proactive exam preparation"],
+      studyPlanRecommendations: [
+        "Apply the Feynman Technique to explain complex formulas in plain language.",
+        "Schedule spaced repetition intervals at 24 hours, 3 days, and 7 days after classes.",
+        "Reserve weekend mornings for simulated past-examination question sets."
+      ]
+    };
+  };
+
+  const getAcademicPlannerFallback = (courses: any[], targetCgpa: number, currentCgpa: number) => {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const techniques = [
+      'Active Recall', 'Practice-Based Learning', 'Spaced Repetition',
+      'Feynman Technique', 'Past Question Practice', 'Pomodoro Technique', 'Interleaved Learning'
+    ];
+    const activities = [
+      'Understand core foundational concepts',
+      'Solve worked calculation problems',
+      'Self-testing & flashcard recall',
+      'Explain complex mechanism in simple words',
+      'Timed past-examination practice',
+      '25m focused interval reading with 5m break',
+      'Synthesize related topics across modules'
+    ];
+
+    const safeCourses = courses && courses.length > 0 ? courses : [
+      { code: 'ACAD101', title: 'Core Academic Module', units: 3, difficulty: 'Hard' },
+      { code: 'MATH102', title: 'Quantitative Reasoning', units: 3, difficulty: 'Medium' }
+    ];
+
+    const timetable: any[] = [];
+    const revisionPlans: any[] = [];
+
+    safeCourses.forEach((c: any, idx: number) => {
+      const tech = (c.difficulty === 'Hard' || c.units >= 4) ? 'Practice-Based Learning' : techniques[idx % techniques.length];
+      revisionPlans.push({
+        courseCode: c.code,
+        courseTitle: c.title || c.code,
+        creditUnits: c.units || 3,
+        priority: c.difficulty === 'Hard' || c.units >= 4 ? 'high' : (c.difficulty === 'Medium' ? 'medium' : 'low'),
+        readingTechnique: tech,
+        topicsToPrioritize: [`Fundamental principles in ${c.code}`, `Applied practice problem sets`, `Exam recurrent question patterns`],
+        revisionFrequency: c.difficulty === 'Hard' ? 'Every 2 days' : 'Weekly',
+        practiceStrategy: 'Review lecture notes, attempt recall from memory, then solve 5 past questions.',
+        assessmentMethod: 'Score 80%+ on timed multiple choice or worked proof before exam week.',
+        countdownDays: 30
+      });
+    });
+
+    for (let i = 0; i < 7; i++) {
+      const day = days[i];
+      const course = safeCourses[i % safeCourses.length];
+      const tech = techniques[i % techniques.length];
+      const act = activities[i % activities.length];
+
+      timetable.push({
+        id: `plan-session-${i + 1}`,
+        day,
+        startTime: i % 2 === 0 ? '16:00' : '18:00',
+        endTime: i % 2 === 0 ? '17:30' : '19:30',
+        courseCode: course.code,
+        courseTitle: course.title || course.code,
+        topic: `Mastering High-Yield Concepts & Problem Sets`,
+        activity: act,
+        recommendedTechnique: tech,
+        instructions: `Dedicate 90 minutes. 10 mins quick review, 60 mins of ${tech}, and 20 mins self-assessment.`,
+        completed: false
+      });
+    }
+
+    return { timetable, revisionPlans };
+  };
+
   const getMaterialsFallback = (content: string, type: 'summary' | 'flashcards' | 'quiz' | 'test') => {
     if (type === 'summary') {
       let summary = `# Strategic Academic Summary\n\n`;
@@ -1117,6 +1284,226 @@ CRITICAL SECURITY & CONTEXT RULES:
     } catch (error: any) {
       console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
       res.json(getScheduleFallback(courses, university));
+    }
+  });
+
+  // Parse Academic Transcript / Result Document
+  app.post('/api/ai/transcript-parse', requireAuth, apiRateLimiter, async (req, res) => {
+    const { text } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ success: false, error: 'Text content is required for parsing.' });
+    }
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.json({ success: true, courses: getTranscriptFallback(text) });
+      }
+
+      const aiContent = await runAICall({
+        systemInstruction: `You are an academic document parser. Extract all course codes, course titles, credit units, and grades from the student's result text.
+        You must return a valid JSON object with a "courses" array.
+        Each course object must strictly have:
+        - "code": string (e.g., "MTH101", "CVE304")
+        - "title": string (title or course name, or empty)
+        - "creditUnits": number (units/credits, default to 3 if unspecified)
+        - "grade": string ("A", "B", "C", "D", "E", or "F")
+        - "score": optional number (if test/exam score exists)
+        Do not invent courses or grades that are not in the text. If no clear courses are present, return an empty array.`,
+        messages: [{ role: 'user', content: `Extract courses from this transcript text:\n\n${text.slice(0, 15000)}` }],
+        jsonMode: true
+      });
+
+      const parsed = JSON.parse(aiContent || '{}');
+      const courses = parsed.courses || parsed.courseList || (Array.isArray(parsed) ? parsed : []);
+      res.json({ success: true, courses });
+    } catch (error: any) {
+      console.warn('Transcript parse AI error, using fallback:', error?.message || error);
+      res.json({ success: true, courses: getTranscriptFallback(text) });
+    }
+  });
+
+  // AI CGPA Analysis & Academic Reasoning
+  app.post('/api/ai/cgpa-analysis', requireAuth, apiRateLimiter, async (req, res) => {
+    const { currentCgpa, targetCgpa, gradingScale, currentLevel, remainingSemesters, completedSemesters, courses, difficultCourses, studyPreferences } = req.body;
+
+    const baseData = {
+      currentCgpa: typeof currentCgpa === 'number' ? currentCgpa : 0,
+      targetCgpa: typeof targetCgpa === 'number' ? targetCgpa : 0,
+      gradingScale: gradingScale === 4 ? 4.0 : 5.0,
+      currentLevel: currentLevel || '100L',
+      remainingSemesters: typeof remainingSemesters === 'number' ? remainingSemesters : 2,
+      completedSemesters: typeof completedSemesters === 'number' ? completedSemesters : 2,
+      courses: courses || [],
+      difficultCourses: difficultCourses || [],
+      studyPreferences: studyPreferences || ''
+    };
+
+    const mathFallback = getCgpaAnalysisFallback(baseData);
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.json({ success: true, analysis: mathFallback });
+      }
+
+      const promptContext = `
+STUDENT ACADEMIC CONTEXT:
+- Current CGPA: ${baseData.currentCgpa.toFixed(2)}
+- Target CGPA: ${baseData.targetCgpa.toFixed(2)}
+- Grading Scale: ${baseData.gradingScale.toFixed(2)} Scale
+- Current Academic Level: ${baseData.currentLevel}
+- Completed Semesters: ${baseData.completedSemesters}
+- Remaining Semesters: ${baseData.remainingSemesters}
+- Required Average Semester GPA to reach Target: ${mathFallback.requiredSemesterGpa.toFixed(2)}
+- Maximum Possible CGPA on this scale: ${mathFallback.maxPossibleCgpa.toFixed(2)}
+- Mathematically Achievable: ${mathFallback.isAchievable ? 'YES' : 'NO'}
+- Student Difficult Courses: ${JSON.stringify(baseData.difficultCourses)}
+- Registered Courses: ${JSON.stringify(baseData.courses)}
+- Study Preferences: ${baseData.studyPreferences || 'Standard focused revision'}
+`;
+
+      const aiContent = await runAICall({
+        systemInstruction: `You are KorsIQ Academic Reasoning Advisor.
+Evaluate the student's target CGPA using rigorous academic math and pedagogical wisdom.
+Be honest, constructive, and highly encouraging.
+Return a valid JSON object matching:
+{
+  "advisorySummary": string (explain the gap, required semester GPA, whether it is achievable, and how high-credit units impact the path),
+  "strategicSteps": string[] (4-5 concrete steps to improve GPA),
+  "highCreditPriorities": [ { "code": string, "units": number, "reason": string } ],
+  "weakAreas": string[] (courses/areas needing special attention),
+  "strengths": string[] (areas where student has positive foundation),
+  "studyPlanRecommendations": string[] (actionable study habits)
+}`,
+        messages: [{ role: 'user', content: promptContext }],
+        jsonMode: true
+      });
+
+      const parsed = JSON.parse(aiContent || '{}');
+      const analysis = {
+        ...mathFallback,
+        advisorySummary: parsed.advisorySummary || mathFallback.advisorySummary,
+        strategicSteps: parsed.strategicSteps || mathFallback.strategicSteps,
+        highCreditPriorities: parsed.highCreditPriorities || mathFallback.highCreditPriorities,
+        weakAreas: parsed.weakAreas || mathFallback.weakAreas,
+        strengths: parsed.strengths || mathFallback.strengths,
+        studyPlanRecommendations: parsed.studyPlanRecommendations || mathFallback.studyPlanRecommendations
+      };
+
+      res.json({ success: true, analysis });
+    } catch (error: any) {
+      console.warn('AI CGPA Analysis error, using mathematical fallback:', error?.message || error);
+      res.json({ success: true, analysis: mathFallback });
+    }
+  });
+
+  // AI Personalized Timetable & Reading Revision Planner
+  app.post('/api/ai/academic-planner', requireAuth, apiRateLimiter, async (req, res) => {
+    const { courses, targetCgpa, currentCgpa, preferredStudyHours, examDate } = req.body;
+    const fallback = getAcademicPlannerFallback(courses, targetCgpa, currentCgpa);
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.json({ success: true, ...fallback });
+      }
+
+      const prompt = `Courses: ${JSON.stringify(courses)}.
+Target CGPA: ${targetCgpa || 0}, Current CGPA: ${currentCgpa || 0}.
+Preferred daily study hours: ${preferredStudyHours || 2}.
+Upcoming Examination Date: ${examDate || 'Not set'}.`;
+
+      const aiContent = await runAICall({
+        systemInstruction: `You are KorsIQ Personalized Timetable and Revision Architect.
+Create:
+1. "timetable": Array of 7 weekly study sessions (Monday-Sunday) tailored to the student's actual courses.
+Each session object:
+- "id": string
+- "day": string (e.g., "Monday")
+- "startTime": string (e.g., "16:00")
+- "endTime": string (e.g., "17:30")
+- "courseCode": string
+- "courseTitle": string
+- "topic": string (specific concept to study)
+- "activity": string (e.g., "Practice problem sets", "Core concept review")
+- "recommendedTechnique": string (One of: "Active Recall", "Spaced Repetition", "Feynman Technique", "Past Question Practice", "Pomodoro Technique", "Interleaved Learning", "Practice-Based Learning")
+- "instructions": string (step by step study guideline)
+
+2. "revisionPlans": Array of course-by-course revision plans.
+Each plan object:
+- "courseCode": string
+- "courseTitle": string
+- "creditUnits": number
+- "priority": "high" | "medium" | "low"
+- "readingTechnique": string
+- "topicsToPrioritize": string[]
+- "revisionFrequency": string (e.g., "Every 2 days")
+- "practiceStrategy": string
+- "assessmentMethod": string
+- "countdownDays": number (if examDate given, otherwise 30)
+
+Return JSON with "timetable" and "revisionPlans" arrays.`,
+        messages: [{ role: 'user', content: prompt }],
+        jsonMode: true
+      });
+
+      const parsed = JSON.parse(aiContent || '{}');
+      res.json({
+        success: true,
+        timetable: parsed.timetable || fallback.timetable,
+        revisionPlans: parsed.revisionPlans || fallback.revisionPlans
+      });
+    } catch (error: any) {
+      console.warn('Academic planner AI error, using fallback:', error?.message || error);
+      res.json({ success: true, ...fallback });
+    }
+  });
+
+  // AI Academic Conversational Adviser Chat
+  app.post('/api/ai/academic-chat', requireAuth, apiRateLimiter, async (req, res) => {
+    const { messages, academicContext } = req.body;
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.json({
+          text: `[KorsIQ Academic Adviser] I have reviewed your academic profile (${academicContext?.courses?.length || 0} registered courses). To boost your CGPA, focus your deepest study hours on high-credit modules and drill past questions using the Feynman and Spaced Repetition techniques.`
+        });
+      }
+
+      const systemInstruction = `You are KorsIQ Academic Adviser, a brilliant, compassionate, and mathematically precise academic mentor.
+You guide university and college students toward intellectual mastery and achieving their target CGPA.
+
+STUDENT ACADEMIC PROFILE:
+- Current CGPA: ${academicContext?.currentCgpa || 'Not set'}
+- Target CGPA: ${academicContext?.targetCgpa || 'Not set'}
+- Grading Scale: ${academicContext?.gradingScale || 5.0} Scale
+- Academic Level: ${academicContext?.currentLevel || 'Not set'}
+- Remaining Semesters: ${academicContext?.remainingSemesters || 2}
+- Registered Courses: ${JSON.stringify(academicContext?.courses || [])}
+- Difficult Courses: ${JSON.stringify(academicContext?.difficultCourses || [])}
+
+RULES:
+1. Always ground your advice in their actual course load, credit units, and mathematical feasibility.
+2. Recommend specific study techniques: Active Recall, Spaced Repetition, Feynman Technique, Past Question Practice, Pomodoro Technique, Interleaved Learning, Practice-Based Learning.
+3. Be honest about academic limits; if a target is impossible, kindly explain the mathematical barrier and propose realistic targets.
+4. Keep explanations concise, structured with bullet points, and actionable.`;
+
+      const aiResponse = await runAICall({
+        systemInstruction,
+        messages: (messages || []).map((m: any) => ({
+          role: m.role || (m.sender === 'user' ? 'user' : 'assistant'),
+          content: m.content || m.text || ''
+        })),
+        preferGroq: true
+      });
+
+      res.json({ text: aiResponse || "I am analyzing your academic question. How can I assist you with your study plan today?" });
+    } catch (error: any) {
+      console.warn('Academic chat AI error:', error?.message || error);
+      res.json({
+        text: `I'm analyzing your academic coursework. Remember to allocate extra review sessions for your 3-unit and 4-unit courses, and test your recall using timed past questions.`
+      });
     }
   });
 

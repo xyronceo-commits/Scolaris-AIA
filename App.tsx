@@ -155,6 +155,7 @@ const App: React.FC = () => {
           tutorialSeen: false,
           tier: 'scholar',
           isPro: true,
+          targetCGPA: 0.00,
           notifications: { messages: true, sessions: true, aiContent: true },
           semesterEnd: ''
         };
@@ -291,8 +292,22 @@ const App: React.FC = () => {
         
         if (!lastNotified || (Date.now() - parseInt(lastNotified, 10)) > 86400000) {
           const course = courses.find(c => c.id === session.courseId);
-          addNotification('session', 'Upcoming Study Session', `You have a ${session.mode} session for ${course?.code || 'your course'} today.`, 'schedule');
+          const topicInfo = session.topic ? ` Today's focus: ${session.topic}.` : '';
+          const techniqueInfo = session.technique ? ` Recommended technique: ${session.technique}.` : '';
+          addNotification('session', 'Upcoming Study Session', `Your ${session.mode} session for ${course?.code || 'your course'} is scheduled today.${topicInfo}${techniqueInfo}`, 'schedule');
           localStorage.setItem(lastNotifiedKey, Date.now().toString());
+
+          // Trigger native browser notification if permitted
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && profile.notifications?.browserPush !== false) {
+            try {
+              new Notification(`KorsIQ Reminder: ${course?.code || 'Study Session'}`, {
+                body: `Your ${session.mode} session is scheduled today.${topicInfo}`,
+                icon: '/korsiq-logo-192.png'
+              });
+            } catch (err) {
+              console.warn('Native notification dispatch error:', err);
+            }
+          }
         }
       });
     }, 60000);
@@ -664,7 +679,18 @@ const App: React.FC = () => {
           addNotification={addNotification}
         />;
       case 'calculator':
-        return <CGPACalculator profile={profile} onUpdateProfile={handleSaveProfile} />;
+        return <CGPACalculator 
+          profile={profile} 
+          onUpdateProfile={handleSaveProfile}
+          courses={courses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          addNotification={addNotification}
+          onOpenHub={(courseId) => {
+            setSelectedCourseId(courseId);
+            setActiveTab('hub');
+          }}
+        />;
       case 'pomodoro':
       case 'library':
         return <PomodoroTimer />;
@@ -697,7 +723,7 @@ const App: React.FC = () => {
     { id: 'schedule', label: 'Schedule', icon: ICONS.Schedule },
     { id: 'hub', label: 'Study Hub', icon: ICONS.StudyHub },
     { id: 'groups', label: 'Circles', icon: ICONS.Groups },
-    { id: 'calculator', label: 'GPA Calc', icon: ICONS.Calculator },
+    { id: 'calculator', label: 'CGPA & Planner', icon: ICONS.Calculator },
     { id: 'analytics', label: 'Analytics', icon: ICONS.Analytics },
     { id: 'pomodoro', label: 'Study Timer', icon: ICONS.Pomodoro },
   ];

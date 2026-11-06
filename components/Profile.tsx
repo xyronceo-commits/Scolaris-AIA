@@ -166,12 +166,12 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                         step="0.01"
                         min="0"
                         max="5.00"
-                        value={editedProfile.targetCGPA !== undefined ? editedProfile.targetCGPA : 4.50}
+                        value={editedProfile.targetCGPA !== undefined ? editedProfile.targetCGPA : 0.00}
                         onChange={e => setEditedProfile({...editedProfile, targetCGPA: parseFloat(e.target.value) || 0})}
                         className="text-sm font-bold text-indigo-600 bg-transparent focus:outline-none w-20 border-b border-indigo-300"
                       />
                     ) : (
-                      <p className="text-sm font-bold text-indigo-600">{(profile?.targetCGPA ?? 4.50).toFixed(2)}</p>
+                      <p className="text-sm font-bold text-indigo-600">{(profile?.targetCGPA ?? 0.00).toFixed(2)}</p>
                     )}
                  </div>
               </div>

@@ -6,7 +6,7 @@ import {
   Sparkles, Users, BookOpen, School, ShieldAlert, Award, Send, RefreshCw, 
   HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash
 } from 'lucide-react';
-import { DBService } from '../services/db';
+import { DBService, generateCircleInviteCode } from '../services/db';
 import { getHeaders } from '../services/gemini';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 
@@ -65,6 +65,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   // File Upload State
   const [isUploading, setIsUploading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -189,14 +190,21 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
     try {
       const code = joinCode.trim().toUpperCase();
-      const groupFound = await DBService.findGroupByCode(code);
+      const findRes = await DBService.findGroupByCode(code);
 
-      if (!groupFound) {
-        setJoinError('No active study group found matching this invite code.');
+      if (!findRes || (!findRes.group && !findRes.error)) {
+        setJoinError('Invalid invitation code. No active study circle found matching this code.');
         setIsAiThinking(false);
         return;
       }
 
+      if (findRes.error) {
+        setJoinError(findRes.error);
+        setIsAiThinking(false);
+        return;
+      }
+
+      const groupFound = findRes.group!;
       const res = await DBService.joinGroup(groupFound.id, code, currentUserId, profile.name);
       if (res.success && res.group) {
         setGroups(prev => {
@@ -209,12 +217,12 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         setActiveGroupId(res.group.id);
         setShowJoinModal(false);
         setJoinCode('');
-        addNotification('message', 'Group Joined', `You joined "${res.group.name}"`, 'groups');
+        addNotification('message', 'Circle Joined', `You successfully joined "${res.group.name}"!`, 'groups');
       } else {
-        setJoinError(res.error || 'Failed to join group.');
+        setJoinError(res.error || 'Failed to join circle.');
       }
     } catch (err: any) {
-      setJoinError('Error joining group. Please try again.');
+      setJoinError('Error joining circle. Please try again.');
     } finally {
       setIsAiThinking(false);
     }
@@ -484,12 +492,61 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const regenerateCode = async () => {
+  const copyInviteCodeOnly = () => {
     if (!activeGroup) return;
-    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    await DBService.updateGroupInviteCode(activeGroup.id, newCode, currentUserId);
-    setGroups(prev => prev.map(g => g.id === activeGroup.id ? { ...g, inviteCode: newCode } : g));
-    addNotification('message', 'Invite Code Updated', `New invite code: ${newCode}`, 'groups');
+    navigator.clipboard.writeText(activeGroup.inviteCode);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  const shareInvite = async () => {
+    if (!activeGroup) return;
+    const inviteUrl = `${window.location.origin}?joinGroup=${activeGroup.inviteCode}`;
+    const shareText = `Join our "${activeGroup.name}" study circle on KorsIQ using invite code: ${activeGroup.inviteCode}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `KorsIQ Circle: ${activeGroup.name}`,
+          text: shareText,
+          url: inviteUrl,
+        });
+        return;
+      } catch (err) {
+        // user cancelled or share failed, fallback to copy
+      }
+    }
+    navigator.clipboard.writeText(`${shareText}\n${inviteUrl}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const regenerateCode = async () => {
+    if (!activeGroup || activeGroup.ownerId !== currentUserId) return;
+    const newCode = generateCircleInviteCode();
+    const ok = await DBService.updateGroupInviteCode(activeGroup.id, newCode, currentUserId);
+    if (ok) {
+      setGroups(prev => prev.map(g => g.id === activeGroup.id ? { ...g, inviteCode: newCode, inviteCodeActive: true } : g));
+      addNotification('message', 'Invite Code Regenerated', `New invite code: ${newCode}. Previous codes have been invalidated.`, 'groups');
+    }
+  };
+
+  const revokeCodeToggle = async () => {
+    if (!activeGroup || activeGroup.ownerId !== currentUserId) return;
+    const isCurrentlyActive = activeGroup.inviteCodeActive !== false;
+    if (isCurrentlyActive) {
+      const ok = await DBService.revokeGroupInviteCode(activeGroup.id, currentUserId);
+      if (ok) {
+        setGroups(prev => prev.map(g => g.id === activeGroup.id ? { ...g, inviteCodeActive: false } : g));
+        addNotification('message', 'Invite Code Revoked', `Invite code for "${activeGroup.name}" has been revoked and can no longer be used.`, 'groups');
+      }
+    } else {
+      const newCode = generateCircleInviteCode();
+      const ok = await DBService.updateGroupInviteCode(activeGroup.id, newCode, currentUserId);
+      if (ok) {
+        setGroups(prev => prev.map(g => g.id === activeGroup.id ? { ...g, inviteCode: newCode, inviteCodeActive: true } : g));
+        addNotification('message', 'Invite Code Reactivated', `New active invite code generated: ${newCode}`, 'groups');
+      }
+    }
   };
 
   return (
@@ -692,28 +749,53 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                     {activeGroup.course}
                   </span>
                 </div>
-                <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
                   <span>{activeGroup.description || 'Collaborative Academic Circle'}</span>
                   <span className="text-slate-300">•</span>
-                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
-                    Code: {activeGroup.inviteCode}
+                  <span className="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2.5 py-0.5 rounded-md flex items-center gap-1.5 shadow-2xs">
+                    <span className="text-[10px] text-slate-400 font-sans font-semibold uppercase">Code:</span>
+                    <span>{activeGroup.inviteCode}</span>
+                    {activeGroup.inviteCodeActive === false ? (
+                      <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded font-sans font-bold">Revoked</span>
+                    ) : (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-sans font-bold">Active</span>
+                    )}
                   </span>
                   <button
-                    onClick={copyInvite}
-                    title="Copy Shareable Invite Link"
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer"
+                    onClick={copyInviteCodeOnly}
+                    title="Copy Invite Code"
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer bg-slate-50 hover:bg-indigo-50 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
                   >
-                    {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-                    {copied ? 'Link Copied!' : 'Copy Link'}
+                    {copiedCode ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                    <span>{copiedCode ? 'Code Copied!' : 'Copy Code'}</span>
+                  </button>
+                  <button
+                    onClick={shareInvite}
+                    title="Share Circle Invitation"
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer bg-slate-50 hover:bg-indigo-50 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
+                  >
+                    <Share2 size={12} />
+                    <span>Share</span>
                   </button>
                   {activeGroup.ownerId === currentUserId && (
-                    <button
-                      onClick={regenerateCode}
-                      title="Generate new invite code"
-                      className="text-[10px] text-slate-500 hover:text-slate-800 underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <RefreshCw size={10} /> Regen Code
-                    </button>
+                    <>
+                      <button
+                        onClick={regenerateCode}
+                        title="Generate a new invite code (invalidates previous code)"
+                        className="text-[11px] text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer hover:underline"
+                      >
+                        <RefreshCw size={11} /> Regen
+                      </button>
+                      <button
+                        onClick={revokeCodeToggle}
+                        title={activeGroup.inviteCodeActive === false ? 'Reactivate invite code' : 'Revoke invite code'}
+                        className={`text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:underline ${
+                          activeGroup.inviteCodeActive === false ? 'text-emerald-600 hover:text-emerald-800' : 'text-rose-600 hover:text-rose-800'
+                        }`}
+                      >
+                        {activeGroup.inviteCodeActive === false ? 'Reactivate' : 'Revoke'}
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -1068,6 +1150,108 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
               {/* 4. OVERVIEW / GROUP INFO TAB */}
               {activeTab === 'overview' && (
                 <div className="max-w-4xl mx-auto space-y-6">
+                  {/* Private Circle Invitation & Access Management Card */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-indigo-600 block mb-1">
+                          Private Circle Invitation
+                        </span>
+                        <h3 className="text-xl font-serif font-bold text-slate-900">{activeGroup.name}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{activeGroup.description || 'Collaborative Academic Study Circle'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {activeGroup.inviteCodeActive === false ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-full">
+                            <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                            Code Revoked (Inactive)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-full">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Active Invitation Code
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Unique Invite Code</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl font-mono font-black text-indigo-950 tracking-widest bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                              {activeGroup.inviteCode}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={copyInviteCodeOnly}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                          >
+                            {copiedCode ? <Check size={14} /> : <Copy size={14} />}
+                            <span>{copiedCode ? 'Code Copied!' : 'Copy Code'}</span>
+                          </button>
+                          <button
+                            onClick={shareInvite}
+                            className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
+                          >
+                            <Share2 size={14} />
+                            <span>Share Invite</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {activeGroup.ownerId === currentUserId && (
+                        <div className="pt-3 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={regenerateCode}
+                              className="px-3 py-1.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                            >
+                              <RefreshCw size={12} />
+                              <span>Regenerate Code</span>
+                            </button>
+                            <button
+                              onClick={revokeCodeToggle}
+                              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                                activeGroup.inviteCodeActive === false
+                                  ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800'
+                                  : 'bg-rose-100 hover:bg-rose-200 text-rose-800'
+                              }`}
+                            >
+                              <span>{activeGroup.inviteCodeActive === false ? 'Reactivate Invite Code' : 'Revoke Current Code'}</span>
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-500 italic">
+                            {activeGroup.inviteCodeActive === false
+                              ? 'This code is currently deactivated. Students cannot join until reactivated.'
+                              : 'Regenerating will immediately invalidate previous codes.'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="bg-white p-3 rounded-xl border border-slate-150">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Current Members</span>
+                        <span className="text-sm font-bold text-slate-900 mt-0.5 block">{(activeGroup.members || []).length} Students</span>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-slate-150">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Creator / Admin</span>
+                        <span className="text-sm font-bold text-slate-900 mt-0.5 block truncate">
+                          {activeGroup.ownerId === currentUserId ? 'You (Circle Admin)' : 'Course Leader'}
+                        </span>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border border-slate-150">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Visibility</span>
+                        <span className="text-sm font-bold text-slate-900 mt-0.5 block capitalize">{activeGroup.type} Circle</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
                     <h3 className="text-base font-serif font-bold text-slate-900">Group Metadata & Access</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
@@ -1282,16 +1466,30 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
             <form onSubmit={handleJoinByCode} className="space-y-4 text-xs">
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Code / Link Code</label>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Circle Invite Code or Link</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. X7K29A"
+                  placeholder="e.g. KOR-7X9P2Q"
                   value={joinCode}
-                  onChange={e => { setJoinCode(e.target.value); setJoinError(''); }}
+                  onChange={e => {
+                    let val = e.target.value;
+                    if (val.includes('joinGroup=')) {
+                      val = val.split('joinGroup=')[1]?.split('&')[0] || val;
+                    }
+                    setJoinCode(val.trim());
+                    setJoinError('');
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-center text-sm font-mono font-bold tracking-widest outline-none focus:ring-2 focus:ring-indigo-500/20 text-indigo-900 uppercase"
                 />
-                {joinError && <p className="text-[11px] text-rose-600 font-bold mt-1.5">{joinError}</p>}
+                <p className="text-[10px] text-slate-400 mt-1 text-center">
+                  Enter the 6-character code (format: KOR-XXXXXX) shared by your circle leader.
+                </p>
+                {joinError && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold mt-2 animate-in fade-in">
+                    {joinError}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

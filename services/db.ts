@@ -116,6 +116,7 @@ function rowToGroup(row: any, materials: any[] = []): StudyGroup {
     type: row.type || 'private',
     visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
     inviteCode: row.invite_code || '',
+    inviteCodeActive: row.invite_code_active !== false,
     department: row.department || '',
     level: row.level || '',
     university: row.university || '',
@@ -131,6 +132,16 @@ function rowToGroup(row: any, materials: any[] = []): StudyGroup {
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString(),
   };
+}
+
+export function generateCircleInviteCode(): string {
+  // Format: KOR-XXXXXX (6 secure uppercase alphanumeric chars, excluding ambiguous 0, O, 1, I)
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `KOR-${code}`;
 }
 
 async function loadGroupMaterials(groupIds: string[]): Promise<Record<string, any[]>> {
@@ -187,7 +198,7 @@ export const DBService = {
         level: data.level || '',
         age: data.age || 18,
         semesterEnd: data.semester_end || '',
-        targetCGPA: typeof data.target_cgpa === 'number' ? data.target_cgpa : Number(data.target_cgpa) || 4.5,
+        targetCGPA: typeof data.target_cgpa === 'number' ? data.target_cgpa : (data.target_cgpa !== null && data.target_cgpa !== undefined && !isNaN(Number(data.target_cgpa)) ? Number(data.target_cgpa) : 0.00),
         avatarIcon: data.avatar_icon || 'graduation-cap',
         onboarded: data.onboarded ?? false,
         tutorialSeen: data.tutorial_seen ?? false,
@@ -219,7 +230,7 @@ export const DBService = {
         level: profile.level,
         age: profile.age,
         semester_end: profile.semesterEnd || '',
-        target_cgpa: profile.targetCGPA ?? 4.5,
+        target_cgpa: profile.targetCGPA !== undefined ? profile.targetCGPA : 0.00,
         avatar_icon: profile.avatarIcon || 'graduation-cap',
         onboarded: profile.onboarded,
         tutorial_seen: profile.tutorialSeen,
@@ -486,7 +497,7 @@ export const DBService = {
     userName: string
   ): Promise<StudyGroup> {
     const groupId = `group_${Date.now()}_${rand()}`;
-    const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const inviteCode = generateCircleInviteCode();
     const createdAt = new Date().toISOString();
 
     const initialMember: GroupMember = {
@@ -520,6 +531,7 @@ export const DBService = {
         type: groupData.type,
         visibility: groupData.type === 'general' ? 'public' : 'private',
         invite_code: inviteCode,
+        invite_code_active: true,
         department: groupData.department || '',
         level: groupData.level || '',
         university: groupData.university || '',
@@ -551,21 +563,109 @@ export const DBService = {
     inviteCode: string | null,
     userId: string,
     userName: string
-  ): Promise<{ success: boolean; error?: string; group?: StudyGroup }> {
+  ): Promise<{ success: boolean; error?: string; group?: StudyGroup; isAlreadyMember?: boolean }> {
     try {
-      const { data, error } = await supabase.rpc('join_group', {
-        p_group_id: groupId,
-        p_invite_code: inviteCode || '',
-        p_name: userName,
-      });
-      if (error) throw error;
+      const codeTrimmed = (inviteCode || '').trim().toUpperCase();
 
-      if (!data?.success) {
-        return { success: false, error: data?.error || 'Failed to join group.' };
+      // Check current group status
+      const existingGroup = await fetchGroupRow(groupId);
+      if (existingGroup) {
+        // 1. Check if user is already a member
+        const currentMembers = (existingGroup.members || []) as any[];
+        const alreadyMember = currentMembers.some((m) => 
+          (typeof m === 'string' ? m === userId : m?.userId === userId)
+        );
+        if (alreadyMember) {
+          const materials = (await loadGroupMaterials([groupId]))[groupId] || [];
+          return {
+            success: false,
+            error: 'You are already a member of this circle.',
+            isAlreadyMember: true,
+            group: rowToGroup(existingGroup, materials),
+          };
+        }
+
+        // 2. If private group, check invite code & active status
+        if (existingGroup.type === 'private' || existingGroup.visibility === 'private') {
+          if (existingGroup.invite_code_active === false) {
+            return {
+              success: false,
+              error: 'This invitation code has been revoked by the circle creator.',
+            };
+          }
+          if ((existingGroup.invite_code || '').trim().toUpperCase() !== codeTrimmed) {
+            return {
+              success: false,
+              error: 'Invalid invitation code.',
+            };
+          }
+        }
+
+        // 3. Check membership limit
+        if (currentMembers.length >= 100) {
+          return {
+            success: false,
+            error: 'Circle membership limit reached (maximum 100 members).',
+          };
+        }
       }
 
-      const materials = (await loadGroupMaterials([groupId]))[groupId] || [];
-      return { success: true, group: rowToGroup(data.group, materials) };
+      // First attempt Supabase RPC join_group if available
+      try {
+        const { data, error } = await supabase.rpc('join_group', {
+          p_group_id: groupId,
+          p_invite_code: codeTrimmed,
+          p_name: userName,
+        });
+        if (!error && data?.success) {
+          const materials = (await loadGroupMaterials([groupId]))[groupId] || [];
+          return { success: true, group: rowToGroup(data.group, materials) };
+        }
+      } catch (rpcErr) {
+        console.warn('RPC join_group skipped or failed, fallback to direct membership:', rpcErr);
+      }
+
+      // Direct join fallback
+      if (existingGroup) {
+        const newMember: GroupMember = {
+          userId,
+          name: userName || 'Member',
+          role: 'member',
+          joinedAt: new Date().toISOString(),
+        };
+        const updatedMembers = [...(existingGroup.members || []), newMember];
+        const activity = newActivity(
+          groupId,
+          'member_joined',
+          'Member Joined Circle',
+          `${userName} joined the study circle.`,
+          userName,
+          userId
+        );
+
+        const { data: updatedData, error: updateError } = await supabase
+          .from('study_groups')
+          .update({
+            members: updatedMembers,
+            member_count: updatedMembers.length,
+            activity_feed: [activity, ...(existingGroup.activity_feed || [])],
+          })
+          .eq('id', groupId)
+          .select('*')
+          .single();
+
+        if (updateError || !updatedData) {
+          throw updateError || new Error('Failed to join circle.');
+        }
+
+        const materials = (await loadGroupMaterials([groupId]))[groupId] || [];
+        const joinedGroup = rowToGroup(updatedData, materials);
+        const list = readCache<StudyGroup[]>('groups', userId, []);
+        writeCache('groups', userId, [joinedGroup, ...list.filter((g) => g.id !== joinedGroup.id)]);
+        return { success: true, group: joinedGroup };
+      }
+
+      return { success: false, error: 'Study circle not found.' };
     } catch (err: any) {
       console.error('joinGroup error:', err);
       return { success: false, error: err?.message || 'Failed to join group.' };
@@ -828,50 +928,106 @@ export const DBService = {
     }
   },
 
-  async updateGroupInviteCode(groupId: string, newCode: string, userId: string): Promise<void> {
+  async updateGroupInviteCode(groupId: string, newCode: string, userId: string): Promise<boolean> {
     try {
-      const { error } = await supabase.from('study_groups').update({ invite_code: newCode }).eq('id', groupId);
+      const group = await fetchGroupRow(groupId);
+      if (group && group.owner_id && group.owner_id !== userId) {
+        throw new Error('Unauthorized to regenerate circle invite code.');
+      }
+
+      const { error } = await supabase
+        .from('study_groups')
+        .update({ invite_code: newCode, invite_code_active: true })
+        .eq('id', groupId);
       if (error) throw error;
 
       const list = readCache<StudyGroup[]>('groups', userId, []);
-      writeCache('groups', userId, list.map((g) => (g.id === groupId ? { ...g, inviteCode: newCode } : g)));
+      writeCache('groups', userId, list.map((g) => (g.id === groupId ? { ...g, inviteCode: newCode, inviteCodeActive: true } : g)));
+      return true;
     } catch (err) {
       console.error('updateGroupInviteCode error:', err);
+      return false;
     }
   },
 
-  async findGroupByCode(inviteCode: string): Promise<StudyGroup | null> {
+  async revokeGroupInviteCode(groupId: string, userId: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase.rpc('find_group_by_code', { p_code: inviteCode.trim() });
-      if (error) throw error;
-      if (!data) return null;
+      const group = await fetchGroupRow(groupId);
+      if (group && group.owner_id && group.owner_id !== userId) {
+        throw new Error('Unauthorized to revoke circle invite code.');
+      }
 
-      return {
-        id: data.id,
-        name: data.name || '',
-        description: data.description || '',
-        course: data.course || 'General Study',
-        type: data.type || 'private',
-        visibility: data.visibility || 'private',
-        inviteCode: data.invite_code,
-        department: data.department || '',
-        level: data.level || '',
-        university: data.university || '',
-        ownerId: data.owner_id || '',
-        members: [],
-        memberCount: data.member_count || 0,
-        messages: [
-          {
-            id: 'welcome',
-            sender: 'KorsIQ',
-            text: `You have found ${(data.name || '').toUpperCase()}. Join this group to view materials and collaborate!`,
-            timestamp: Date.now(),
-          },
-        ],
-        sharedMaterials: [],
-        discussions: [],
-        activityFeed: [],
-      };
+      const { error } = await supabase
+        .from('study_groups')
+        .update({ invite_code_active: false })
+        .eq('id', groupId);
+      if (error) throw error;
+
+      const list = readCache<StudyGroup[]>('groups', userId, []);
+      writeCache('groups', userId, list.map((g) => (g.id === groupId ? { ...g, inviteCodeActive: false } : g)));
+      return true;
+    } catch (err) {
+      console.error('revokeGroupInviteCode error:', err);
+      return false;
+    }
+  },
+
+  async findGroupByCode(inviteCode: string): Promise<{ group?: StudyGroup; error?: string } | null> {
+    const trimmed = (inviteCode || '').trim().toUpperCase();
+    if (!trimmed) return null;
+    try {
+      // 1. Direct select from study_groups
+      const { data: directData } = await supabase
+        .from('study_groups')
+        .select('*')
+        .ilike('invite_code', trimmed)
+        .maybeSingle();
+
+      if (directData) {
+        if (directData.invite_code_active === false) {
+          return { error: 'This invitation code has been revoked by the circle creator.' };
+        }
+        return { group: rowToGroup(directData, []) };
+      }
+
+      // 2. RPC fallback
+      const { data, error } = await supabase.rpc('find_group_by_code', { p_code: trimmed });
+      if (!error && data) {
+        if (data.invite_code_active === false) {
+          return { error: 'This invitation code has been revoked by the circle creator.' };
+        }
+        return {
+          group: {
+            id: data.id,
+            name: data.name || '',
+            description: data.description || '',
+            course: data.course || 'General Study',
+            type: data.type || 'private',
+            visibility: data.visibility || 'private',
+            inviteCode: data.invite_code,
+            inviteCodeActive: data.invite_code_active !== false,
+            department: data.department || '',
+            level: data.level || '',
+            university: data.university || '',
+            ownerId: data.owner_id || '',
+            members: [],
+            memberCount: data.member_count || 0,
+            messages: [
+              {
+                id: 'welcome',
+                sender: 'KorsIQ',
+                text: `You have found ${(data.name || '').toUpperCase()}. Join this group to view materials and collaborate!`,
+                timestamp: Date.now(),
+              },
+            ],
+            sharedMaterials: [],
+            discussions: [],
+            activityFeed: [],
+          }
+        };
+      }
+
+      return null;
     } catch (err) {
       console.error('findGroupByCode error:', err);
       return null;
