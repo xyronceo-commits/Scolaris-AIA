@@ -10,6 +10,7 @@ import ScheduleView from './components/ScheduleView';
 import StudyHub from './components/StudyHub';
 import StudyGroups from './components/StudyGroups';
 import CGPACalculator from './components/CGPACalculator';
+import AcademicStudio from './components/AcademicStudio';
 import PomodoroTimer from './components/PomodoroTimer';
 import TimetableView from './components/TimetableView';
 import Profile from './components/Profile';
@@ -709,6 +710,13 @@ const App: React.FC = () => {
           hubs={hubs}
           addNotification={addNotification}
         />;
+      case 'studio':
+        return <AcademicStudio 
+          userId={authUser.uid} 
+          profile={profile} 
+          setProfile={handleSaveProfile} 
+          onNavigateTab={(tab) => setActiveTab(tab as AppState)} 
+        />;
       case 'calculator':
         return <CGPACalculator 
           profile={profile} 
@@ -750,6 +758,7 @@ const App: React.FC = () => {
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: ICONS.Dashboard },
+    { id: 'studio', label: 'Academic Studio', icon: ICONS.Studio },
     { id: 'courses', label: 'Courses', icon: ICONS.Courses },
     { id: 'schedule', label: 'Schedule', icon: ICONS.Schedule },
     { id: 'hub', label: 'Study Hub', icon: ICONS.StudyHub },

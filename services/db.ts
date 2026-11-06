@@ -9,6 +9,8 @@ import {
   SubscriptionTier,
   UserFile,
   GroupMember,
+  AcademicDocument,
+  StudioVersion,
 } from '../types';
 
 const USER_FILES_BUCKET = 'user-files';
@@ -1163,6 +1165,238 @@ export const DBService = {
     } catch (err) {
       console.error('deleteUserFile error:', err);
       throw err;
+    }
+  },
+
+  // ==========================================
+  // KORSIQ ACADEMIC STUDIO
+  // ==========================================
+
+  async getAcademicDocuments(userId: string): Promise<AcademicDocument[]> {
+    try {
+      const cached = readCache<AcademicDocument[]>('academic_docs', userId, []);
+      const { data, error } = await supabase
+        .from('academic_documents')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
+
+      if (error || !data) {
+        return cached;
+      }
+
+      const docs: AcademicDocument[] = data.map((r: any) => ({
+        id: r.id,
+        userId: r.user_id,
+        title: r.title,
+        docType: r.doc_type,
+        subject: r.subject || '',
+        instructions: r.instructions || '',
+        targetWordCount: r.target_word_count || 1500,
+        currentWordCount: r.current_word_count || 0,
+        citationStyle: r.citation_style || 'APA',
+        status: r.status || 'planning',
+        outline: r.outline || [],
+        sections: r.sections || [],
+        references: r.references || [],
+        metadata: r.metadata || {},
+        version: r.version || 1,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
+
+      writeCache('academic_docs', userId, docs);
+      return docs;
+    } catch (err) {
+      console.warn('getAcademicDocuments fallback to cache:', err);
+      return readCache<AcademicDocument[]>('academic_docs', userId, []);
+    }
+  },
+
+  async getAcademicDocument(docId: string, userId: string): Promise<AcademicDocument | null> {
+    try {
+      const cachedList = readCache<AcademicDocument[]>('academic_docs', userId, []);
+      const localDoc = cachedList.find((d) => d.id === docId);
+
+      const { data, error } = await supabase
+        .from('academic_documents')
+        .select('*')
+        .eq('id', docId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error || !data) {
+        return localDoc || null;
+      }
+
+      const doc: AcademicDocument = {
+        id: data.id,
+        userId: data.user_id,
+        title: data.title,
+        docType: data.doc_type,
+        subject: data.subject || '',
+        instructions: data.instructions || '',
+        targetWordCount: data.target_word_count || 1500,
+        currentWordCount: data.current_word_count || 0,
+        citationStyle: data.citation_style || 'APA',
+        status: data.status || 'planning',
+        outline: data.outline || [],
+        sections: data.sections || [],
+        references: data.references || [],
+        metadata: data.metadata || {},
+        version: data.version || 1,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      };
+
+      return doc;
+    } catch {
+      const cachedList = readCache<AcademicDocument[]>('academic_docs', userId, []);
+      return cachedList.find((d) => d.id === docId) || null;
+    }
+  },
+
+  async saveAcademicDocument(doc: AcademicDocument): Promise<AcademicDocument> {
+    const now = new Date().toISOString();
+    const updatedDoc: AcademicDocument = {
+      ...doc,
+      updatedAt: now,
+    };
+
+    // Update local cache immediately
+    const list = readCache<AcademicDocument[]>('academic_docs', doc.userId, []);
+    const idx = list.findIndex((d) => d.id === doc.id);
+    if (idx >= 0) list[idx] = updatedDoc;
+    else list.unshift(updatedDoc);
+    writeCache('academic_docs', doc.userId, list);
+
+    try {
+      const { error } = await supabase.from('academic_documents').upsert(
+        {
+          id: doc.id,
+          user_id: doc.userId,
+          title: doc.title,
+          doc_type: doc.docType,
+          subject: doc.subject || '',
+          instructions: doc.instructions || '',
+          target_word_count: doc.targetWordCount,
+          current_word_count: doc.currentWordCount,
+          citation_style: doc.citationStyle,
+          status: doc.status,
+          outline: doc.outline || [],
+          sections: doc.sections || [],
+          references: doc.references || [],
+          metadata: doc.metadata || {},
+          version: doc.version || 1,
+          updated_at: now,
+        },
+        { onConflict: 'id' }
+      );
+      if (error) console.warn('Supabase saveAcademicDocument warning:', error);
+    } catch (err) {
+      console.warn('saveAcademicDocument remote error, cached locally:', err);
+    }
+
+    return updatedDoc;
+  },
+
+  async deleteAcademicDocument(docId: string, userId: string): Promise<void> {
+    const list = readCache<AcademicDocument[]>('academic_docs', userId, []);
+    writeCache('academic_docs', userId, list.filter((d) => d.id !== docId));
+
+    try {
+      await supabase.from('academic_documents').delete().eq('id', docId).eq('user_id', userId);
+    } catch (err) {
+      console.warn('deleteAcademicDocument remote warning:', err);
+    }
+  },
+
+  async duplicateAcademicDocument(docId: string, userId: string): Promise<AcademicDocument | null> {
+    const original = await this.getAcademicDocument(docId, userId);
+    if (!original) return null;
+
+    const newDoc: AcademicDocument = {
+      ...original,
+      id: crypto.randomUUID(),
+      title: `${original.title} (Copy)`,
+      status: 'planning',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    return await this.saveAcademicDocument(newDoc);
+  },
+
+  async saveDocumentVersion(
+    docId: string,
+    userId: string,
+    title: string,
+    snapshot: string,
+    wordCount: number,
+    notes?: string
+  ): Promise<StudioVersion> {
+    const version: StudioVersion = {
+      id: crypto.randomUUID(),
+      documentId: docId,
+      versionNumber: Date.now(),
+      title,
+      createdAt: new Date().toISOString(),
+      snapshot,
+      wordCount,
+      notes,
+    };
+
+    const cacheKeyName = `studio_versions_${docId}`;
+    const list = readCache<StudioVersion[]>(cacheKeyName, userId, []);
+    writeCache(cacheKeyName, userId, [version, ...list]);
+
+    try {
+      await supabase.from('academic_versions').insert({
+        id: version.id,
+        document_id: docId,
+        user_id: userId,
+        version_number: version.versionNumber,
+        title: version.title,
+        snapshot: JSON.parse(snapshot),
+        word_count: wordCount,
+        notes: notes || '',
+      });
+    } catch (err) {
+      console.warn('saveDocumentVersion remote warning:', err);
+    }
+
+    return version;
+  },
+
+  async getDocumentVersions(docId: string, userId: string): Promise<StudioVersion[]> {
+    const cacheKeyName = `studio_versions_${docId}`;
+    const cached = readCache<StudioVersion[]>(cacheKeyName, userId, []);
+
+    try {
+      const { data, error } = await supabase
+        .from('academic_versions')
+        .select('*')
+        .eq('document_id', docId)
+        .order('created_at', { ascending: false });
+
+      if (error || !data) return cached;
+
+      const versions: StudioVersion[] = data.map((r: any) => ({
+        id: r.id,
+        documentId: r.document_id,
+        versionNumber: r.version_number,
+        title: r.title,
+        createdAt: r.created_at,
+        snapshot: typeof r.snapshot === 'string' ? r.snapshot : JSON.stringify(r.snapshot),
+        wordCount: r.word_count || 0,
+        notes: r.notes || '',
+      }));
+
+      writeCache(cacheKeyName, userId, versions);
+      return versions;
+    } catch {
+      return cached;
     }
   },
 };

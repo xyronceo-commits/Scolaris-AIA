@@ -241,7 +241,7 @@ export interface StudyGroup {
   updatedAt?: string;
 }
 
-export type AppState = 'onboarding' | 'dashboard' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';
+export type AppState = 'onboarding' | 'dashboard' | 'studio' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';
 
 export interface CGPACourseRecord {
   code: string;
@@ -313,3 +313,137 @@ export interface AIRepetitionPlan {
   assessmentMethod: string;
   countdownDays?: number;
 }
+
+// ==========================================
+// KORSIQ ACADEMIC STUDIO TYPES
+// ==========================================
+
+export type AcademicDocumentType = 
+  | 'assignment' 
+  | 'term_paper' 
+  | 'essay' 
+  | 'research_proposal' 
+  | 'thesis' 
+  | 'literature_review' 
+  | 'case_study' 
+  | 'lab_report' 
+  | 'seminar_paper';
+
+export type CitationStyle = 'APA' | 'Harvard' | 'MLA' | 'IEEE';
+
+export type StudioDocumentStatus = 
+  | 'planning' 
+  | 'outline_approved' 
+  | 'drafting' 
+  | 'review' 
+  | 'completed';
+
+export interface StudioOutlineItem {
+  id: string;
+  title: string;
+  level: 1 | 2 | 3;
+  order: number;
+  description: string;
+  rationale?: string;
+  targetWords: number;
+  approved: boolean;
+  personalInstructions?: string;
+  subsections?: StudioOutlineItem[];
+}
+
+export interface StudioCitation {
+  id: string;
+  referenceId: string;
+  sourceTitle: string;
+  authors?: string;
+  year?: string;
+  page?: string;
+  quote?: string;
+  formattedCitation: string;
+}
+
+export interface StudioSection {
+  id: string;
+  outlineItemId: string;
+  title: string;
+  level: 1 | 2 | 3;
+  order: number;
+  content: string;
+  status: 'empty' | 'generating' | 'drafted' | 'approved';
+  wordCount: number;
+  citations: StudioCitation[];
+  lastEditedAt: string;
+}
+
+export interface StudioReference {
+  id: string;
+  title: string;
+  authors: string;
+  year?: string;
+  sourceType: 'pdf' | 'docx' | 'book' | 'journal' | 'website' | 'group_material';
+  contentSnippet?: string;
+  fileName?: string;
+  fileUrl?: string;
+  doi?: string;
+  verified: boolean;
+}
+
+export interface StudioReviewSuggestion {
+  id: string;
+  type: 'grammar' | 'tone' | 'structure' | 'citation' | 'unsupported_claim' | 'clarity';
+  title: string;
+  explanation: string;
+  originalText?: string;
+  suggestedReplacement?: string;
+  severity: 'critical' | 'improvement' | 'minor';
+  status: 'pending' | 'accepted' | 'rejected';
+}
+
+export interface StudioVersion {
+  id: string;
+  documentId: string;
+  versionNumber: number;
+  title: string;
+  createdAt: string;
+  snapshot: string;
+  wordCount: number;
+  notes?: string;
+}
+
+export interface AcademicDocumentMetadata {
+  studentName?: string;
+  studentId?: string;
+  department?: string;
+  faculty?: string;
+  institution?: string;
+  courseCode?: string;
+  courseTitle?: string;
+  lecturerName?: string;
+  submissionDate?: string;
+  abstract?: string;
+  includeCoverPage?: boolean;
+  includeTableOfContents?: boolean;
+  includeReferences?: boolean;
+  includeAppendices?: boolean;
+}
+
+export interface AcademicDocument {
+  id: string;
+  userId: string;
+  title: string;
+  docType: AcademicDocumentType;
+  subject: string;
+  instructions: string;
+  targetWordCount: number;
+  currentWordCount: number;
+  citationStyle: CitationStyle;
+  status: StudioDocumentStatus;
+  outline: StudioOutlineItem[];
+  sections: StudioSection[];
+  references: StudioReference[];
+  metadata: AcademicDocumentMetadata;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+

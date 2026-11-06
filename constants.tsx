@@ -49,6 +49,7 @@ import {
 
 export const ICONS = {
   Dashboard: <LayoutGrid size={20} />,
+  Studio: <FileText size={20} />,
   Courses: <BookOpen size={20} />,
   Schedule: <Calendar size={20} />,
   Timetable: <Calendar size={20} />,

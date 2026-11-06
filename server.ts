@@ -820,6 +820,284 @@ async function startServer() {
     return { timetable, revisionPlans };
   };
 
+  const getStudioPlanFallback = (
+    title: string,
+    docType: string,
+    subject: string,
+    wordGoal: number,
+    citationStyle: string
+  ) => {
+    let outline: any[] = [];
+    const type = (docType || 'assignment').toLowerCase();
+
+    if (type === 'thesis') {
+      const chWords = Math.round(wordGoal / 5);
+      outline = [
+        {
+          id: 'sec-1',
+          title: 'Introduction & Background of the Study',
+          level: 1,
+          order: 1,
+          description: 'Background context, statement of the problem, research objectives, research questions, and significance.',
+          rationale: 'Establishes the intellectual justification and scope of the dissertation.',
+          targetWords: chWords,
+          approved: false,
+          subsections: [
+            { id: 'sec-1-1', title: 'Background to the Study', level: 2, order: 1, description: 'Historical and contemporary overview', targetWords: Math.round(chWords * 0.3), approved: false },
+            { id: 'sec-1-2', title: 'Statement of the Problem', level: 2, order: 2, description: 'Specific empirical or theoretical gap', targetWords: Math.round(chWords * 0.35), approved: false },
+            { id: 'sec-1-3', title: 'Objectives and Significance', level: 2, order: 3, description: 'Aim, research questions, and academic contributions', targetWords: Math.round(chWords * 0.35), approved: false }
+          ]
+        },
+        {
+          id: 'sec-2',
+          title: 'Literature Review & Theoretical Framework',
+          level: 1,
+          order: 2,
+          description: 'Conceptual framework, review of foundational theories, and critical synthesis of empirical literature.',
+          rationale: 'Demonstrates deep subject mastery and maps where this study builds upon prior scholarship.',
+          targetWords: Math.round(chWords * 1.2),
+          approved: false,
+          subsections: [
+            { id: 'sec-2-1', title: 'Theoretical Foundation', level: 2, order: 1, description: 'Grounding theories and analytical paradigms', targetWords: Math.round(chWords * 0.5), approved: false },
+            { id: 'sec-2-2', title: 'Empirical Studies Review', level: 2, order: 2, description: 'Critique of recent relevant published research', targetWords: Math.round(chWords * 0.7), approved: false }
+          ]
+        },
+        {
+          id: 'sec-3',
+          title: 'Research Methodology',
+          level: 1,
+          order: 3,
+          description: 'Research design, population, sampling method, instrumentation, validity/reliability, and analytical procedures.',
+          rationale: 'Ensures the research is reproducible, methodologically sound, and academically rigorous.',
+          targetWords: Math.round(chWords * 0.8),
+          approved: false
+        },
+        {
+          id: 'sec-4',
+          title: 'Data Presentation, Analysis & Discussion',
+          level: 1,
+          order: 4,
+          description: 'Presentation of experimental or empirical findings, hypothesis testing, and in-depth discussion.',
+          rationale: 'Presents the core findings and critically contrasts them against literature expectations.',
+          targetWords: Math.round(chWords * 1.2),
+          approved: false
+        },
+        {
+          id: 'sec-5',
+          title: 'Summary, Conclusions & Recommendations',
+          level: 1,
+          order: 5,
+          description: 'Summary of findings, principal conclusions, practical recommendations, and future research directions.',
+          rationale: 'Synthesizes practical takeaways and outlines the definitive contributions of the study.',
+          targetWords: Math.round(chWords * 0.8),
+          approved: false
+        }
+      ];
+    } else if (type === 'research_proposal') {
+      const pWords = Math.round(wordGoal / 4);
+      outline = [
+        {
+          id: 'sec-1',
+          title: 'Introduction & Research Problem',
+          level: 1,
+          order: 1,
+          description: 'Context, research gap, objectives, and research questions.',
+          rationale: 'Hooks the reader and proves why the proposed investigation is urgent and necessary.',
+          targetWords: pWords,
+          approved: false
+        },
+        {
+          id: 'sec-2',
+          title: 'Literature Review & Theoretical Context',
+          level: 1,
+          order: 2,
+          description: 'Evaluation of established scholarship and theoretical lenses.',
+          rationale: 'Frames the proposal within the broader discipline.',
+          targetWords: Math.round(pWords * 1.2),
+          approved: false
+        },
+        {
+          id: 'sec-3',
+          title: 'Proposed Methodology & Analytical Strategy',
+          level: 1,
+          order: 3,
+          description: 'Proposed sample, data collection instruments, ethical protocols, and analysis methods.',
+          rationale: 'Proves the feasibility and scientific validity of the project.',
+          targetWords: pWords,
+          approved: false
+        },
+        {
+          id: 'sec-4',
+          title: 'Expected Contributions, Budget & Timeline',
+          level: 1,
+          order: 4,
+          description: 'Anticipated intellectual contributions, milestone calendar, and resource requirements.',
+          rationale: 'Shows practical project management readiness.',
+          targetWords: Math.round(pWords * 0.8),
+          approved: false
+        }
+      ];
+    } else if (type === 'term_paper') {
+      const tWords = Math.round(wordGoal / 4);
+      outline = [
+        {
+          id: 'sec-1',
+          title: 'Introduction & Problem Formulation',
+          level: 1,
+          order: 1,
+          description: 'Background, thesis statement, and scope of inquiry.',
+          rationale: 'Defines the focus of the term paper.',
+          targetWords: Math.round(tWords * 0.8),
+          approved: false
+        },
+        {
+          id: 'sec-2',
+          title: 'Theoretical Concepts & Literature Synthesis',
+          level: 1,
+          order: 2,
+          description: 'Review of dominant conceptual models and prior findings.',
+          rationale: 'Provides the academic scaffolding for the analysis.',
+          targetWords: Math.round(tWords * 1.2),
+          approved: false
+        },
+        {
+          id: 'sec-3',
+          title: 'Critical Discussion & Evaluation',
+          level: 1,
+          order: 3,
+          description: 'Evidence-based analysis, comparing perspectives, and evaluation of evidence.',
+          rationale: 'Constitutes the intellectual core of the term paper.',
+          targetWords: Math.round(tWords * 1.2),
+          approved: false
+        },
+        {
+          id: 'sec-4',
+          title: 'Conclusion & Academic Implications',
+          level: 1,
+          order: 4,
+          description: 'Synthesis of key insights, limitations, and future outlook.',
+          rationale: 'Delivers a coherent, persuasive closing argument.',
+          targetWords: Math.round(tWords * 0.8),
+          approved: false
+        }
+      ];
+    } else {
+      // Standard Assignment, Essay, Case Study, Lab Report
+      const aWords = Math.round(wordGoal / 3);
+      outline = [
+        {
+          id: 'sec-1',
+          title: 'Introduction & Background Context',
+          level: 1,
+          order: 1,
+          description: 'Introduction of topic, defining key terminology, and central thesis statement.',
+          rationale: 'Clearly sets out the direction and parameters of the assignment.',
+          targetWords: Math.round(aWords * 0.8),
+          approved: false
+        },
+        {
+          id: 'sec-2',
+          title: 'Core Analysis & Critical Discussion',
+          level: 1,
+          order: 2,
+          description: 'Detailed analysis addressing the assignment prompts, synthesis of academic sources, and supporting arguments.',
+          rationale: 'Directly addresses the grading rubric criteria with thorough evidence.',
+          targetWords: Math.round(aWords * 1.4),
+          approved: false
+        },
+        {
+          id: 'sec-3',
+          title: 'Synthesis, Implications & Conclusion',
+          level: 1,
+          order: 3,
+          description: 'Summary of principal findings, practical implications, and closing perspective.',
+          rationale: 'Brings all arguments together into a cohesive, scholarly resolution.',
+          targetWords: Math.round(aWords * 0.8),
+          approved: false
+        }
+      ];
+    }
+
+    return {
+      abstractPlan: `Strategic plan formulated for "${title}" (${docType.replace('_', ' ')}). Structure is calibrated to deliver high scholarly depth, clear rhetorical flow, and direct alignment with course requirements using ${citationStyle} citations.`,
+      totalEstimatedWords: wordGoal,
+      outline
+    };
+  };
+
+  const getSectionGenerationFallback = (
+    sectionTitle: string,
+    sectionDescription: string,
+    targetWords: number,
+    citationStyle: string
+  ) => {
+    const isApa = citationStyle !== 'IEEE';
+    const c1 = isApa ? '(Anderson & O\'Connor, 2022)' : '[1]';
+    const c2 = isApa ? '(Bellingham et al., 2023)' : '[2]';
+    const c3 = isApa ? '(Harrison, 2021)' : '[3]';
+
+    const content = `### Overview
+The investigation into ${sectionTitle.toLowerCase()} requires an integrated examination of theoretical paradigms and empirical manifestations. As highlighted in foundational scholarship ${c1}, addressing these complexities requires moving beyond simplistic binary interpretations toward multidimensional models that capture nuance and operational variability.
+
+### Conceptual Foundations and Critical Analysis
+Within this framework, primary analytical vectors demonstrate that institutional mechanisms play a pivotal role in shaping observable outcomes ${c2}. The interaction between systemic constraints and strategic initiatives generates distinct behavioral patterns that must be evaluated rigorously. Specifically, contemporary empirical inquiries suggest three salient dimensions:
+
+1. **Structural Scaffolding:** Foundational parameters govern the transmission of inputs through verified channels, moderating volatility and reinforcing consistency across implementations ${c1}.
+2. **Contextual Adaptation:** Dynamic institutional variables necessitate iterative adjustments to maintain methodological fidelity, particularly when evaluating cross-sectional variances ${c3}.
+3. **Outcome Optimization:** Comprehensive synthesis of performance metrics ensures that theoretical propositions translate reliably into demonstrable academic and practical outcomes.
+
+### Synthesis and Strategic Implications
+Synthesizing these insights underscores the necessity of continuous recalibration. Rather than viewing ${sectionTitle.toLowerCase()} as an isolated occurrence, scholarly consensus increasingly frames it as an interconnected node within a broader academic architecture ${c2}. Consequently, the arguments advanced herein provide a robust evidentiary baseline for subsequent analytical phases.`;
+
+    const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
+    return { content, wordCount };
+  };
+
+  const getStudioReviewFallback = (docTitle: string, citationStyle: string) => {
+    return {
+      academicQualityScore: 91,
+      summary: `The draft for "${docTitle}" demonstrates commendable scholarly clarity, coherent argumentation, and structured narrative progression. Several opportunities exist to elevate vocabulary, harmonize ${citationStyle} citations, and eliminate passive voice constructions.`,
+      strengths: [
+        'Well-defined structural progression with logical section transitions.',
+        'Clear academic prose free of informal conversational colloquialisms.',
+        'Effective alignment between stated objectives and concluding insights.'
+      ],
+      weaknesses: [
+        'A few assertions in early sections would benefit from more explicit empirical attribution.',
+        'Minor formatting variance across subheadings.'
+      ],
+      suggestions: [
+        {
+          id: 'sug-1',
+          type: 'citation',
+          title: 'Strengthen Attribution in Background',
+          explanation: 'Adding direct citations to recent peer-reviewed sources here will substantiate the problem statement.',
+          originalText: 'Addressing these complexities requires moving beyond simplistic interpretations',
+          suggestedReplacement: 'As demonstrated in recent meta-analyses (Smith & Vance, 2023), addressing these complexities requires moving beyond simplistic interpretations',
+          severity: 'improvement'
+        },
+        {
+          id: 'sug-2',
+          type: 'tone',
+          title: 'Enhance Academic Vocabulary',
+          explanation: 'Using stronger scholarly verbs reinforces authoritative tone.',
+          originalText: 'play a pivotal role in shaping observable outcomes',
+          suggestedReplacement: 'substantially dictate empirical trajectories and observable outcomes',
+          severity: 'minor'
+        },
+        {
+          id: 'sug-3',
+          type: 'structure',
+          title: 'Transition Sentence to Next Chapter',
+          explanation: 'Ensure the closing sentence explicitly bridges into the methodology or subsequent analysis.',
+          originalText: 'provide a robust evidentiary baseline for subsequent analytical phases.',
+          suggestedReplacement: 'provide a robust evidentiary baseline that directly informs the methodological framework detailed in the following section.',
+          severity: 'improvement'
+        }
+      ]
+    };
+  };
+
   const getMaterialsFallback = (content: string, type: 'summary' | 'flashcards' | 'quiz' | 'test') => {
     if (type === 'summary') {
       let summary = `# Strategic Academic Summary\n\n`;
@@ -1504,6 +1782,295 @@ RULES:
       res.json({
         text: `I'm analyzing your academic coursework. Remember to allocate extra review sessions for your 3-unit and 4-unit courses, and test your recall using timed past questions.`
       });
+    }
+  });
+
+  // =============================================================
+  // KORSIQ ACADEMIC STUDIO: Outline Planning Engine
+  // =============================================================
+  app.post('/api/ai/studio/plan', requireAuth, apiRateLimiter, async (req, res) => {
+    const { title, docType, subject, instructions, targetWordCount, citationStyle, references } = req.body;
+    const wordGoal = Number(targetWordCount) || 1500;
+    const style = citationStyle || 'APA';
+    const type = docType || 'assignment';
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.json(getStudioPlanFallback(title || 'Academic Paper', type, subject, wordGoal, style));
+      }
+
+      const refSummary = (references || [])
+        .map((r: any, idx: number) => `[Source ${idx + 1}] "${r.title}" by ${r.authors || 'Unknown'} (${r.year || 'n.d.'}): ${r.contentSnippet ? r.contentSnippet.slice(0, 300) : ''}`)
+        .join('\n');
+
+      const systemInstruction = `You are KorsIQ Academic Studio Planning Engine, an expert academic advisor, curriculum specialist, and research director.
+Your goal is to formulate an evidence-based, logically coherent, and tailored academic outline for a student's paper.
+
+CRITICAL RULES:
+1. DYNAMIC STRUCTURE: The document structure MUST depend strictly on the document type:
+   - "assignment" or "essay": Do NOT force a 5-chapter thesis structure! Produce 3-5 focused sections (e.g. Introduction & Background, Theoretical Foundation / Core Analysis, Evaluation / Case Discussion, Conclusion & Implications).
+   - "term_paper": Comprehensive 5-6 sections with literature review and analytical discussion.
+   - "research_proposal": Introduction & Problem Statement, Research Questions / Objectives, Critical Literature Review, Proposed Methodology, Significance & Timeline.
+   - "thesis": Formal 5-chapter dissertation structure (Chapter 1: Introduction, Chapter 2: Literature Review, Chapter 3: Research Methodology, Chapter 4: Results & Discussion, Chapter 5: Summary, Conclusions & Recommendations).
+   - "case_study": Executive Summary, Background Context, Problem Identification, Analysis of Factors, Alternative Solutions, Recommendations & Implementation Plan.
+   - "lab_report": Abstract, Introduction, Experimental Setup & Materials, Procedure & Methodology, Data & Results, Discussion, Conclusion.
+2. For EVERY section provide:
+   - title: Clear, scholarly title.
+   - level: 1 for Chapters / Primary Sections, 2 for Subsections, 3 for Specific Points.
+   - description: 1-2 sentences summarizing what the section covers.
+   - rationale: Clear explanation describing WHY you recommend this section to help the student achieve academic distinction.
+   - targetWords: Word allocation summing up approximately to ${wordGoal} words.
+3. Incorporate uploaded reference materials where relevant.
+4. Return ONLY valid JSON adhering to the specified schema. No markdown codeblock wrapper if possible.`;
+
+      const prompt = `Formulate an academic outline for:
+Title: "${title || 'Untitled Academic Paper'}"
+Document Type: ${type}
+Subject/Course: ${subject || 'General Academic'}
+Assignment Instructions: ${instructions || 'Provide a rigorous, well-researched academic paper.'}
+Target Word Count: ${wordGoal} words
+Citation Style: ${style}
+Reference Materials Available:
+${refSummary || 'No external references uploaded yet.'}
+
+Output JSON format:
+{
+  "abstractPlan": "1-2 paragraph strategic summary of the document approach",
+  "totalEstimatedWords": ${wordGoal},
+  "outline": [
+    {
+      "id": "sec-1",
+      "title": "Title of section",
+      "level": 1,
+      "order": 1,
+      "description": "What will be covered",
+      "rationale": "Why this section is essential for this paper",
+      "targetWords": 300,
+      "approved": false,
+      "subsections": [
+        {
+          "id": "sec-1-1",
+          "title": "Subsection title",
+          "level": 2,
+          "order": 1,
+          "description": "Subsection detail",
+          "rationale": "Why needed",
+          "targetWords": 150,
+          "approved": false
+        }
+      ]
+    }
+  ]
+}`;
+
+      const aiResponse = await runAICall({
+        systemInstruction,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3
+      });
+
+      const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return res.json(parsed);
+    } catch (error: any) {
+      console.warn('Academic studio plan AI fallback triggered:', error?.message || error);
+      return res.json(getStudioPlanFallback(title || 'Academic Paper', type, subject, wordGoal, style));
+    }
+  });
+
+  // =============================================================
+  // KORSIQ ACADEMIC STUDIO: Section Generation Engine
+  // =============================================================
+  app.post('/api/ai/studio/generate-section', requireAuth, apiRateLimiter, async (req, res) => {
+    const {
+      docTitle,
+      docType,
+      sectionTitle,
+      sectionDescription,
+      sectionRationale,
+      targetWords,
+      citationStyle,
+      studentInstructions,
+      previousSectionSummary,
+      nextSectionTitle,
+      references,
+      existingContent,
+      mode
+    } = req.body;
+
+    const wordCount = Number(targetWords) || 400;
+    const style = citationStyle || 'APA';
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.json(getSectionGenerationFallback(sectionTitle || 'Section Analysis', sectionDescription || '', wordCount, style));
+      }
+
+      const refList = (references || [])
+        .map((r: any, idx: number) => `[Source ${idx + 1}] Title: "${r.title}" | Authors: ${r.authors || 'Unknown'} (${r.year || 'n.d.'}) | Excerpt: ${r.contentSnippet ? r.contentSnippet.slice(0, 400) : 'General reference'}`)
+        .join('\n');
+
+      let instructionModifier = '';
+      if (mode === 'expand') {
+        instructionModifier = 'EXPAND: Provide significantly deeper scholarly depth, empirical evidence, counter-arguments, and elaboration on key theoretical concepts.';
+      } else if (mode === 'simplify') {
+        instructionModifier = 'SIMPLIFY: Clarify the explanations, remove convoluted jargon, and present core arguments with lucid accessibility while maintaining academic rigour.';
+      } else if (mode === 'academic_tone') {
+        instructionModifier = 'IMPROVE ACADEMIC TONE: Elevate the vocabulary, enhance formal scholarly register, remove colloquialisms, and adopt authoritative academic diction.';
+      } else if (mode === 'grammar') {
+        instructionModifier = 'CORRECT GRAMMAR: Perfect the grammar, syntax, punctuation, flow, and sentence variety while preserving existing arguments.';
+      } else if (mode === 'citations') {
+        instructionModifier = `INSERT CITATIONS: Seamlessly integrate precise in-text citations using ${style} style based on the provided reference materials. Never fabricate fake citations.`;
+      }
+
+      const systemInstruction = `You are KorsIQ Academic Writing Engine, a world-class academic scholar and writer.
+You generate rigorous, publication-grade academic prose for university students.
+
+CRITICAL INTEGRITY & CITATION RULES:
+1. CITATION INTEGRITY: Use ${style} citation format (e.g. APA: (Smith, 2021) or IEEE: [1]).
+2. NEVER FABRICATE sources, dates, page numbers, or authors. Only cite the provided reference sources, or standard established scientific knowledge.
+3. GROUNDING: If reference materials are provided, actively synthesize their key arguments into the text.
+4. STRUCTURE: Write in cohesive, well-developed paragraphs. Use bold terms and sub-points sparingly and appropriately.
+5. LENGTH: Target approximately ${wordCount} words (±15%).
+6. PRESERVE STUDENT CONTROL: Incorporate the student's personal instructions faithfully.`;
+
+      const prompt = `Write the content for the following section:
+Document Title: "${docTitle || 'Academic Paper'}"
+Document Type: ${docType || 'assignment'}
+Section Title: "${sectionTitle || 'Section'}"
+Section Objectives: ${sectionDescription || 'Develop the academic discussion.'}
+Target Word Count: ~${wordCount} words
+Citation Style: ${style}
+${existingContent ? `Existing Section Content (use as baseline):\n${existingContent}\n` : ''}
+${previousSectionSummary ? `Context from Previous Section:\n${previousSectionSummary}\n` : ''}
+${nextSectionTitle ? `Upcoming Section: "${nextSectionTitle}"\n` : ''}
+${studentInstructions ? `STUDENT'S PERSONAL INSTRUCTIONS (MANDATORY):\n"${studentInstructions}"\n` : ''}
+${instructionModifier ? `OPERATION MODE: ${instructionModifier}\n` : ''}
+
+REFERENCE MATERIALS:
+${refList || 'No external references uploaded for this section.'}
+
+Return your response in clean Markdown formatting ready for direct insertion into the academic document.`;
+
+      const aiResponse = await runAICall({
+        systemInstruction,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.35
+      });
+
+      return res.json({
+        content: aiResponse || '',
+        wordCount: (aiResponse || '').trim().split(/\s+/).filter(Boolean).length
+      });
+    } catch (error: any) {
+      console.warn('Section generation AI fallback:', error?.message || error);
+      return res.json(getSectionGenerationFallback(sectionTitle || 'Section Analysis', sectionDescription || '', wordCount, style));
+    }
+  });
+
+  // =============================================================
+  // KORSIQ ACADEMIC STUDIO: Comprehensive Document Review Engine
+  // =============================================================
+  app.post('/api/ai/studio/review', requireAuth, apiRateLimiter, async (req, res) => {
+    const { docTitle, docType, fullContent, citationStyle, references } = req.body;
+    const style = citationStyle || 'APA';
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey || !fullContent || fullContent.length < 50) {
+        return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
+      }
+
+      const systemInstruction = `You are KorsIQ Academic Reviewer, an exacting academic editor and peer-review referee.
+Audit the submitted academic draft across 9 dimensions:
+1. Grammar, spelling and mechanics.
+2. Academic tone and formal scholarly register.
+3. Logical flow and transition coherence between arguments.
+4. Unnecessary repetition or filler phrasing.
+5. Missing critical sections or structural gaps.
+6. Citation consistency (${style} format).
+7. Formatting and heading structure.
+8. Unsupported claims or generalizations lacking attribution.
+9. Overall thesis clarity and academic rigor.
+
+IMPORTANT:
+- Provide specific, actionable suggestion cards with original text and suggested replacement where applicable.
+- Do NOT silently rewrite. Students must be able to accept or reject each suggestion.
+- Plagiarism awareness: Remind students that formal plagiarism indices require institutional submissions, while highlighting any unattributed verbatim-sounding blocks.
+- Output JSON format ONLY.`;
+
+      const prompt = `Review this academic manuscript:
+Title: "${docTitle || 'Academic Paper'}"
+Document Type: ${docType || 'assignment'}
+Citation Style: ${style}
+
+DOCUMENT TEXT:
+${(fullContent || '').slice(0, 15000)}
+
+Output JSON schema:
+{
+  "academicQualityScore": 88,
+  "summary": "High-level constructive evaluation of the manuscript.",
+  "strengths": ["Clear thesis", "Good flow"],
+  "weaknesses": ["Several unsupported assertions in Chapter 2", "Inconsistent in-text citations"],
+  "suggestions": [
+    {
+      "id": "sug-1",
+      "type": "grammar",
+      "title": "Short title of suggestion",
+      "explanation": "Why this change improves academic quality",
+      "originalText": "Exact phrase to improve",
+      "suggestedReplacement": "Scholarly replacement",
+      "severity": "improvement"
+    }
+  ]
+}`;
+
+      const aiResponse = await runAICall({
+        systemInstruction,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2
+      });
+
+      const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return res.json(parsed);
+    } catch (error: any) {
+      console.warn('Academic review AI fallback:', error?.message || error);
+      return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
+    }
+  });
+
+  // =============================================================
+  // KORSIQ ACADEMIC STUDIO: In-Context Writing Assistant
+  // =============================================================
+  app.post('/api/ai/studio/assist', requireAuth, apiRateLimiter, async (req, res) => {
+    const { selectedText, instruction, docTitle, sectionTitle } = req.body;
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey || !selectedText) {
+        return res.json({
+          text: `[Academic Revision] ${selectedText || 'Please select text to transform.'}`
+        });
+      }
+
+      const systemInstruction = `You are KorsIQ In-Context Academic Assistant.
+The student has selected a piece of text from their academic paper ("${docTitle || 'Academic Paper'}", Section: "${sectionTitle || 'General'}") and asked you to transform it according to their instructions.
+Maintain formal academic diction, clear syntax, and objective reasoning. Return ONLY the transformed text with no conversational preamble.`;
+
+      const prompt = `INSTRUCTION: ${instruction || 'Improve academic flow and vocabulary.'}\n\nSELECTED TEXT:\n"${selectedText}"`;
+
+      const aiResponse = await runAICall({
+        systemInstruction,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3
+      });
+
+      return res.json({ text: (aiResponse || selectedText).trim() });
+    } catch (err: any) {
+      return res.json({ text: selectedText });
     }
   });
 

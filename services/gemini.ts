@@ -567,5 +567,104 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       console.warn('sendAcademicChat error:', err);
       return { text: "Focus on mastering high-credit units with active recall practice problem sets." };
     }
+  },
+
+  // ==========================================
+  // KORSIQ ACADEMIC STUDIO WRAPPERS
+  // ==========================================
+
+  async generateStudioPlan(payload: {
+    title: string;
+    docType: string;
+    subject?: string;
+    instructions?: string;
+    targetWordCount: number;
+    citationStyle: string;
+    references?: any[];
+  }): Promise<{ abstractPlan?: string; totalEstimatedWords?: number; outline: any[] }> {
+    try {
+      const response = await fetch('/api/ai/studio/plan', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('generateStudioPlan error:', err);
+      throw err;
+    }
+  },
+
+  async generateStudioSection(payload: {
+    docTitle: string;
+    docType: string;
+    sectionTitle: string;
+    sectionDescription?: string;
+    sectionRationale?: string;
+    targetWords: number;
+    citationStyle: string;
+    studentInstructions?: string;
+    previousSectionSummary?: string;
+    nextSectionTitle?: string;
+    references?: any[];
+    existingContent?: string;
+    mode?: string;
+  }): Promise<{ content: string; wordCount: number }> {
+    try {
+      const response = await fetch('/api/ai/studio/generate-section', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('generateStudioSection error:', err);
+      throw err;
+    }
+  },
+
+  async reviewStudioDocument(payload: {
+    docTitle: string;
+    docType: string;
+    fullContent: string;
+    citationStyle: string;
+    references?: any[];
+  }): Promise<{
+    academicQualityScore: number;
+    summary: string;
+    strengths: string[];
+    weaknesses: string[];
+    suggestions: any[];
+  }> {
+    try {
+      const response = await fetch('/api/ai/studio/review', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('reviewStudioDocument error:', err);
+      throw err;
+    }
+  },
+
+  async assistStudioText(payload: {
+    selectedText: string;
+    instruction: string;
+    docTitle?: string;
+    sectionTitle?: string;
+  }): Promise<{ text: string }> {
+    try {
+      const response = await fetch('/api/ai/studio/assist', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (err: any) {
+      console.warn('assistStudioText error:', err);
+      return { text: payload.selectedText };
+    }
   }
 };
