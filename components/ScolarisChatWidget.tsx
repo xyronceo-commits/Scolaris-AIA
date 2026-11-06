@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2, Loader2, RefreshCw, Key, Check } from 'lucide-react';
+import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2, Loader2, RefreshCw } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { Course, StudyHubData } from '../types';
 import ReactMarkdown from 'react-markdown';
@@ -28,45 +28,12 @@ export const ScolarisChatWidget: React.FC<ScolarisChatWidgetProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasNewMessage, setHasNewMessage] = useState(false);
-  const [showKeyDrawer, setShowKeyDrawer] = useState(false);
-  const [customKeyInput, setCustomKeyInput] = useState(() => 
-    localStorage.getItem('scolaris_custom_gemini_api_key') ||
-    localStorage.getItem('scolaris_custom_scolaris_ai_key') ||
-    localStorage.getItem('scolaris_custom_groq_api_key') || ''
-  );
-  const [keySavedMessage, setKeySavedMessage] = useState(false);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const currentCourse = courses.find(c => c.id === activeCourseId);
   const fileContent = activeHub?.fileContent || '';
   const fileName = activeHub?.fileName || '';
-
-  const hasApiKey = Boolean(
-    customKeyInput.trim() || 
-    localStorage.getItem('scolaris_custom_gemini_api_key') ||
-    localStorage.getItem('scolaris_custom_scolaris_ai_key') ||
-    localStorage.getItem('scolaris_custom_groq_api_key')
-  );
-
-  const handleSaveApiKey = () => {
-    const trimmed = customKeyInput.trim();
-    if (trimmed) {
-      localStorage.setItem('scolaris_custom_gemini_api_key', trimmed);
-      localStorage.setItem('scolaris_custom_scolaris_ai_key', trimmed);
-      localStorage.setItem('scolaris_custom_groq_api_key', trimmed);
-      setKeySavedMessage(true);
-      setTimeout(() => {
-        setKeySavedMessage(false);
-        setShowKeyDrawer(false);
-      }, 1500);
-    } else {
-      localStorage.removeItem('scolaris_custom_gemini_api_key');
-      localStorage.removeItem('scolaris_custom_scolaris_ai_key');
-      localStorage.removeItem('scolaris_custom_groq_api_key');
-      setShowKeyDrawer(false);
-    }
-  };
 
   // Scroll to bottom when messages list updates or when panel is opened
   useEffect(() => {
@@ -144,7 +111,7 @@ How can I assist you with your studies or coursework today?`,
         {
           id: Math.random().toString(36).substring(2, 9),
           sender: 'Scolaris',
-          text: `⚠️ **Connection Note**: ${error?.message || 'Check your API Key settings using the key icon above.'}`,
+          text: `⚠️ **Connection Note**: ${error?.message || 'The assistant is unavailable right now. Please try again in a moment.'}`,
           timestamp: Date.now()
         }
       ]);
@@ -225,22 +192,13 @@ How can I assist you with your studies or coursework today?`,
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <span className="text-[9px] text-indigo-200 font-bold uppercase tracking-wider">
-                    {hasApiKey ? 'API Connected' : 'Live Tutor Agent'}
+                    Live Tutor Agent
                   </span>
                 </div>
               </div>
             </div>
             
             <div className="flex items-center gap-1.5">
-              <button 
-                onClick={() => setShowKeyDrawer(!showKeyDrawer)}
-                title="Configure AI API Key"
-                className={`p-2 rounded-xl transition-all cursor-pointer ${
-                  showKeyDrawer ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Key size={15} />
-              </button>
               <button 
                 onClick={handleClearHistory}
                 title="Clear conversation history"
@@ -256,36 +214,6 @@ How can I assist you with your studies or coursework today?`,
               </button>
             </div>
           </div>
-
-          {/* Quick API Key Drawer */}
-          {showKeyDrawer && (
-            <div className="bg-slate-900 text-white p-4 border-b border-slate-800 space-y-2 animate-in slide-in-from-top-2 duration-200">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-300">
-                <span className="flex items-center gap-1.5">
-                  <Key size={13} className="text-blue-400" />
-                  Scolaris / Gemini / Groq API Key
-                </span>
-                <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
-                  {customKeyInput.startsWith('AIzaSy') ? 'Gemini Key' : customKeyInput.startsWith('gsk_') ? 'Groq Key' : customKeyInput.startsWith('sk-') ? 'OpenRouter Key' : 'Proxy Default'}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={customKeyInput}
-                  onChange={(e) => setCustomKeyInput(e.target.value)}
-                  placeholder="Paste AIzaSy... or gsk_... key"
-                  className="flex-1 bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                />
-                <button
-                  onClick={handleSaveApiKey}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                >
-                  {keySavedMessage ? <Check size={14} className="text-emerald-300" /> : 'Save'}
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Dynamic Loaded Context Bar */}
           {(currentCourse || fileName) && (

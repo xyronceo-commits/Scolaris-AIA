@@ -76,12 +76,6 @@ const getHeaders = async (): Promise<HeadersInit> => {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const customKey = localStorage.getItem('scolaris_custom_scolaris_ai_key') || localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key');
-  if (customKey) {
-    headers['X-Scolaris-AI-Key'] = customKey;
-    headers['X-Groq-API-Key'] = customKey;
-    headers['X-Gemini-API-Key'] = customKey;
-  }
   return headers;
 };
 

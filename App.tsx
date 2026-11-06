@@ -166,6 +166,17 @@ const App: React.FC = () => {
     }
   };
 
+  // Security cleanup: users can no longer bring their own AI keys. Delete any that older versions saved in this browser.
+  useEffect(() => {
+    try {
+      ['scolaris_custom_gemini_api_key', 'scolaris_custom_scolaris_ai_key', 'scolaris_custom_groq_api_key'].forEach((k) =>
+        localStorage.removeItem(k)
+      );
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
   // Supabase Auth Observer
   const loadedUidRef = useRef<string | null>(null);
   useEffect(() => {
