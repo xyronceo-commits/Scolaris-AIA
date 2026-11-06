@@ -23,6 +23,7 @@ import Auth from './components/Auth';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
 import { DBService } from './services/db';
+import { cleanupLegacyApiKeyStorage } from './services/gemini';
 import ScolarisLogo from './components/ScolarisLogo';
 
 const App: React.FC = () => {
@@ -55,6 +56,11 @@ const App: React.FC = () => {
   }, [isDarkMode]);
 
   const toggleTheme = () => setIsDarkMode(prev => !prev);
+
+  // Safe one-time legacy API key cleanup from browser storage
+  useEffect(() => {
+    cleanupLegacyApiKeyStorage();
+  }, []);
   
   // Auth State Management
   const [authLoading, setAuthLoading] = useState(true);
@@ -125,21 +131,26 @@ const App: React.FC = () => {
   }, [activeTab, authUser, showAuth, authMode, showAdminLoginForm]);
 
   // Load User Data & Profile from Supabase
+  const isInitialDataLoadedRef = useRef(false);
   const loadUserData = async (user: AuthUser) => {
+    isInitialDataLoadedRef.current = false;
     try {
       const uid = user.uid;
       let dbProfile = await DBService.getProfile(uid);
 
       if (dbProfile) {
+        if ((!dbProfile.name || dbProfile.name === 'Scholar') && user.displayName) {
+          dbProfile.name = user.displayName;
+        }
         setProfile(dbProfile);
       } else {
-        // Create initial default profile in Firestore for new user
+        // Create initial default profile in Supabase for new user
         const newProfile: UserProfile = {
           name: user.displayName || user.email?.split('@')[0] || 'Scholar',
           email: user.email || '',
           university: '',
           level: 'Undergraduate',
-          age: 18,
+          age: 20,
           onboarded: false,
           tutorialSeen: false,
           tier: 'scholar',
@@ -161,6 +172,7 @@ const App: React.FC = () => {
       setSchedule(dbSchedule);
       setHubs(dbHubs);
       setGroups(dbGroups);
+      isInitialDataLoadedRef.current = true;
     } catch (error) {
       console.error('Failed to load user data:', error);
     }
@@ -238,13 +250,13 @@ const App: React.FC = () => {
   }, [profile, authUser?.uid]);
 
   useEffect(() => {
-    if (authUser?.uid && profile?.onboarded && courses.length > 0) {
+    if (authUser?.uid && profile?.onboarded && (isInitialDataLoadedRef.current || courses.length > 0)) {
       DBService.saveCourses(authUser.uid, courses);
     }
   }, [courses, profile?.onboarded, authUser?.uid]);
 
   useEffect(() => {
-    if (authUser?.uid && profile?.onboarded && schedule.length > 0) {
+    if (authUser?.uid && profile?.onboarded && (isInitialDataLoadedRef.current || schedule.length > 0)) {
       DBService.saveSchedule(authUser.uid, schedule);
     }
   }, [schedule, profile?.onboarded, authUser?.uid]);
@@ -321,6 +333,7 @@ const App: React.FC = () => {
     setGroups([]);
     setActiveTab('dashboard');
     setShowAuth(true);
+    setAuthMode('signin');
     setSessionExpiredMsg(null);
     handleAdminSignOut();
   };
@@ -536,7 +549,7 @@ const App: React.FC = () => {
 
   // 5. Onboarding View
   if (profile && !profile.onboarded) {
-    return <Onboarding userEmail={profile.email} onComplete={handleOnboardingComplete} />;
+    return <Onboarding userEmail={profile.email} initialProfile={profile} onComplete={handleOnboardingComplete} />;
   }
 
   // 6. Main Protected Application View & Admin Router

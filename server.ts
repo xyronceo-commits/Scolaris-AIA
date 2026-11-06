@@ -128,6 +128,21 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // Enforce server-side AI security: reject and completely strip any client-supplied provider credentials
+  app.use((req, res, next) => {
+    delete req.headers['x-groq-api-key'];
+    delete req.headers['x-gemini-api-key'];
+    delete req.headers['x-scolaris-ai-key'];
+    delete req.headers['x-api-key'];
+    if (req.body && typeof req.body === 'object') {
+      delete req.body.apiKey;
+      delete req.body.customKey;
+      delete req.body.groqApiKey;
+      delete req.body.geminiApiKey;
+    }
+    next();
+  });
+
   interface AuthenticatedRequest extends express.Request {
     user?: any;
   }
@@ -182,36 +197,12 @@ async function startServer() {
     next();
   };
 
-  // Lazy init and adapter helper for Scolaris AI / Groq / Gemini
-  const getAIKey = (customKey?: string) => {
-    return customKey || process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
-  };
-
-  const getCustomKey = (req: express.Request) => {
-    return (
-      (req.headers['x-scolaris-ai-key'] as string) ||
-      (req.headers['x-groq-api-key'] as string) ||
-      (req.headers['x-gemini-api-key'] as string)
-    );
-  };
-
-  const isUsingGemini = (customKey?: string) => {
-    if (customKey) {
-      if (customKey.startsWith('AIzaSy')) return true;
-      if (customKey.startsWith('gsk_')) return false;
-    }
-    if (!process.env.SCOLARIS_AI_KEY && !process.env.GROQ_API_KEY && process.env.GEMINI_API_KEY) return true;
-    return false;
-  };
-
-  const getAI = (customKey?: string) => {
-    const apiKey = getAIKey(customKey);
-    if (!apiKey) throw new Error('API Key is required');
-    return new Groq({ apiKey });
+  // Server-side AI provider credentials resolver (strictly from environment variables)
+  const getAIKey = (): string | null => {
+    return process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || null;
   };
 
   interface AIParams {
-    customKey?: string;
     systemInstruction?: string;
     messages: { role: string; content: string }[];
     temperature?: number;
@@ -243,10 +234,8 @@ async function startServer() {
     }
 
     const candidateModels = [
-      'openai/gpt-oss-120b',
-      'qwen/qwen3.6-27b',
-      'qwen/qwen-2.5-72b-instruct',
       'meta-llama/llama-3.3-70b-instruct',
+      'qwen/qwen-2.5-72b-instruct',
       'openai/gpt-4o-mini',
       'deepseek/deepseek-chat'
     ];
@@ -315,14 +304,12 @@ async function startServer() {
     return null;
   };
 
-  const runAICall = async ({ customKey, systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
-    const key = getAIKey(customKey);
-    if (!key) throw new Error('API Key is required');
+  const runAICall = async ({ systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
+    const key = getAIKey();
+    if (!key) throw new Error('Our AI service is temporarily unavailable. Please try again shortly.');
 
-    // 1. Try SCOLARIS_AI_KEY or custom key via OpenRouter / OpenAI
-    const scolarisKey = (customKey && !customKey.startsWith('AIzaSy') && !customKey.startsWith('gsk_'))
-      ? customKey
-      : (process.env.SCOLARIS_AI_KEY || (customKey && customKey.startsWith('sk-') ? customKey : null));
+    // 1. Try SCOLARIS_AI_KEY via OpenRouter / OpenAI if available and not preferring Groq
+    const scolarisKey = process.env.SCOLARIS_AI_KEY;
 
     if (scolarisKey && !preferGroq) {
       const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
@@ -331,10 +318,8 @@ async function startServer() {
       }
     }
 
-    // 2. Groq Execution
-    const groqKey = (customKey && customKey.startsWith('gsk_'))
-      ? customKey
-      : (process.env.GROQ_API_KEY || (key && key.startsWith('gsk_') ? key : null));
+    // 2. Groq Execution using server credentials
+    const groqKey = process.env.GROQ_API_KEY || (key && key.startsWith('gsk_') ? key : null);
 
     if (groqKey) {
       try {
@@ -346,13 +331,9 @@ async function startServer() {
         apiMessages.push(...messages);
 
         const candidateModels = [
-          'openai/gpt-oss-120b',
-          'qwen/qwen3.6-27b',
-          'openai/gpt-oss-20b',
-          'groq/compound',
-          'groq/compound-mini',
           'llama-3.3-70b-versatile',
-          'llama-3.1-8b-instant'
+          'llama-3.1-8b-instant',
+          'gemma2-9b-it'
         ];
 
         for (const model of candidateModels) {
@@ -377,12 +358,10 @@ async function startServer() {
       }
     }
 
-    // 3. Gemini Execution - STRICTLY ONLY IF A VALID GEMINI KEY IS PROVIDED (starts with AIzaSy)
-    const geminiKey = (customKey && customKey.startsWith('AIzaSy'))
-      ? customKey
-      : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
-          ? process.env.GEMINI_API_KEY
-          : (key && key.startsWith('AIzaSy') ? key : null));
+    // 3. Gemini Execution using server credentials
+    const geminiKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
+      ? process.env.GEMINI_API_KEY
+      : (key && key.startsWith('AIzaSy') ? key : null);
 
     if (geminiKey) {
       try {
@@ -417,7 +396,7 @@ async function startServer() {
           config.responseMimeType = "application/json";
         }
 
-        const geminiCandidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.5-flash'];
+        const geminiCandidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
         for (const model of geminiCandidateModels) {
           try {
             const response = await aiGen.models.generateContent({
@@ -437,7 +416,7 @@ async function startServer() {
       }
     }
 
-    throw new Error('All AI providers failed to generate content or no valid API key was available.');
+    throw new Error('Our AI service is temporarily unavailable. Please try again shortly.');
   };
 
   let s3Client: S3Client | null = null;
@@ -733,18 +712,15 @@ async function startServer() {
       .replace(/^[\s*+-]+\s+/gm, '')
       .replace(/\|/g, ' ')
       .replace(/[`~^]/g, '')
-      .replace(/[^\x00-\x7F]/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
 
-  async function generateGroqPodcastScript(studyMaterial: string, customApiKey?: string): Promise<string> {
-    const groqKey = (customApiKey && customApiKey.startsWith('gsk_'))
-      ? customApiKey
-      : (process.env.GROQ_API_KEY || (customApiKey && !customApiKey.startsWith('AIzaSy') ? customApiKey : null));
+  async function generateGroqPodcastScript(studyMaterial: string): Promise<string> {
+    const groqKey = process.env.GROQ_API_KEY;
 
     if (!groqKey) {
-      throw new Error("GROQ_API_KEY environment variable is not configured.");
+      throw new Error("Our AI podcast service is temporarily unavailable. Please try again shortly.");
     }
 
     const groq = new Groq({ apiKey: groqKey });
@@ -764,7 +740,6 @@ Alex: [spoken text]
 Dr. Taylor: [spoken text]`;
 
     const modelsToTry = [
-      'llama3-70b-8192',
       'llama-3.3-70b-versatile',
       'llama-3.1-8b-instant'
     ];
@@ -963,9 +938,8 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   // Proxy Groq / Gemini Chat
   app.post('/api/ai/chat', requireAuth, apiRateLimiter, async (req, res) => {
     const { messages, groupName, groupDesc } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getChatFallback(groupName));
       }
@@ -975,7 +949,6 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
       
       const aiContent = await runAICall({
-        customKey,
         messages: [{ role: 'user', content: prompt }]
       });
       res.json({ text: aiContent });
@@ -988,10 +961,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   // Dedicated Group AI Study Endpoint (Grounded strictly in group materials)
   app.post('/api/groups/ai', requireAuth, apiRateLimiter, async (req, res) => {
     const { groupId, groupName, groupCourse, materialsContent, prompt, mode } = req.body;
-    const customKey = getCustomKey(req);
 
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       
       let systemInstruction = `You are Scolaris AI, an intelligent academic study companion assigned exclusively to the Study Group: "${groupName || 'Academic Study Group'}" (Course: ${groupCourse || 'General'}).
       
@@ -1016,12 +988,11 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       if (!apiKey) {
-        const fallbackText = `[Offline Group AI Mode] Analysis for group "${groupName}":\n\n### 📌 Group Study Synthesis\n- Materials Analyzed: ${materialsContent ? '1+ group documents' : 'No documents uploaded yet.'}\n\n**Query:** "${prompt || 'General Study Overview'}"\n\nTo unlock live deep AI reasoning across all group files, ensure an API key is configured in your profile.`;
+        const fallbackText = `Analysis for group "${groupName}":\n\n### 📌 Group Study Synthesis\n- Materials Analyzed: ${materialsContent ? '1+ group documents' : 'No documents uploaded yet.'}\n\n**Query:** "${prompt || 'General Study Overview'}"\n\nI am ready to help! Upload lecture slides or notes in the Shared Materials tab to analyze concepts.`;
         return res.json({ text: fallbackText });
       }
 
       const aiContent = await runAICall({
-        customKey,
         systemInstruction,
         messages: [{ role: 'user', content: prompt || 'Synthesize and analyze the group study materials.' }],
         temperature: 0.4
@@ -1039,14 +1010,12 @@ CRITICAL SECURITY & CONTEXT RULES:
   // Magic Import
   app.post('/api/ai/import', requireAuth, apiRateLimiter, async (req, res) => {
     const { text } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getImportFallback(text));
       }
       const aiContent = await runAICall({
-        customKey,
         systemInstruction: 'Extract course metadata from the following text. You must return a valid JSON object with a "courses" key containing an array of courses. Each course must have "code", "title", "units" (number), "difficulty" ("Easy", "Medium", "Hard"), and "description".',
         messages: [{ role: 'user', content: text }],
         jsonMode: true
@@ -1062,14 +1031,12 @@ CRITICAL SECURITY & CONTEXT RULES:
   // Generate Schedule
   app.post('/api/ai/schedule', requireAuth, apiRateLimiter, async (req, res) => {
     const { courses, university } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getScheduleFallback(courses, university));
       }
       const aiContent = await runAICall({
-        customKey,
         systemInstruction: `Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
         You must return a valid JSON object with a "schedule" key containing an array of sessions. 
         Each session object must have:
@@ -1092,16 +1059,15 @@ CRITICAL SECURITY & CONTEXT RULES:
   // Scolaris Generate
   app.post('/api/scolaris/generate', requireAuth, apiRateLimiter, async (req, res) => {
     const { studyMaterial, mode } = req.body;
-    const customKey = getCustomKey(req);
 
     if (!studyMaterial) {
       return res.status(400).json({ error: "No study material provided." });
     }
 
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
-        return res.status(500).json({ error: "API key is required" });
+        return res.status(503).json({ error: "Our AI service is temporarily unavailable. Please try again shortly." });
       }
 
       let systemPrompt = "";
@@ -1151,7 +1117,6 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       const rawContent = await runAICall({
-        customKey,
         systemInstruction: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
@@ -1224,7 +1189,6 @@ CRITICAL SECURITY & CONTEXT RULES:
   app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
-      const customKey = getCustomKey(req);
 
       if (!contentBase64) {
         return res.status(400).json({ error: 'contentBase64 parameter is required' });
@@ -1263,10 +1227,10 @@ You MUST return a JSON object containing structured study assets with this exact
   ]
 }`;
 
-      // Use Gemini vision if valid Gemini key is present
-      const geminiVisionKey = (customKey && customKey.startsWith('AIzaSy'))
-        ? customKey
-        : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy') ? process.env.GEMINI_API_KEY : null);
+      // Use Gemini vision if valid server Gemini key is present
+      const geminiVisionKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
+        ? process.env.GEMINI_API_KEY
+        : null;
 
       if (geminiVisionKey) {
         const aiGen = new GoogleGenAI({
@@ -1282,7 +1246,7 @@ You MUST return a JSON object containing structured study assets with this exact
         };
 
         const response = await aiGen.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: 'gemini-2.0-flash',
           contents: [
             mediaInput,
             "Scan and transcribe this document, then synthesize structured study assets matching the JSON schema."
@@ -1301,14 +1265,50 @@ You MUST return a JSON object containing structured study assets with this exact
         // Fallback for non-Gemini: extract text first then generate JSON assets
         let textContent = '';
         const buffer = Buffer.from(contentBase64, 'base64');
-        if (mime === 'application/pdf' || fileName?.toLowerCase().endsWith('.pdf')) {
+        const isPdf = mime === 'application/pdf' || fileName?.toLowerCase().endsWith('.pdf');
+        if (isPdf) {
           textContent = await parsePdfBuffer(buffer);
         } else {
-          textContent = buffer.toString('utf-8');
+          // If this is an image (jpg/png/webp), check if Groq vision is available
+          const groqKey = process.env.GROQ_API_KEY;
+          if (groqKey && (mime.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(fileName || ''))) {
+            try {
+              const groq = new Groq({ apiKey: groqKey });
+              const visionResp = await groq.chat.completions.create({
+                model: 'llama-3.2-11b-vision-preview',
+                messages: [
+                  { role: 'system', content: visionSchemaPrompt },
+                  {
+                    role: 'user',
+                    content: [
+                      { type: 'text', text: 'Scan and transcribe this document, then synthesize structured study assets matching the JSON schema.' },
+                      { type: 'image_url', image_url: { url: `data:${mime};base64,${contentBase64}` } }
+                    ] as any
+                  }
+                ],
+                temperature: 0.2,
+                response_format: { type: 'json_object' }
+              });
+              const vText = visionResp.choices[0]?.message?.content;
+              if (vText) {
+                return res.json({ success: true, data: JSON.parse(vText) });
+              }
+            } catch (vErr) {
+              console.warn('Groq vision model attempt warning:', vErr);
+            }
+          }
+          // Do not decode raw image binary as utf-8; only decode text-like files
+          if (!mime.startsWith('image/')) {
+            textContent = buffer.toString('utf-8');
+          } else {
+            return res.json({
+              success: false,
+              error: 'Image scanning is temporarily unavailable. Please try again later.'
+            });
+          }
         }
 
         const rawContent = await runAICall({
-          customKey,
           systemInstruction: visionSchemaPrompt,
           messages: [{ role: 'user', content: `Document content:\n${textContent}` }],
           temperature: 0.3,
@@ -1349,11 +1349,10 @@ You MUST return a JSON object containing structured study assets with this exact
   // Advanced Academic AI Companion / tutoring endpoint
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
     const { messages, courseContext, fileContent } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json({ text: "[Offline Companion Mode] Hello! I am Scolaris, your AI Study Assistant. To access full academic responses, please set your API key in the Profile tab." });
+        return res.json({ text: "Hello! I am Scolaris, your AI Study Assistant. I am ready to help you analyze coursework, explain concepts, and prepare for exams. What would you like to study today?" });
       }
 
       let systemPrompt = `You are Scolaris Academic Chatbot, an elite, highly supportive personal AI tutor and academic study master.
@@ -1386,7 +1385,6 @@ Always refer to this context when answering questions about the material, explai
       }));
 
       const aiContent = await runAICall({
-        customKey,
         systemInstruction: systemPrompt,
         messages: clientMessages,
         temperature: 0.5
@@ -1402,7 +1400,6 @@ Always refer to this context when answering questions about the material, explai
   // Study Materials
   app.post('/api/ai/materials', requireAuth, apiRateLimiter, async (req, res) => {
     const { content, type } = req.body;
-    const customKey = getCustomKey(req);
     try {
       if (!content || typeof content !== 'string') {
         return res.status(400).json({ error: "No study material provided." });
@@ -1416,7 +1413,7 @@ Always refer to this context when answering questions about the material, explai
       }
 
       const cleanContent = normalizeExtractedText(content);
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getMaterialsFallback(cleanContent, type));
       }
@@ -1484,7 +1481,6 @@ CRITICAL WRITING RULES:
       }
       
       const text = await runAICall({
-        customKey,
         systemInstruction,
         messages: [{ role: 'user', content: userContent }],
         jsonMode: type !== 'summary',
@@ -1518,13 +1514,12 @@ CRITICAL WRITING RULES:
   // Podcast Generation via Groq AI (llama3-70b-8192) & Speech Audio Synthesis
   const handlePodcastGeneration = async (req: express.Request, res: express.Response) => {
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
-    const customKey = getCustomKey(req);
 
     try {
-      // Step 1: Connect to Groq using GROQ_API_KEY and generate script via llama3-70b-8192
+      // Step 1: Connect to Groq using server GROQ_API_KEY and generate script via llama3-70b-8192
       let rawScript = '';
       try {
-        rawScript = await generateGroqPodcastScript(studyText, customKey);
+        rawScript = await generateGroqPodcastScript(studyText);
       } catch (groqErr: any) {
         console.warn('Direct Groq llama3-70b-8192 call failed, attempting fallback AI caller:', groqErr?.message || groqErr);
         const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
@@ -1537,7 +1532,6 @@ Dr. Taylor: [spoken text]
 Strictly NO markdown formatting.`;
 
         rawScript = await runAICall({
-          customKey,
           preferGroq: true,
           systemInstruction,
           temperature: 0.4,
@@ -1578,14 +1572,12 @@ Strictly NO markdown formatting.`;
   app.post('/api/ai/validate', requireAuth, apiRateLimiter, async (req, res) => {
     const { text, message, groupName, groupDesc } = req.body;
     const msgText = text || message || '';
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getValidateFallback());
       }
       const rawContent = await runAICall({
-        customKey,
         systemInstruction: 'Evaluate if the message is relevant to the purpose of the study group. You must return a valid JSON object: { "isRelevant": boolean, "reason": string }',
         messages: [
           {

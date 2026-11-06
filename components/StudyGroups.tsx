@@ -7,6 +7,7 @@ import {
   HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash
 } from 'lucide-react';
 import { DBService } from '../services/db';
+import { getHeaders } from '../services/gemini';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 import { UserAvatar } from './UserAvatar';
 
@@ -317,11 +318,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         .map(m => `--- DOCUMENT: ${m.fileName} ---\n${m.content || 'No text content available.'}`)
         .join('\n\n');
 
-      const token = await getAccessToken();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const headers = await getHeaders();
 
       const response = await fetch('/api/groups/ai', {
         method: 'POST',

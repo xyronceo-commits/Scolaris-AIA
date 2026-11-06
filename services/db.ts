@@ -194,6 +194,11 @@ export const DBService = {
         isPro: data.is_pro ?? false,
         tier: (data.tier || 'free') as SubscriptionTier,
         notifications: data.notifications || { messages: true, sessions: true, aiContent: true },
+        department: data.department || '',
+        major: data.major || '',
+        academicGoals: data.academic_goals || '',
+        studyStyle: data.study_style || '',
+        assistanceAreas: data.assistance_areas || [],
       };
       writeCache('profile', userId, profile);
       return profile;
@@ -206,25 +211,39 @@ export const DBService = {
   async saveProfile(userId: string, profile: UserProfile) {
     writeCache('profile', userId, profile);
     try {
-      const { error } = await supabase.from('profiles').upsert(
-        {
-          id: userId,
-          name: profile.name,
-          email: profile.email,
-          institution: profile.university,
-          level: profile.level,
-          age: profile.age,
-          semester_end: profile.semesterEnd || '',
-          target_cgpa: profile.targetCGPA ?? 4.5,
-          avatar_icon: profile.avatarIcon || 'graduation-cap',
-          onboarded: profile.onboarded,
-          tutorial_seen: profile.tutorialSeen,
-          is_pro: profile.isPro,
-          tier: profile.tier,
-          notifications: profile.notifications,
-        },
-        { onConflict: 'id' }
-      );
+      const basePayload: Record<string, any> = {
+        id: userId,
+        name: profile.name,
+        email: profile.email,
+        institution: profile.university,
+        level: profile.level,
+        age: profile.age,
+        semester_end: profile.semesterEnd || '',
+        target_cgpa: profile.targetCGPA ?? 4.5,
+        avatar_icon: profile.avatarIcon || 'graduation-cap',
+        onboarded: profile.onboarded,
+        tutorial_seen: profile.tutorialSeen,
+        is_pro: profile.isPro,
+        tier: profile.tier,
+        notifications: profile.notifications,
+      };
+
+      const fullPayload = { ...basePayload };
+      if (profile.department !== undefined) fullPayload.department = profile.department;
+      if (profile.major !== undefined) fullPayload.major = profile.major;
+      if (profile.academicGoals !== undefined) fullPayload.academic_goals = profile.academicGoals;
+      if (profile.studyStyle !== undefined) fullPayload.study_style = profile.studyStyle;
+      if (profile.assistanceAreas !== undefined) fullPayload.assistance_areas = profile.assistanceAreas;
+
+      let { error } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+
+      // If database table doesn't have the extended columns yet, fall back gracefully to base columns
+      if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
+        console.warn('Extended profile columns missing from remote DB, saving core profile fields:', error.message);
+        const retry = await supabase.from('profiles').upsert(basePayload, { onConflict: 'id' });
+        error = retry.error;
+      }
+
       if (error) throw error;
       return { error: null };
     } catch (err) {

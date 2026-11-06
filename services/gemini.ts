@@ -1,5 +1,3 @@
-
-
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 
 // Standard decoding for binary audio
@@ -36,6 +34,7 @@ function validateAudioBytes(bytes: Uint8Array): { valid: boolean; error?: string
 
   return { valid: true };
 }
+
 function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
   const header = new ArrayBuffer(44);
   const view = new DataView(header);
@@ -70,17 +69,56 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 24000): Blob {
   return new Blob([header, pcmData], { type: 'audio/wav' });
 }
 
-const getHeaders = async (): Promise<HeadersInit> => {
+/** Safe, one-time cleanup of obsolete legacy browser-stored API credentials */
+export function cleanupLegacyApiKeyStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const LEGACY_STORAGE_KEYS = [
+      'scolaris_custom_gemini_api_key',
+      'scolaris_custom_groq_api_key',
+      'scolaris_custom_scolaris_ai_key',
+      'scolaris_custom_ai_key',
+      'groq_api_key',
+      'gemini_api_key',
+      'scolaris_ai_api_key',
+      'scolaris_user_api_key',
+      'user_ai_key',
+      'custom_ai_key',
+      'custom_groq_key',
+      'custom_gemini_key',
+      'ai_api_key'
+    ];
+
+    LEGACY_STORAGE_KEYS.forEach(key => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && /(?:custom.*ai.*key|groq.*key|gemini.*key)/i.test(k) && !k.startsWith('sb-')) {
+        localStorage.removeItem(k);
+      }
+    }
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const k = sessionStorage.key(i);
+      if (k && /(?:custom.*ai.*key|groq.*key|gemini.*key)/i.test(k) && !k.startsWith('sb-')) {
+        sessionStorage.removeItem(k);
+      }
+    }
+  } catch {
+    // Non-blocking browser storage access error handling
+  }
+}
+
+// Automatically execute once on script initialization
+cleanupLegacyApiKeyStorage();
+
+export const getHeaders = async (): Promise<HeadersInit> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = await getAccessToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
-  }
-  const customKey = localStorage.getItem('scolaris_custom_scolaris_ai_key') || localStorage.getItem('scolaris_custom_groq_api_key') || localStorage.getItem('scolaris_custom_gemini_api_key');
-  if (customKey) {
-    headers['X-Scolaris-AI-Key'] = customKey;
-    headers['X-Groq-API-Key'] = customKey;
-    headers['X-Gemini-API-Key'] = customKey;
   }
   return headers;
 };
@@ -419,53 +457,58 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     }
   },
 
-  async extractFileText(fileName: string, fileType: string, contentBase64: string) {
+  async extractFileText(fileName: string, fileType: string, contentBase64: string): Promise<{ success: boolean; extractedText?: string; error?: string; isScannedPdf?: boolean; fileName?: string; fileTypeDetected?: string; pageCount?: number }> {
     try {
-      return await safeFetchJson('/api/files/extract', {
+      const response = await fetch('/api/files/extract', {
         method: 'POST',
         headers: await getHeaders(),
         body: JSON.stringify({ fileName, fileType, contentBase64 })
-      }, 'File text extraction failed');
-    } catch (err) {
-      console.warn("File text extraction fallback active:", err);
+      });
+      const data = await response.json().catch(() => ({}));
+      if (data && typeof data.success === 'boolean') {
+        return data;
+      }
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Server file extraction request failed.',
+          fileName
+        };
+      }
+      return data;
+    } catch (err: any) {
+      console.warn("File text extraction request error:", err);
       return {
-        success: true,
-        fileName,
-        extractedText: `Extracted readable content for ${fileName}.\n\nCore subject matter, notes, and definitions parsed for active study.`
+        success: false,
+        error: err?.message || 'Network connection failed while extracting text.',
+        fileName
       };
     }
   },
 
-  async scanDocumentWithVision(fileName: string, fileType: string, contentBase64: string) {
+  async scanDocumentWithVision(fileName: string, fileType: string, contentBase64: string): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
-      return await safeFetchJson('/api/vision/scan', {
+      const response = await fetch('/api/vision/scan', {
         method: 'POST',
         headers: await getHeaders(),
         body: JSON.stringify({ fileName, fileType, contentBase64 })
-      }, 'Vision document scan failed');
-    } catch (err) {
-      console.warn("Vision document scan fallback active:", err);
+      });
+      const data = await response.json().catch(() => ({}));
+      if (data && typeof data.success === 'boolean') {
+        return data;
+      }
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Vision document scan failed.'
+        };
+      }
+      return data;
+    } catch (err: any) {
+      console.warn("Vision document scan request error:", err);
       return {
-        success: true,
-        data: {
-          transcription: `Scanned notes for ${fileName}.`,
-          summary: `# Document Summary\n\n- Key concepts identified from scanned document.\n- Formulas and definitions parsed for active recall.`,
-          keyTerms: [
-            { term: "Document Subject", definition: "Scanned academic course note material" }
-          ],
-          flashcards: [
-            { id: 1, front: "What is the primary topic of this scanned material?", back: "The core course modules and definitions extracted from your notes." }
-          ],
-          quiz: [
-            {
-              id: 1,
-              question: "What is the best way to retain concepts from scanned handwritten notes?",
-              options: ["Convert to flashcards & practice active recall", "Read once and put away", "Only look at diagrams", "Ignore key terms"],
-              answer: "Convert to flashcards & practice active recall",
-              explanation: "Active self-testing strengthens long-term memory tracks."
-            }
-          ]
-        }
+        success: false,
+        error: err?.message || 'Vision document scan failed.'
       };
     }
   }

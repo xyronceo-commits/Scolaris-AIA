@@ -51,6 +51,11 @@ export interface UserProfile {
   isPro: boolean;
   tier: SubscriptionTier;
   notifications: NotificationSettings;
+  department?: string;
+  major?: string;
+  academicGoals?: string;
+  studyStyle?: string;
+  assistanceAreas?: string[];
 }
 
 export interface StudySession {

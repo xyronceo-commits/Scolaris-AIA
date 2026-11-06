@@ -106,13 +106,38 @@ const StudyHub: React.FC<StudyHubProps> = ({
     fetchUserFiles();
   }, [getCurrentUserId(), refreshFilesTrigger]);
 
-  const handleSelectRecentFile = (file: UserFile) => {
-    if (file.courseId) {
-      setActiveCourseId(file.courseId);
+  const handleSelectRecentFile = async (file: UserFile) => {
+    const targetCourseId = file.courseId || activeCourseId;
+    if (targetCourseId) {
+      setActiveCourseId(targetCourseId);
     }
     setIsSessionFileActive(true);
-    addNotification('content', 'File Loaded', `Loaded ${file.fileName} into Study Hub`, 'hub');
+    addNotification('content', 'Loading File', `Loading ${file.fileName} into Study Hub workbench...`, 'hub');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Auto-fetch file content into workbench if signed download URL is available
+    if (file.downloadUrl) {
+      try {
+        const resp = await fetch(file.downloadUrl);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const base64 = await fileToBase64(blob);
+          const res = await GeminiService.extractFileText(file.fileName, file.fileType, base64);
+          if (res.success && res.extractedText) {
+            setFileContent(res.extractedText);
+            if (targetCourseId) {
+              const currentH = hubs[targetCourseId] || { courseId: targetCourseId };
+              const updatedH = { ...currentH, fileContent: res.extractedText, fileName: file.fileName } as StudyHubData;
+              setHubs(prev => ({ ...prev, [targetCourseId]: updatedH }));
+              await DBService.saveHub(updatedH);
+            }
+            addNotification('content', 'File Ready', `${file.fileName} loaded and ready in Study Hub workbench!`, 'hub');
+          }
+        }
+      } catch (loadErr) {
+        console.warn('Auto-extract for selected recent file warning:', loadErr);
+      }
+    }
   };
 
   useEffect(() => {
@@ -121,7 +146,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
     }
   }, [activeCourseId]);
 
-  const fileToBase64 = (file: File): Promise<string> => {
+  const fileToBase64 = (file: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -308,6 +333,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
       } else {
         const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
         if (!isPlainTextFile) {
+          if (res.isScannedPdf) {
+            throw new Error(res.error || "This PDF contains scanned images without selectable text. Please use the Document Scanner tool to parse scanned notes and worksheets.");
+          }
           throw new Error(res.error || "We couldn't read this document correctly. Please try uploading another copy.");
         }
       }
@@ -352,7 +380,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         const updatedHub = { 
           ...activeHub, 
           fileContent: content, 
-          fileName: '',
+          fileName: name,
           summary: summaryText || activeHub.summary
         } as StudyHubData;
 
@@ -391,7 +419,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
             const updatedHub = { 
               ...activeHub, 
               fileContent: content, 
-              fileName: '',
+              fileName: file.name,
               summary: summaryText || activeHub.summary
             } as StudyHubData;
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, AlertCircle, Eye, EyeOff, ShieldAlert } from 'lucide-react';
+import { ArrowRight, AlertCircle, Eye, EyeOff, ShieldAlert, CheckCircle2, Lock, Mail, User, CheckSquare, Square } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { EmailVerification } from './EmailVerification';
 import ScolarisLogo from './ScolarisLogo';
@@ -10,6 +10,8 @@ interface AuthProps {
   initialMode?: 'signin' | 'signup';
   sessionExpiredMsg?: string | null;
 }
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const Auth: React.FC<AuthProps> = ({ 
   onAuthSuccess, 
@@ -23,14 +25,16 @@ export const Auth: React.FC<AuthProps> = ({
   }, [initialMode]);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
   
   const [error, setError] = useState<string | null>(null);
-  // When set, the user must enter the OTP sent to this address
+  // When set, user is routed to the dedicated 6-digit OTP verification screen
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   const formatAuthError = (err: any): string => {
@@ -39,45 +43,86 @@ export const Auth: React.FC<AuthProps> = ({
     const msg: string = err.message || '';
 
     if (code === 'invalid_credentials' || msg.toLowerCase().includes('invalid login credentials')) {
-      return 'Email or password is incorrect.';
+      return 'Email or password is incorrect. Please check your details and try again.';
     }
-    if (code === 'user_already_exists' || code === 'email_exists') {
+    if (code === 'user_already_exists' || code === 'email_exists' || msg.toLowerCase().includes('user already registered')) {
       return 'An account already exists with this email address. Please sign in instead.';
     }
-    if (code === 'weak_password') {
-      return 'That password is too weak. Use at least 8 characters with a mix of letters and numbers.';
+    if (code === 'weak_password' || msg.toLowerCase().includes('weak')) {
+      return 'Password is too weak. Please use at least 8 characters with letters and numbers.';
     }
-    if (code === 'validation_failed' || code === 'email_address_invalid') {
+    if (code === 'validation_failed' || code === 'email_address_invalid' || msg.toLowerCase().includes('valid email')) {
       return 'Please enter a valid email address.';
     }
     if (err.status === 429 || code === 'over_request_rate_limit' || code === 'over_email_send_rate_limit') {
-      return 'Too many attempts. Please wait a few minutes and try again.';
+      return 'Too many attempts. Please wait a moment before trying again.';
     }
     return msg || 'Authentication issue occurred.';
   };
 
+  const validateForm = (): boolean => {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Please enter your email address.');
+      return false;
+    }
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      setError('Please enter a valid email format (e.g. name@university.edu).');
+      return false;
+    }
+
+    if (!password) {
+      setError('Please enter your password.');
+      return false;
+    }
+
+    if (mode === 'signup') {
+      if (!fullName.trim() || fullName.trim().length < 2) {
+        setError('Please enter your full name (minimum 2 characters).');
+        return false;
+      }
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters long.');
+        return false;
+      }
+      if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+        setError('Password must contain both letters and numbers.');
+        return false;
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords do not match. Please verify both entries.');
+        return false;
+      }
+      if (!agreeTerms) {
+        setError('Please accept the Terms of Service and Privacy Policy to continue.');
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
     setError(null);
 
+    if (!validateForm()) return;
+
+    setIsLoading(true);
     const cleanEmail = email.trim().toLowerCase();
 
     try {
       if (mode === 'signup') {
-        if (password !== confirmPassword) {
-          setError('Passwords do not match.');
-          return;
-        }
-        if (password.length < 8) {
-          setError('Password must be at least 8 characters long.');
-          return;
-        }
-
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: cleanEmail,
           password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+            },
+          },
         });
+
         if (signUpError) throw signUpError;
 
         // Supabase returns an obfuscated user with no identities when the email is already registered
@@ -86,27 +131,27 @@ export const Auth: React.FC<AuthProps> = ({
           return;
         }
 
-        if (data.session) {
-          // Email confirmation is switched off in the project: user is already signed in
-          onAuthSuccess();
-        } else {
-          // Normal path: a one-time code has been emailed
-          setPendingEmail(cleanEmail);
-        }
+        // Email OTP is sent by Supabase. Always route to dedicated 6-digit OTP verification screen
+        setPendingEmail(cleanEmail);
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
+
         if (signInError) {
-          if (signInError.code === 'email_not_confirmed') {
-            // Account exists but was never verified: send a fresh code and show the OTP screen
+          // If user exists but email has not been verified yet, trigger fresh OTP and route to verification
+          if (
+            signInError.code === 'email_not_confirmed' ||
+            signInError.message.toLowerCase().includes('email not confirmed')
+          ) {
             await supabase.auth.resend({ type: 'signup', email: cleanEmail }).catch(() => {});
             setPendingEmail(cleanEmail);
             return;
           }
           throw signInError;
         }
+
         onAuthSuccess();
       }
     } catch (err: any) {
@@ -190,7 +235,7 @@ export const Auth: React.FC<AuthProps> = ({
             <button
               type="button"
               onClick={() => { setMode('signin'); setError(null); }}
-              className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 ${
+              className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 cursor-pointer ${
                 mode === 'signin' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'
               }`}
             >
@@ -199,7 +244,7 @@ export const Auth: React.FC<AuthProps> = ({
             <button
               type="button"
               onClick={() => { setMode('signup'); setError(null); }}
-              className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 ${
+              className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 cursor-pointer ${
                 mode === 'signup' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'
               }`}
             >
@@ -215,7 +260,7 @@ export const Auth: React.FC<AuthProps> = ({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5"
+                  className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5 text-left"
                 >
                   <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
                   <p className="text-xs font-semibold text-rose-700 leading-snug">
@@ -225,10 +270,36 @@ export const Auth: React.FC<AuthProps> = ({
               )}
             </AnimatePresence>
 
-            <form onSubmit={handleEmailAuth} className="space-y-4">
+            <form onSubmit={handleEmailAuth} className="space-y-4" noValidate>
               <div className="space-y-3.5 text-left">
+                {/* Full Name for Sign Up */}
+                {mode === 'signup' && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="space-y-1"
+                  >
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                      Full Name
+                    </label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        required
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl px-4 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                        placeholder="e.g. Alex Morgan"
+                      />
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Email Address */}
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                    Email Address
+                  </label>
                   <input 
                     type="email" 
                     required
@@ -239,8 +310,18 @@ export const Auth: React.FC<AuthProps> = ({
                   />
                 </div>
 
+                {/* Password */}
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
+                  <div className="flex items-center justify-between ml-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Password
+                    </label>
+                    {mode === 'signup' && (
+                      <span className="text-[9px] text-slate-400 font-medium">
+                        Min. 8 chars (letters &amp; numbers)
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
                     <input 
                       type={showPassword ? "text" : "password"} 
@@ -254,7 +335,7 @@ export const Auth: React.FC<AuthProps> = ({
                       type="button"
                       tabIndex={-1}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
                       title={showPassword ? "Hide password" : "Show password"}
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -262,13 +343,16 @@ export const Auth: React.FC<AuthProps> = ({
                   </div>
                 </div>
 
+                {/* Confirm Password for Sign Up */}
                 {mode === 'signup' && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     className="space-y-1"
                   >
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Confirm Password</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                      Confirm Password
+                    </label>
                     <div className="relative">
                       <input 
                         type={showConfirmPassword ? "text" : "password"} 
@@ -282,7 +366,7 @@ export const Auth: React.FC<AuthProps> = ({
                         type="button"
                         tabIndex={-1}
                         onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none"
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
                         title={showConfirmPassword ? "Hide password" : "Show password"}
                       >
                         {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -290,18 +374,52 @@ export const Auth: React.FC<AuthProps> = ({
                     </div>
                   </motion.div>
                 )}
+
+                {/* Terms and Conditions Acceptance */}
+                {mode === 'signup' && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="pt-1"
+                  >
+                    <label className="flex items-start gap-2.5 cursor-pointer select-none group">
+                      <input
+                        type="checkbox"
+                        checked={agreeTerms}
+                        onChange={(e) => setAgreeTerms(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-4 h-4 rounded-md border flex items-center justify-center mt-0.5 shrink-0 transition-colors ${
+                        agreeTerms 
+                          ? 'bg-indigo-600 border-indigo-600 text-white' 
+                          : 'border-slate-300 bg-slate-50 group-hover:border-slate-400'
+                      }`}>
+                        {agreeTerms && <CheckCircle2 size={12} className="text-white" />}
+                      </div>
+                      <span className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                        I agree to the{' '}
+                        <span className="text-indigo-600 font-bold hover:underline">Terms of Service</span>
+                        {' '}and{' '}
+                        <span className="text-indigo-600 font-bold hover:underline">Privacy Policy</span>.
+                      </span>
+                    </label>
+                  </motion.div>
+                )}
               </div>
 
               <button 
                 type="submit"
                 disabled={isLoading}
-                className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 group mt-4"
+                className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isLoading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>{mode === 'signin' ? 'Signing In...' : 'Registering Account...'}</span>
+                  </div>
                 ) : (
                   <>
-                    <span>{mode === 'signin' ? 'Sign In' : 'Create Account'}</span>
+                    <span>{mode === 'signin' ? 'Sign In to Workspace' : 'Create Scholarly Account'}</span>
                     <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
                   </>
                 )}
@@ -312,11 +430,12 @@ export const Auth: React.FC<AuthProps> = ({
 
         <div className="mt-6 text-center">
           <button 
+            type="button"
             onClick={() => {
               setMode(mode === 'signin' ? 'signup' : 'signin');
               setError(null);
             }}
-            className="text-[10px] font-bold text-slate-500 hover:text-slate-900 uppercase tracking-widest transition-all bg-white/50 hover:bg-white px-5 py-2 rounded-full border border-slate-200/80 shadow-sm active:scale-95"
+            className="text-[10px] font-bold text-slate-500 hover:text-slate-900 uppercase tracking-widest transition-all bg-white/50 hover:bg-white px-5 py-2 rounded-full border border-slate-200/80 shadow-sm active:scale-95 cursor-pointer"
           >
             {mode === 'signin' ? "Not a member? Create an account" : "Already registered? Sign In"}
           </button>
