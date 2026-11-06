@@ -419,19 +419,21 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     }
   },
 
-  async extractFileText(fileName: string, fileType: string, contentBase64: string) {
+  async extractFileText(fileName: string, fileType: string, contentBase64: string): Promise<any> {
     try {
       return await safeFetchJson('/api/files/extract', {
         method: 'POST',
         headers: await getHeaders(),
         body: JSON.stringify({ fileName, fileType, contentBase64 })
       }, 'File text extraction failed');
-    } catch (err) {
-      console.warn("File text extraction fallback active:", err);
+    } catch (err: any) {
+      // Report the real failure instead of inventing placeholder text for the AI to study
+      console.warn("File text extraction failed:", err);
       return {
-        success: true,
+        success: false,
         fileName,
-        extractedText: `Extracted readable content for ${fileName}.\n\nCore subject matter, notes, and definitions parsed for active study.`
+        extractedText: '',
+        error: err?.message || "We couldn't read this document correctly. Please try uploading another copy."
       };
     }
   },
