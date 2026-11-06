@@ -13,7 +13,7 @@ const Tutorial: React.FC<TutorialProps> = ({ onComplete }) => {
 
   const steps = [
     {
-      title: "Welcome to Scolaris AI",
+      title: "Welcome to KorsIQ",
       description: "The next generation of academic intelligence. Let's briefly show you how to master your university life.",
       icon: <div className="p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-2xl shadow-slate-900/20"><GraduationCap size={48} /></div>,
       color: "from-slate-900 to-slate-800",
@@ -30,7 +30,7 @@ const Tutorial: React.FC<TutorialProps> = ({ onComplete }) => {
     },
     {
       title: "Adaptive Study Plans",
-      description: "Check 'Schedule' for a personalized roadmap. Scolaris prioritizes harder units and spaces out revision sessions.",
+      description: "Check 'Schedule' for a personalized roadmap. KorsIQ prioritizes harder units and spaces out revision sessions.",
       icon: <div className="p-8 bg-emerald-600 text-white rounded-[2.5rem] shadow-xl shadow-emerald-500/20"><Calendar size={48} /></div>,
       color: "from-emerald-600 to-teal-600",
       accent: "text-amber-400",
@@ -95,7 +95,7 @@ const Tutorial: React.FC<TutorialProps> = ({ onComplete }) => {
            </div>
 
            <div className="relative z-10">
-              <p className={`text-xs font-bold uppercase tracking-widest ${current.accent}`}>Scolaris Neural Network</p>
+              <p className={`text-xs font-bold uppercase tracking-widest ${current.accent}`}>KorsIQ Neural Network</p>
               <div className="flex gap-2 mt-4">
                  {steps.map((_, i) => (
                     <div 

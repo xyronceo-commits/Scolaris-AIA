@@ -443,7 +443,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
           {importTab === 'syllabus' ? (
             <div className="space-y-4">
               <div className="text-[10px] text-slate-500 leading-relaxed max-w-2xl font-medium">
-                 Paste raw syllabus content, university registration text, or course requirements. Scolaris AI analyzes the text, identifies credits/descriptions, and populates your course deck.
+                 Paste raw syllabus content, university registration text, or course requirements. KorsIQ analyzes the text, identifies credits/descriptions, and populates your course deck.
               </div>
               <textarea
                 value={magicText}

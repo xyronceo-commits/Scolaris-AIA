@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Mail, ArrowRight, RefreshCw, ArrowLeft, Check, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import ScolarisLogo from './ScolarisLogo';
+import KorsIQLogo from './KorsIQLogo';
 
 interface EmailVerificationProps {
   email: string;
@@ -94,10 +94,10 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
       <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full relative z-10">
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center p-3.5 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4">
-            <ScolarisLogo variant="icon" size={32} colorClass="text-white" />
+            <KorsIQLogo variant="icon" size={44} onDark />
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">Verify Your Email</h1>
-          <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">Scolaris Academic Security</p>
+          <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">KorsIQ Academic Security</p>
         </div>
 
         <div className="bg-white rounded-3xl border border-slate-200/60 shadow-xl shadow-slate-200/30 p-6 md:p-8 text-center space-y-6">
@@ -108,7 +108,7 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
           <div className="space-y-2">
             <h2 className="text-lg font-serif font-bold text-slate-900">Enter Your Code</h2>
             <p className="text-xs text-slate-600 font-medium leading-relaxed">
-              We sent a verification code to <span className="font-bold text-slate-900">{email}</span>. Enter it below to activate your Scolaris account.
+              We sent a verification code to <span className="font-bold text-slate-900">{email}</span>. Enter it below to activate your KorsIQ account.
             </p>
           </div>
 

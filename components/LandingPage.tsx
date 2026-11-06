@@ -1,7 +1,7 @@
 import React from 'react';
 import { ICONS } from '../constants';
 import { ArrowRight, Star } from 'lucide-react';
-import ScolarisLogo from './ScolarisLogo';
+import KorsIQLogo from './KorsIQLogo';
 
 interface LandingPageProps {
   onStart: () => void;
@@ -14,7 +14,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
       {/* Navigation */}
       <nav className="h-16 flex items-center justify-between px-6 md:px-10 max-w-7xl mx-auto relative z-50">
         <div className="flex items-center gap-2">
-          <ScolarisLogo variant="full" size={30} />
+          <KorsIQLogo variant="full" size={40} />
         </div>
         <div className="flex items-center gap-4">
            <button onClick={onSignIn} className="hidden md:block font-bold text-[10px] text-slate-500 hover:text-slate-900 transition-colors uppercase tracking-widest">Sign In</button>
@@ -34,11 +34,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
         
         <div className="max-w-3xl mx-auto text-center space-y-6">
           <h1 className="text-2xl md:text-4xl font-serif font-bold tracking-tighter text-slate-900 leading-[1.1] animate-in fade-in zoom-in duration-1000">
-            Study smarter,<br />not harder.
+            Outsmart Your<br />Syllabus.
           </h1>
 
           <p className="text-xs md:text-sm text-slate-500 font-medium max-w-xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
-            Scolaris is your AI-powered study companion — from smart schedules and instant flashcards to collaborative study circles and CGPA tracking.
+            KorsIQ is your AI-powered study companion — from smart schedules and instant flashcards to collaborative study circles and CGPA tracking.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-500">
@@ -87,7 +87,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
          <div className="flex flex-col md:flex-row justify-between items-center gap-12 text-center md:text-left">
             <div className="space-y-4">
                <div className="flex items-center justify-center md:justify-start gap-3">
-                  <ScolarisLogo variant="full" size={32} />
+                  <KorsIQLogo variant="full" size={40} />
                </div>
                <p className="text-slate-400 font-medium text-sm max-w-xs">Built for the next generation of academic excellence.</p>
             </div>
@@ -111,7 +111,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
             </div>
          </div>
          <div className="mt-20 pt-10 border-t border-slate-50 flex flex-col md:flex-row justify-between items-center gap-6">
-            <p className="text-xs text-slate-400 font-medium">© 2024 Scolaris AI Studio. All rights reserved.</p>
+            <p className="text-xs text-slate-400 font-medium">© 2026 KorsIQ. All rights reserved.</p>
             <div className="flex gap-8 text-xs text-slate-400 font-medium">
                <a href="#" className="hover:text-slate-900 transition-colors">Privacy Policy</a>
                <a href="#" className="hover:text-slate-900 transition-colors">Terms of Service</a>

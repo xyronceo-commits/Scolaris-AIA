@@ -17,7 +17,7 @@ Dashboard → Authentication:
 1. **Providers → Email**: keep *Confirm email* **on**.
 2. **Email Templates → Confirm signup**: the template must contain `{{ .Token }}` (the 6-digit code). Example body:
    ```html
-   <h2>Verify your Scolaris account</h2>
+   <h2>Verify your KorsIQ account</h2>
    <p>Your verification code is:</p>
    <h1 style="letter-spacing:6px">{{ .Token }}</h1>
    <p>It expires in 1 hour. If you didn't sign up, ignore this email.</p>

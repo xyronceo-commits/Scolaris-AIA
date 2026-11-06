@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
+
+import { isAiSender } from '../lib/brand';
 import { UserAvatar } from './UserAvatar';
 
 interface StudyGroupsProps {
@@ -116,7 +118,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         // Initialize default welcome AI chat message for active group
         setAiMessages([
           {
-            sender: 'Scolaris AI',
+            sender: 'KorsIQ',
             text: `Welcome to **${activeGroup.name}**! I am your group study companion. Upload course notes in the **Materials** tab, and I will analyze them to answer questions, generate quizzes, or summarize key topics for your study circle.`,
             timestamp: Date.now()
           }
@@ -344,7 +346,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
       const aiMsgObj: GroupMessage = {
         id: `msg_${Date.now()}_ai`,
-        sender: 'Scolaris AI',
+        sender: 'KorsIQ',
         text: aiRespText,
         timestamp: Date.now()
       };
@@ -352,7 +354,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
       setAiMessages(prev => [
         ...prev,
         {
-          sender: 'Scolaris AI',
+          sender: 'KorsIQ',
           text: aiRespText,
           timestamp: Date.now()
         }
@@ -374,7 +376,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
       setAiMessages(prev => [
         ...prev,
         {
-          sender: 'Scolaris AI',
+          sender: 'KorsIQ',
           text: errMsg,
           timestamp: Date.now()
         }
@@ -730,7 +732,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Bot size={14} className="text-indigo-600" /> Scolaris AI
+                    <Bot size={14} className="text-indigo-600" /> KorsIQ
                   </button>
                   <button
                     onClick={() => setActiveTab('materials')}
@@ -769,7 +771,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
             {/* TAB CONTENT */}
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-slate-50/30">
               
-              {/* 1. SCOLARIS AI TAB */}
+              {/* 1. KORSIQ TAB */}
               {activeTab === 'ai' && (
                 <div className="max-w-4xl mx-auto space-y-6 flex flex-col h-full">
                   
@@ -813,7 +815,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                   {/* Chat Messages Log */}
                   <div className="flex-1 space-y-4 overflow-y-auto pr-1">
                     {aiMessages.map((msg, idx) => {
-                      const isAi = msg.sender === 'Scolaris AI';
+                      const isAi = isAiSender(msg.sender);
                       return (
                         <div key={idx} className={`flex gap-3 ${isAi ? 'items-start' : 'items-end justify-end'}`}>
                           {isAi && (
@@ -846,7 +848,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                     {isAiThinking && (
                       <div className="flex items-center gap-3 text-indigo-600 font-medium text-xs bg-indigo-50/80 p-3.5 rounded-2xl border border-indigo-100 animate-pulse">
                         <Sparkles size={16} className="animate-spin" />
-                        Scolaris AI is analyzing group materials and generating response...
+                        KorsIQ is analyzing group materials and generating response...
                       </div>
                     )}
                     <div ref={chatEndRef} />
@@ -856,7 +858,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                   <form onSubmit={e => handleSendAiPrompt(e)} className="bg-white p-2 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-2">
                     <input
                       type="text"
-                      placeholder={`Ask Scolaris AI about materials in "${activeGroup.name}"...`}
+                      placeholder={`Ask KorsIQ about materials in "${activeGroup.name}"...`}
                       value={aiPrompt}
                       onChange={e => setAiPrompt(e.target.value)}
                       disabled={isAiThinking}
@@ -901,7 +903,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                           <Files size={24} />
                         </div>
                         <p className="text-xs font-bold text-slate-700">No Study Materials Uploaded</p>
-                        <p className="text-xs text-slate-500">Upload your PDF course notes or slides so Scolaris AI can answer questions for your group!</p>
+                        <p className="text-xs text-slate-500">Upload your PDF course notes or slides so KorsIQ can answer questions for your group!</p>
                       </div>
                     ) : (
                       (activeGroup.sharedMaterials || []).map((mat, idx) => (
