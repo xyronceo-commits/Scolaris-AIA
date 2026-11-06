@@ -19,7 +19,7 @@ import Tutorial from './components/Tutorial';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import { ScolarisChatWidget } from './components/ScolarisChatWidget';
-import Auth from './components/Auth';
+import Auth, { type AuthMode } from './components/Auth';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
 import { DBService } from './services/db';
@@ -66,8 +66,12 @@ const App: React.FC = () => {
   const [authLoading, setAuthLoading] = useState(true);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [authMode, setAuthMode] = useState<AuthMode>('signin');
   const [sessionExpiredMsg, setSessionExpiredMsg] = useState<string | null>(null);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
+  });
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
 
   // Admin System State
@@ -221,7 +225,11 @@ const App: React.FC = () => {
       if (!cancelled) setAuthLoading(false);
     };
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+        setShowAuth(true);
+      }
       // Defer: calling Supabase APIs synchronously inside this callback can deadlock the client
       setTimeout(() => { if (!cancelled) applySession(session); }, 0);
     });
@@ -520,6 +528,29 @@ const App: React.FC = () => {
           Resolving Academic Session...
         </p>
       </div>
+    );
+  }
+
+  // 1.5 Password Recovery Flow
+  if (isPasswordRecovery) {
+    return (
+      <Auth 
+        onAuthSuccess={() => {
+          setIsPasswordRecovery(false);
+          if (typeof window !== 'undefined') {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+          setSessionExpiredMsg(null);
+        }} 
+        initialMode="reset_password"
+        isDirectRecovery={true}
+        onRecoveryComplete={() => {
+          setIsPasswordRecovery(false);
+          if (typeof window !== 'undefined') {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }}
+      />
     );
   }
 
