@@ -15,6 +15,7 @@ import {
 
 const USER_FILES_BUCKET = 'user-files';
 const GROUP_MATERIALS_BUCKET = 'group-materials';
+const FALLBACK_BUCKET = 'scolaris-library';
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 // ---------- local cache helpers (offline fallback, scoped per user) ----------
@@ -61,13 +62,36 @@ async function fileToBase64(file: File): Promise<string> {
 async function signedUrlMap(bucket: string, paths: string[]): Promise<Record<string, string>> {
   const unique = Array.from(new Set(paths.filter(Boolean)));
   if (unique.length === 0) return {};
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
-  if (error || !data) return {};
-  const map: Record<string, string> = {};
-  data.forEach((entry) => {
-    if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
-  });
-  return map;
+  try {
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
+    if (!error && data && data.length > 0 && data.some(d => d.signedUrl)) {
+      const map: Record<string, string> = {};
+      data.forEach((entry) => {
+        if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
+      });
+      return map;
+    }
+  } catch (err) {
+    console.warn(`signedUrlMap primary bucket '${bucket}' error:`, err);
+  }
+
+  // Fallback to FALLBACK_BUCKET if different
+  if (bucket !== FALLBACK_BUCKET) {
+    try {
+      const { data: fbData, error: fbErr } = await supabase.storage.from(FALLBACK_BUCKET).createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
+      if (!fbErr && fbData) {
+        const map: Record<string, string> = {};
+        fbData.forEach((entry) => {
+          if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
+        });
+        return map;
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+
+  return {};
 }
 
 // ---------- row <-> model mappers ----------
@@ -684,9 +708,24 @@ export const DBService = {
       const materialId = `mat_${Date.now()}_${rand()}`;
       const storagePath = `groups/${groupId}/materials/${materialId}_${sanitizeFileName(file.name)}`;
 
-      const { error: uploadError } = await supabase.storage
+      let usedBucket = GROUP_MATERIALS_BUCKET;
+      let { error: uploadError } = await supabase.storage
         .from(GROUP_MATERIALS_BUCKET)
-        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream' });
+        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+
+      if (uploadError) {
+        console.warn(`Upload to '${GROUP_MATERIALS_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
+        const fbRes = await supabase.storage
+          .from(FALLBACK_BUCKET)
+          .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+        if (!fbRes.error) {
+          uploadError = null;
+          usedBucket = FALLBACK_BUCKET;
+        } else {
+          uploadError = fbRes.error;
+        }
+      }
+
       if (uploadError) throw uploadError;
 
       // Extract plain text server-side so the group AI can use the material
@@ -731,7 +770,7 @@ export const DBService = {
         .single();
       if (insertError || !row) {
         // Don't leave an orphaned object behind
-        await supabase.storage.from(GROUP_MATERIALS_BUCKET).remove([storagePath]).catch(() => {});
+        await supabase.storage.from(usedBucket).remove([storagePath]).catch(() => {});
         throw insertError || new Error('Failed to save material record.');
       }
 
@@ -1081,11 +1120,26 @@ export const DBService = {
     // Isolated per-user path: users/{userId}/courses/{courseId}/{fileId}_{fileName}
     const storagePath = `users/${userId}/courses/${courseId}/${fileId}_${sanitizeFileName(file.name)}`;
 
-    const { error: uploadError } = await supabase.storage
+    let usedBucket = USER_FILES_BUCKET;
+    let { error: uploadError } = await supabase.storage
       .from(USER_FILES_BUCKET)
-      .upload(storagePath, file, { contentType: file.type || 'application/octet-stream' });
+      .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+
     if (uploadError) {
-      console.error('Storage upload error:', uploadError);
+      console.warn(`Upload to '${USER_FILES_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
+      const fbRes = await supabase.storage
+        .from(FALLBACK_BUCKET)
+        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+      if (!fbRes.error) {
+        uploadError = null;
+        usedBucket = FALLBACK_BUCKET;
+      } else {
+        uploadError = fbRes.error;
+      }
+    }
+
+    if (uploadError) {
+      console.error('Storage upload error across buckets:', uploadError);
       throw new Error(uploadError.message || 'File upload failed.');
     }
 
@@ -1105,12 +1159,12 @@ export const DBService = {
       .select('*')
       .single();
     if (insertError || !row) {
-      await supabase.storage.from(USER_FILES_BUCKET).remove([storagePath]).catch(() => {});
+      await supabase.storage.from(usedBucket).remove([storagePath]).catch(() => {});
       console.error('Save user_files error:', insertError);
       throw new Error(insertError?.message || 'Failed to save file record.');
     }
 
-    const urls = await signedUrlMap(USER_FILES_BUCKET, [storagePath]);
+    const urls = await signedUrlMap(usedBucket, [storagePath]);
     const userFile = rowToUserFile(row, urls);
 
     const cached = readCache<UserFile[]>('files', userId, []);

@@ -18,10 +18,16 @@ import {
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
 
+export function cleanEnvKey(name: string): string {
+  const val = process.env[name];
+  if (!val || typeof val !== 'string') return '';
+  return val.trim().replace(/^["']|["']$/g, '').trim();
+}
+
 // Supabase configuration
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_URL = cleanEnvKey('SUPABASE_URL') || cleanEnvKey('VITE_SUPABASE_URL');
+const SUPABASE_ANON_KEY = cleanEnvKey('SUPABASE_ANON_KEY') || cleanEnvKey('VITE_SUPABASE_ANON_KEY');
+const SUPABASE_SERVICE_ROLE_KEY = cleanEnvKey('SUPABASE_SERVICE_ROLE_KEY');
 
 const supabaseClientOptions = { auth: { persistSession: false, autoRefreshToken: false } } as const;
 
@@ -109,12 +115,15 @@ function verifyAdminToken(token: string): { email: string; role: string } | null
   }
 }
 
-const OCR_MODEL = 'gemini-3.5-flash';
+const OCR_MODEL = 'gemini-2.0-flash';
 const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
 
 function pickGeminiKey(): string | null {
-  const envKey = process.env.GEMINI_API_KEY || (process.env.SCOLARIS_AI_KEY?.startsWith('AIzaSy') ? process.env.SCOLARIS_AI_KEY : null);
-  return envKey && envKey.startsWith('AIzaSy') ? envKey : null;
+  const gemini = cleanEnvKey('GEMINI_API_KEY');
+  if (gemini) return gemini;
+  const scolaris = cleanEnvKey('SCOLARIS_AI_KEY');
+  if (scolaris && (scolaris.startsWith('AIzaSy') || !scolaris.startsWith('gsk_'))) return scolaris;
+  return null;
 }
 
 /** Reads a scanned / image-only PDF with Gemini's native PDF vision. Returns '' when it can't. */
@@ -215,7 +224,8 @@ async function startServer() {
 
   const requireAuth = async (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
     if (!supabaseAuthClient) {
-      return res.status(503).json({ success: false, error: 'Authentication service unavailable' });
+      console.warn('[Auth Middleware] Supabase auth client unavailable: SUPABASE_URL or SUPABASE_ANON_KEY is not set');
+      return res.status(503).json({ success: false, error: 'Authentication service unavailable: Supabase credentials not configured' });
     }
 
     const authHeader = req.headers.authorization;
@@ -229,14 +239,16 @@ async function startServer() {
     }
 
     try {
-      // getUser validates the JWT against the Supabase Auth server
+      // getUser cryptographically validates the JWT against the Supabase Auth server
       const { data, error } = await supabaseAuthClient.auth.getUser(token);
-      if (error || !data.user || !data.user.email_confirmed_at) {
+      if (error || !data.user) {
+        console.warn('[Auth Middleware] Token verification failed:', error?.message || 'User not found');
         return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
       }
       req.user = { uid: data.user.id, email: data.user.email };
       next();
     } catch (err: any) {
+      console.warn('[Auth Middleware] Error verifying token:', err?.message || err);
       return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
     }
   };
@@ -261,9 +273,9 @@ async function startServer() {
     next();
   };
 
-  // Server-side AI provider credentials resolver (strictly from environment variables)
+  // Server-side AI provider credentials resolver (strictly from sanitized environment variables)
   const getAIKey = (): string | null => {
-    return process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || null;
+    return cleanEnvKey('GROQ_API_KEY') || cleanEnvKey('GEMINI_API_KEY') || cleanEnvKey('SCOLARIS_AI_KEY') || null;
   };
 
   interface AIParams {
@@ -369,22 +381,17 @@ async function startServer() {
   };
 
   const runAICall = async ({ systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
-    const key = getAIKey();
-    if (!key) throw new Error('Our AI service is temporarily unavailable. Please try again shortly.');
+    const groqKey = cleanEnvKey('GROQ_API_KEY') || (cleanEnvKey('SCOLARIS_AI_KEY').startsWith('gsk_') ? cleanEnvKey('SCOLARIS_AI_KEY') : '');
+    const geminiKey = cleanEnvKey('GEMINI_API_KEY') || (cleanEnvKey('SCOLARIS_AI_KEY').startsWith('AIzaSy') ? cleanEnvKey('SCOLARIS_AI_KEY') : '');
+    const scolarisKey = cleanEnvKey('SCOLARIS_AI_KEY');
 
-    // 1. Try SCOLARIS_AI_KEY via OpenRouter / OpenAI if available and not preferring Groq
-    const scolarisKey = process.env.SCOLARIS_AI_KEY;
-
-    if (scolarisKey && !preferGroq) {
-      const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
-      if (openRouterResult) {
-        return openRouterResult;
-      }
+    if (!groqKey && !geminiKey && !scolarisKey) {
+      throw new Error('AI credentials are not configured on the server. Please configure GROQ_API_KEY or GEMINI_API_KEY in hosting environment variables.');
     }
 
-    // 2. Groq Execution using server credentials
-    const groqKey = process.env.GROQ_API_KEY || (key && key.startsWith('gsk_') ? key : null);
+    let lastError: any = null;
 
+    // 1. Try Groq Execution using server credentials (ultra-fast inference)
     if (groqKey) {
       try {
         const groq = new Groq({ apiKey: groqKey });
@@ -396,8 +403,7 @@ async function startServer() {
 
         const candidateModels = [
           'llama-3.3-70b-versatile',
-          'llama-3.1-8b-instant',
-          'gemma2-9b-it'
+          'llama-3.1-8b-instant'
         ];
 
         for (const model of candidateModels) {
@@ -410,23 +416,21 @@ async function startServer() {
             });
 
             const content = response.choices[0]?.message?.content;
-            if (content) {
+            if (content && content.trim().length > 0) {
               return content;
             }
           } catch (mErr: any) {
             console.warn(`Groq model '${model}' call failed:`, mErr?.message || mErr);
+            lastError = mErr;
           }
         }
       } catch (gErr: any) {
         console.warn(`Groq execution warning:`, gErr?.message || gErr);
+        lastError = gErr;
       }
     }
 
-    // 3. Gemini Execution using server credentials
-    const geminiKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
-      ? process.env.GEMINI_API_KEY
-      : (key && key.startsWith('AIzaSy') ? key : null);
-
+    // 2. Gemini Execution using server credentials (multimodal & deep reasoning)
     if (geminiKey) {
       try {
         const aiGen = new GoogleGenAI({
@@ -468,19 +472,35 @@ async function startServer() {
               contents,
               config
             });
-            if (response.text) {
+            if (response.text && response.text.trim().length > 0) {
               return response.text;
             }
           } catch (gErr: any) {
             console.warn(`Gemini model '${model}' call warning:`, gErr?.message || gErr);
+            lastError = gErr;
           }
         }
       } catch (gemInitErr: any) {
         console.warn("Gemini execution warning:", gemInitErr?.message || gemInitErr);
+        lastError = gemInitErr;
       }
     }
 
-    throw new Error('Our AI service is temporarily unavailable. Please try again shortly.');
+    // 3. OpenRouter / OpenAI fallback if scolarisKey is an OpenRouter/OpenAI key
+    if (scolarisKey && (scolarisKey.startsWith('sk-') || scolarisKey.startsWith('sk-or-'))) {
+      try {
+        const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
+        if (openRouterResult) {
+          return openRouterResult;
+        }
+      } catch (oErr: any) {
+        lastError = oErr;
+      }
+    }
+
+    const failureReason = lastError?.message || 'All AI providers failed to generate a response';
+    console.error('[runAICall Fatal]:', failureReason);
+    throw new Error(`AI service failure: ${failureReason}`);
   };
 
   let s3Client: S3Client | null = null;
@@ -1226,7 +1246,7 @@ Synthesizing these insights underscores the necessity of continuous recalibratio
   }
 
   async function generateGroqPodcastScript(studyMaterial: string): Promise<string> {
-    const groqKey = process.env.GROQ_API_KEY;
+    const groqKey = cleanEnvKey('GROQ_API_KEY') || (cleanEnvKey('SCOLARIS_AI_KEY').startsWith('gsk_') ? cleanEnvKey('SCOLARIS_AI_KEY') : '');
 
     if (!groqKey) {
       throw new Error("Our AI podcast service is temporarily unavailable. Please try again shortly.");
@@ -2247,9 +2267,7 @@ You MUST return a JSON object containing structured study assets with this exact
 }`;
 
       // Use Gemini vision if valid server Gemini key is present
-      const geminiVisionKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
-        ? process.env.GEMINI_API_KEY
-        : null;
+      const geminiVisionKey = pickGeminiKey();
 
       if (geminiVisionKey) {
         const aiGen = new GoogleGenAI({
@@ -2289,7 +2307,7 @@ You MUST return a JSON object containing structured study assets with this exact
           textContent = await parsePdfBuffer(buffer);
         } else {
           // If this is an image (jpg/png/webp), check if Groq vision is available
-          const groqKey = process.env.GROQ_API_KEY;
+          const groqKey = cleanEnvKey('GROQ_API_KEY');
           if (groqKey && (mime.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(fileName || ''))) {
             try {
               const groq = new Groq({ apiKey: groqKey });
@@ -2322,7 +2340,7 @@ You MUST return a JSON object containing structured study assets with this exact
           } else {
             return res.json({
               success: false,
-              error: 'Image scanning is temporarily unavailable. Please try again later.'
+              error: 'Image scanning requires GEMINI_API_KEY to be configured in your hosting environment variables.'
             });
           }
         }
@@ -2371,7 +2389,9 @@ You MUST return a JSON object containing structured study assets with this exact
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json({ text: "Hello! I am KorsIQ, your AI Study Assistant. I am ready to help you analyze coursework, explain concepts, and prepare for exams. What would you like to study today?" });
+        return res.status(503).json({
+          error: "AI service credentials are not configured on the server. Please configure GROQ_API_KEY or GEMINI_API_KEY in your hosting environment variables."
+        });
       }
 
       let systemPrompt = `You are KorsIQ Academic Chatbot, an elite, highly supportive personal AI tutor and academic study master.
@@ -2411,8 +2431,10 @@ Always refer to this context when answering questions about the material, explai
 
       res.json({ text: aiContent });
     } catch (error: any) {
-      console.warn("KorsIQ Chat API pipeline warning:", error?.message || error);
-      res.json({ text: "I am ready to help! What key concept or question from your coursework would you like us to break down next?" });
+      console.error("KorsIQ Chat API pipeline error:", error?.message || error);
+      res.status(500).json({
+        error: error?.message || "AI tutor request failed. Please check server AI configuration."
+      });
     }
   });
 
@@ -2988,6 +3010,19 @@ Strictly NO markdown formatting.`;
     app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
+  }
+
+  // Ensure default storage buckets exist if service role client is active
+  if (supabaseAdmin) {
+    const bucketsToEnsure = ['user-files', 'group-materials', 'scolaris-library'];
+    for (const b of bucketsToEnsure) {
+      supabaseAdmin.storage.createBucket(b, {
+        public: true,
+        fileSizeLimit: 52428800 // 50MB
+      }).then(({ error }) => {
+        if (!error) console.log(`[Storage] Auto-created bucket '${b}' on Supabase.`);
+      }).catch(() => {});
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {

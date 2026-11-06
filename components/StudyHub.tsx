@@ -324,15 +324,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
     addNotification('content', 'Processing File', `Reading and extracting text from ${file.name}...`, 'hub');
 
     try {
-      const base64 = await fileToBase64(file);
-      const res = await GeminiService.extractFileText(file.name, file.type, base64);
-      
+      const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
       let content = '';
-      if (res.success && res.extractedText) {
-        content = res.extractedText;
+
+      if (isPlainTextFile) {
+        content = await file.text();
       } else {
-        const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
-        if (!isPlainTextFile) {
+        const base64 = await fileToBase64(file);
+        const res = await GeminiService.extractFileText(file.name, file.type, base64);
+        if (res.success && res.extractedText) {
+          content = res.extractedText;
+        } else {
           if (res.isScannedPdf) {
             throw new Error(res.error || "This PDF contains scanned images without selectable text. Please use the Document Scanner tool to parse scanned notes and worksheets.");
           }
@@ -340,11 +342,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         }
       }
 
-      if (content || file.type.startsWith('text/')) {
-        if (!content) {
-          content = await file.text();
-        }
-
+      if (content && content.trim().length > 0) {
         setFileContent(content);
         const name = file.name;
 

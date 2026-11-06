@@ -394,9 +394,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         body: JSON.stringify({ messages, groupName, groupDesc })
       }, 'Group chat failed');
       return data.text;
-    } catch (err) {
-      console.warn("Group chat fallback active:", err);
-      return `[KorsIQ Tutor] Let's break down this topic together! Ask any question regarding ${groupName || 'this module'} and we can analyze it step by step.`;
+    } catch (err: any) {
+      console.warn("Group chat warning:", err?.message || err);
+      return `[KorsIQ Tutor] I encountered an issue connecting to the AI service (${err?.message || 'Connection error'}). Please verify GROQ_API_KEY or GEMINI_API_KEY in your hosting environment variables.`;
     }
   },
 
@@ -451,9 +451,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         headers: await getHeaders(),
         body: JSON.stringify({ messages, courseContext, fileContent })
       }, 'KorsIQ chatbot request failed');
-    } catch (err) {
-      console.warn("KorsIQ chat fallback active:", err);
-      return { text: "I am ready to help! What key concept or question from your coursework would you like us to break down next?" };
+    } catch (err: any) {
+      console.warn("KorsIQ chat warning:", err?.message || err);
+      return { text: `[KorsIQ Assistant] I encountered an issue: ${err?.message || 'Connection error'}. Please verify your AI API key is set in hosting environment variables.` };
     }
   },
 
