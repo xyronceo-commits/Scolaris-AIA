@@ -1,7 +1,7 @@
 {
-  "name": "Scolaris AI",
-  "short_name": "Scolaris AI",
-  "description": "Scolaris AI helps students turn their course materials into smarter study resources, understand difficult topics, practise, revise, and learn more effectively with AI.",
+  "name": "KorsIQ",
+  "short_name": "KorsIQ",
+  "description": "KorsIQ helps students turn their course materials into smarter study resources, understand difficult topics, practise, revise, and learn more effectively with AI.",
   "start_url": "/",
   "id": "/",
   "display": "standalone",
@@ -10,19 +10,13 @@
   "theme_color": "#312e81",
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
-    {
-      "src": "/scolaris-logo-192.png",
+      "src": "/korsiq-logo-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/scolaris-logo-512.png",
+      "src": "/korsiq-logo-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

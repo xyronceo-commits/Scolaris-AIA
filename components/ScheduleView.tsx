@@ -119,10 +119,10 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
     let icsLines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Scolaris AI//Study Schedule//EN',
+      'PRODID:-//KorsIQ//Study Schedule//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
-      'X-WR-CALNAME:Scolaris Study Schedule',
+      'X-WR-CALNAME:KorsIQ Study Schedule',
       'X-WR-TIMEZONE:UTC'
     ];
 
@@ -142,7 +142,7 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
       const endDate = new Date(sessionDate.getTime() + (session.duration || 60) * 60 * 1000);
 
       const title = `${course?.code || 'CS'}: ${course?.title || 'Study Session'} (${session.mode || 'Review'})`;
-      const description = `Scolaris AI Study Session\\nMode: ${session.mode}\\nCourse: ${course?.title || 'Course'}\\nDuration: ${session.duration} minutes.`;
+      const description = `KorsIQ Study Session\\nMode: ${session.mode}\\nCourse: ${course?.title || 'Course'}\\nDuration: ${session.duration} minutes.`;
 
       icsLines.push(
         'BEGIN:VEVENT',
@@ -165,7 +165,7 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'scolaris_study_schedule.ics';
+    link.download = 'korsiq_study_schedule.ics';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -194,7 +194,7 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
     const formatGCalDate = (d: Date) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
 
     const title = encodeURIComponent(`${course?.code || 'CS'}: ${course?.title || 'Study Session'} (${session.mode})`);
-    const details = encodeURIComponent(`Scolaris AI Weekly Study Session\nMode: ${session.mode}\nDuration: ${session.duration} mins\nCourse: ${course?.title}`);
+    const details = encodeURIComponent(`KorsIQ Weekly Study Session\nMode: ${session.mode}\nDuration: ${session.duration} mins\nCourse: ${course?.title}`);
     const dates = `${formatGCalDate(sessionDate)}/${formatGCalDate(endDate)}`;
 
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}&recur=RRULE:FREQ=WEEKLY`;
@@ -416,7 +416,7 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
                   <h3 className="text-xl font-serif font-bold text-slate-900">Export Study Schedule</h3>
                 </div>
                 <p className="text-xs text-slate-500 font-medium">
-                  Sync your Scolaris AI study plan directly with Apple Calendar, Google Calendar, or Outlook.
+                  Sync your KorsIQ study plan directly with Apple Calendar, Google Calendar, or Outlook.
                 </p>
               </div>
 

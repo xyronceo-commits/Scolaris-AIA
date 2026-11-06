@@ -120,7 +120,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ userEmail, onComplete }) => {
             </div>
           </div>
           
-          <h1 className="text-xl font-serif font-bold tracking-tight text-slate-900 leading-none">Scolaris</h1>
+          <h1 className="text-xl font-serif font-bold tracking-tight text-slate-900 leading-none">KorsIQ</h1>
           <p className="text-slate-500 font-medium text-[11px] italic">Your personal academic studio.</p>
         </div>
 

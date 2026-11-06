@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { isAiSender } from './lib/brand';
 import Groq from 'groq-sdk';
 import { GoogleGenAI } from '@google/genai';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
@@ -182,7 +183,7 @@ async function startServer() {
     next();
   };
 
-  // Lazy init and adapter helper for Scolaris AI / Groq / Gemini
+  // Lazy init and adapter helper for KorsIQ / Groq / Gemini
   const getAIKey = (customKey?: string) => {
     return customKey || process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
   };
@@ -265,7 +266,7 @@ async function startServer() {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://ai.studio/build',
-            'X-Title': 'Scolaris AI'
+            'X-Title': 'KorsIQ'
           },
           body: JSON.stringify({
             model,
@@ -549,7 +550,7 @@ async function startServer() {
 
   // Offline / Quota Fallback Generators
   const getChatFallback = (groupName: string) => ({ 
-    text: `[Scolaris AI Bot - Study Companion] Let's work on this together! Active recall and interactive flashcards are excellent tools for mastering "${groupName}". Let me know what concepts we should break down first!`
+    text: `[KorsIQ Bot - Study Companion] Let's work on this together! Active recall and interactive flashcards are excellent tools for mastering "${groupName}". Let me know what concepts we should break down first!`
   });
 
   const getImportFallback = (text: string) => {
@@ -749,7 +750,7 @@ async function startServer() {
 
     const groq = new Groq({ apiKey: groqKey });
 
-    const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
+    const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
 Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
 Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
 Host 2 (Dr. Taylor): Analytical, friendly, explanatory professor host who breaks down complex concepts with clear real-world examples.
@@ -946,7 +947,7 @@ Dr. Taylor: [spoken text]`;
   }
 
   const getPodcastFallback = () => {
-    const rawScript = `Alex: Welcome to Scolaris AI Revision Seminar! Dr. Taylor, can you explain the best strategy to maximize exam retention?
+    const rawScript = `Alex: Welcome to KorsIQ Revision Seminar! Dr. Taylor, can you explain the best strategy to maximize exam retention?
 Dr. Taylor: Hello Alex! The most effective approach is active recall and spaced repetition. Testing yourself on core concepts builds far stronger neural pathways than passive reading.
 Alex: That explains why timed practice quizzes and summary cards are so critical for exam preparation!
 Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitions ensures long-term memory consolidation.`;
@@ -957,7 +958,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
 
   const getValidateFallback = () => ({
     isRelevant: true,
-    reason: "Scolaris Academic Integrity Validation passed in preview mode."
+    reason: "KorsIQ Academic Integrity Validation passed in preview mode."
   });
 
   // Proxy Groq / Gemini Chat
@@ -969,7 +970,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       if (!apiKey) {
         return res.json(getChatFallback(groupName));
       }
-      const prompt = `You are the Scolaris AI Study Bot assigned to the group "${groupName}". 
+      const prompt = `You are the KorsIQ Study Bot assigned to the group "${groupName}". 
       Group Purpose: ${groupDesc}. 
       Conversation History: ${JSON.stringify(messages)}. 
       Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
@@ -993,7 +994,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     try {
       const apiKey = getAIKey(customKey);
       
-      let systemInstruction = `You are Scolaris AI, an intelligent academic study companion assigned exclusively to the Study Group: "${groupName || 'Academic Study Group'}" (Course: ${groupCourse || 'General'}).
+      let systemInstruction = `You are KorsIQ, an intelligent academic study companion assigned exclusively to the Study Group: "${groupName || 'Academic Study Group'}" (Course: ${groupCourse || 'General'}).
       
 CRITICAL SECURITY & CONTEXT RULES:
 1. You MUST ONLY use information from the uploaded study materials provided in the context below for this group.
@@ -1089,7 +1090,7 @@ CRITICAL SECURITY & CONTEXT RULES:
     }
   });
 
-  // Scolaris Generate
+  // KorsIQ Generate
   app.post('/api/scolaris/generate', requireAuth, apiRateLimiter, async (req, res) => {
     const { studyMaterial, mode } = req.body;
     const customKey = getCustomKey(req);
@@ -1176,7 +1177,7 @@ CRITICAL SECURITY & CONTEXT RULES:
 
       res.json({ success: true, data: parsedData });
     } catch (error: any) {
-      console.warn("Scolaris AI Generation Warning:", error?.message || error);
+      console.warn("KorsIQ Generation Warning:", error?.message || error);
       const fallback = getMaterialsFallback(studyMaterial, mode as 'quiz' | 'flashcards');
       if (mode === 'quiz') {
         res.json({ success: true, data: { quiz: fallback } });
@@ -1353,10 +1354,10 @@ You MUST return a JSON object containing structured study assets with this exact
     try {
       const apiKey = getAIKey(customKey);
       if (!apiKey) {
-        return res.json({ text: "[Offline Companion Mode] Hello! I am Scolaris, your AI Study Assistant. To access full academic responses, please set your API key in the Profile tab." });
+        return res.json({ text: "[Offline Companion Mode] Hello! I am KorsIQ, your AI Study Assistant. To access full academic responses, please set your API key in the Profile tab." });
       }
 
-      let systemPrompt = `You are Scolaris Academic Chatbot, an elite, highly supportive personal AI tutor and academic study master.
+      let systemPrompt = `You are KorsIQ Academic Chatbot, an elite, highly supportive personal AI tutor and academic study master.
 Your goal is to guide students to intellectual mastery through deep explanation, clear step-by-step logic, and encouraging dialogue.
 Keep your responses well-structured and easy to read. Let's make learning engaging!`;
 
@@ -1381,7 +1382,7 @@ Always refer to this context when answering questions about the material, explai
       }
 
       const clientMessages = (messages || []).map((m: any) => ({
-        role: m.role || (m.sender === 'Scolaris AI' || m.sender === 'Scolaris' ? 'assistant' : 'user'),
+        role: m.role || (isAiSender(m.sender) ? 'assistant' : 'user'),
         content: m.content || m.text
       }));
 
@@ -1394,7 +1395,7 @@ Always refer to this context when answering questions about the material, explai
 
       res.json({ text: aiContent });
     } catch (error: any) {
-      console.warn("Scolaris Chat API pipeline warning:", error?.message || error);
+      console.warn("KorsIQ Chat API pipeline warning:", error?.message || error);
       res.json({ text: "I am ready to help! What key concept or question from your coursework would you like us to break down next?" });
     }
   });
@@ -1527,7 +1528,7 @@ CRITICAL WRITING RULES:
         rawScript = await generateGroqPodcastScript(studyText, customKey);
       } catch (groqErr: any) {
         console.warn('Direct Groq llama3-70b-8192 call failed, attempting fallback AI caller:', groqErr?.message || groqErr);
-        const systemInstruction = `You are an expert producer for Scolaris AI Academic Podcasts.
+        const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
 Create a natural, highly engaging dialogue conversation (4 to 6 exchanges) between two podcast hosts:
 Host 1 (Alex): Student host asking insightful questions.
 Host 2 (Dr. Taylor): Professor host explaining core concepts.

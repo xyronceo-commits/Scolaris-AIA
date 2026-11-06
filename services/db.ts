@@ -486,7 +486,7 @@ export const DBService = {
     );
     const welcomeMessage = {
       id: 'welcome',
-      sender: 'Scolaris AI',
+      sender: 'KorsIQ',
       text: `Welcome to ${groupData.name}! Upload study materials or start a discussion to collaborate.`,
       timestamp: Date.now(),
     };
@@ -844,7 +844,7 @@ export const DBService = {
         messages: [
           {
             id: 'welcome',
-            sender: 'Scolaris AI',
+            sender: 'KorsIQ',
             text: `You have found ${(data.name || '').toUpperCase()}. Join this group to view materials and collaborate!`,
             timestamp: Date.now(),
           },
