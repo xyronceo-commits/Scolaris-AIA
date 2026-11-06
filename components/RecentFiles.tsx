@@ -130,17 +130,17 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-8 rounded-[2rem] shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-2xs space-y-4">
         <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h3 className="text-base font-serif font-bold text-slate-900 dark:text-slate-100">Full Document Library</h3>
-            <p className="text-xs text-slate-400">Loading user-isolated storage records...</p>
+          <div className="space-y-0.5">
+            <h3 className="text-sm font-semibold text-slate-900">Document Library</h3>
+            <p className="text-xs text-slate-500">Loading stored course files...</p>
           </div>
-          <Loader2 size={18} className="animate-spin text-indigo-600" />
+          <Loader2 size={16} className="animate-spin text-blue-600" />
         </div>
-        <div className="space-y-3 pt-2">
+        <div className="space-y-2 pt-1">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-16 bg-slate-50 dark:bg-slate-800/50 rounded-2xl animate-pulse" />
+            <div key={i} className="h-12 bg-slate-50 rounded-lg animate-pulse border border-slate-100" />
           ))}
         </div>
       </div>
@@ -149,14 +149,14 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
 
   if (files.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-8 rounded-[2rem] shadow-sm text-center space-y-4">
-        <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mx-auto border border-indigo-100 dark:border-indigo-900">
-          <FolderOpen size={22} />
+      <div className="bg-white border border-slate-200 p-8 rounded-xl shadow-2xs text-center space-y-3">
+        <div className="w-10 h-10 bg-slate-50 text-slate-500 rounded-lg flex items-center justify-center mx-auto border border-slate-200">
+          <FolderOpen size={18} />
         </div>
         <div className="space-y-1 max-w-sm mx-auto">
-          <h3 className="text-base font-serif font-bold text-slate-900 dark:text-slate-100">No Uploaded Files Yet</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Upload study materials or course documents in your Study Hub to view and manage your full library here.
+          <h3 className="text-sm font-semibold text-slate-900">No Uploaded Documents</h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Upload study materials or course documents in your Study Hub to view and manage your library here.
           </p>
         </div>
       </div>
@@ -164,51 +164,51 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
   }
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 md:p-8 rounded-[2rem] shadow-sm space-y-6">
+    <div className="bg-white border border-slate-200 p-5 sm:p-6 rounded-xl shadow-2xs space-y-4">
       {/* Header & Badges */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-serif font-bold text-slate-900 dark:text-slate-100 tracking-tight">
+            <h3 className="text-sm font-semibold text-slate-900 tracking-tight">
               Recent Files & Full Document Library
             </h3>
-            <span className="px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-full text-[10px] font-bold tracking-wider uppercase border border-indigo-100 dark:border-indigo-900">
-              {files.length} {files.length === 1 ? 'file' : 'files'} archived
+            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md text-[11px] font-semibold border border-blue-100">
+              {files.length} {files.length === 1 ? 'file' : 'files'}
             </span>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 italic">
-            Searchable complete library • Click any document to load into Study Hub
+          <p className="text-xs text-slate-500">
+            Searchable library • Click any document to load into Study Hub
           </p>
         </div>
 
         {/* Time Filters */}
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl shrink-0">
+        <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
           <button
             onClick={() => setTimeFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
               timeFilter === 'all'
-                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             All Files
           </button>
           <button
             onClick={() => setTimeFilter('today')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
               timeFilter === 'today'
-                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Today
           </button>
           <button
             onClick={() => setTimeFilter('week')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
               timeFilter === 'week'
-                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Past 7 Days
@@ -217,20 +217,20 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
       </div>
 
       {/* Controls: Search & Course Filter */}
-      <div className="flex flex-col sm:flex-row items-center gap-3">
+      <div className="flex flex-col sm:flex-row items-center gap-2.5">
         <div className="relative flex-1 w-full">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search document library by file name, course code, or type..."
-            className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium"
+            className="w-full h-9 bg-white border border-slate-300 rounded-lg pl-9 pr-8 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all font-normal"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
             >
               <X size={14} />
             </button>
@@ -238,12 +238,12 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
         </div>
 
         {courses.length > 0 && (
-          <div className="relative w-full sm:w-56 shrink-0">
+          <div className="relative w-full sm:w-52 shrink-0">
             <Filter size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <select
               value={selectedCourseFilter}
               onChange={e => setSelectedCourseFilter(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none appearance-none cursor-pointer transition-all uppercase tracking-wider"
+              className="w-full h-9 bg-white border border-slate-300 rounded-lg pl-8 pr-7 text-xs font-medium text-slate-700 outline-none appearance-none cursor-pointer focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all"
             >
               <option value="ALL">All Courses ({courses.length})</option>
               {courses.map(c => (
@@ -258,8 +258,8 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
 
       {/* File List */}
       {filteredFiles.length === 0 ? (
-        <div className="text-center py-10 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+        <div className="text-center py-8 bg-slate-50 rounded-lg border border-dashed border-slate-200 space-y-2">
+          <p className="text-xs text-slate-500 font-normal">
             No files match your current search or filter criteria.
           </p>
           <button
@@ -268,13 +268,13 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
               setSelectedCourseFilter('ALL');
               setTimeFilter('all');
             }}
-            className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 font-bold text-xs rounded-xl hover:bg-indigo-100 transition-all"
+            className="px-3 py-1 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-medium rounded-md transition-colors"
           >
             Clear Filters
           </button>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filteredFiles.map((file) => {
             const associatedCourse = courses.find(c => c.id === file.courseId);
             const courseCodeDisplay = file.courseCode || associatedCourse?.code || 'COURSE';
@@ -291,35 +291,35 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
                     onOpenHub(file.courseId);
                   }
                 }}
-                className="group bg-slate-50/70 dark:bg-slate-800/40 hover:bg-white dark:hover:bg-slate-800 border border-slate-100 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-900 p-4 rounded-2xl transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs hover:shadow-md"
+                className="group bg-white hover:bg-slate-50/80 border border-slate-200 hover:border-slate-300 p-3.5 rounded-lg transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
               >
-                <div className="flex items-center gap-4 min-w-0">
+                <div className="flex items-center gap-3 min-w-0">
                   {getFileIcon(file.fileType, file.fileName)}
                   
                   <div className="space-y-0.5 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded-md uppercase tracking-wider border border-indigo-100 dark:border-indigo-900">
-                        📄 {courseCodeDisplay}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                        {courseCodeDisplay}
                       </span>
                       {courseTitleDisplay && (
-                        <span className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate max-w-[200px]">
+                        <span className="text-xs font-normal text-slate-500 truncate max-w-[200px]">
                           — {courseTitleDisplay}
                         </span>
                       )}
                       {isRecentUpload && (
-                        <span className="text-[8px] font-black uppercase tracking-wider px-2 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 rounded-md border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
-                          <Sparkles size={10} /> Recently Uploaded
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200 flex items-center gap-1">
+                          <Sparkles size={10} /> Recent
                         </span>
                       )}
                     </div>
                     
-                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                    <h4 className="text-xs font-semibold text-slate-900 truncate group-hover:text-blue-600 transition-colors">
                       {file.fileName}
                     </h4>
                     
-                    <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
-                      <span className="flex items-center gap-1 font-mono">
-                        <Clock size={12} />
+                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <Clock size={11} />
                         Uploaded: {formatRelativeTime(file.timestamp || file.uploadedAt)}
                       </span>
                       {file.fileSize && <span>• {file.fileSize}</span>}
@@ -337,8 +337,8 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
                         onOpenHub(file.courseId);
                       }
                     }}
-                    title="Load into Study Hub Workbench"
-                    className="px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all shadow-xs flex items-center gap-1"
+                    title="Load into Study Hub"
+                    className="px-2.5 py-1 bg-blue-600 text-white hover:bg-blue-700 rounded-md text-xs font-medium transition-colors shadow-2xs flex items-center gap-1"
                   >
                     Load File
                   </button>
@@ -350,9 +350,9 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
                       rel="noreferrer"
                       onClick={(e) => e.stopPropagation()}
                       title="Download / View File"
-                      className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950 rounded-xl transition-all border border-transparent hover:border-indigo-100 dark:hover:border-indigo-900"
+                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                     >
-                      <Download size={16} />
+                      <Download size={15} />
                     </a>
                   )}
                   
@@ -363,9 +363,9 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
                         onOpenHub(file.courseId);
                       }}
                       title="Open Study Hub"
-                      className="p-2 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950 rounded-xl transition-all border border-transparent hover:border-emerald-100 dark:hover:border-emerald-900"
+                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                     >
-                      <BookOpen size={16} />
+                      <BookOpen size={15} />
                     </button>
                   )}
 

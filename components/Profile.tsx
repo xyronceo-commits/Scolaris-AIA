@@ -18,7 +18,6 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
   React.useEffect(() => {
     setEditedProfile(profile);
   }, [profile]);
-  
 
   const handleSave = () => {
     setProfile(editedProfile);
@@ -26,30 +25,30 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
   };
 
   return (
-    <div className="space-y-12 animate-in fade-in duration-700 pb-20">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 animate-in fade-in duration-300 pb-20 max-w-4xl mx-auto">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-5">
         <div className="space-y-0.5">
-          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight leading-none">Profile</h1>
-          <p className="text-slate-500 font-medium text-sm italic mt-1">Manage your account and preferences</p>
+          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight leading-none">Profile & Account</h1>
+          <p className="text-slate-500 font-normal text-xs mt-1">Manage your academic profile, preferences, and account credentials</p>
         </div>
         <button 
           onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-bold text-[10px] uppercase tracking-widest transition-all ${
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer ${
             isEditing 
-            ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200' 
-            : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200'
+            ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-xs' 
+            : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-2xs'
           }`}
         >
           {isEditing ? 'Save Changes' : 'Edit Profile'}
         </button>
       </div>
 
-      <div className="space-y-10">
+      <div className="space-y-6">
         {/* Account Card */}
-        <section className="space-y-4">
-           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">{profile.name.split(' ')[0]}'s Account</h3>
-           <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm space-y-8">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+        <section className="space-y-2">
+           <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Academic Identity</h3>
+           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-5">
                  <div className="shrink-0">
                    <UserAvatar 
                      avatarIcon={editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap'}
@@ -59,37 +58,38 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                      isOnline
                    />
                  </div>
-                 <div className="space-y-1 w-full max-w-xs">
+                 <div className="space-y-1 w-full max-w-md">
                     {isEditing ? (
                       <input 
                         type="text"
                         value={editedProfile.name}
                         onChange={e => setEditedProfile({...editedProfile, name: e.target.value})}
-                        className="w-full text-lg font-serif font-bold text-slate-900 border-b border-blue-200 focus:outline-none focus:border-blue-500 bg-transparent"
+                        className="w-full text-base font-serif font-bold text-slate-900 border-b border-blue-400 focus:outline-none bg-transparent pb-0.5"
                       />
                     ) : (
-                      <h2 className="text-lg font-serif font-bold text-slate-900">{profile.name}</h2>
+                      <h2 className="text-base font-serif font-bold text-slate-900">{profile.name}</h2>
                     )}
                     {isEditing ? (
                       <input 
                         type="text"
                         value={editedProfile.university}
                         onChange={e => setEditedProfile({...editedProfile, university: e.target.value})}
-                        className="w-full text-xs text-slate-500 font-medium italic border-b border-blue-100 focus:outline-none focus:border-blue-400 bg-transparent mt-1"
+                        className="w-full text-xs text-slate-500 border-b border-blue-200 focus:outline-none bg-transparent mt-1 pb-0.5"
+                        placeholder="Institution name"
                       />
                     ) : (
-                      <p className="text-slate-500 font-medium text-xs italic">{profile.university}</p>
+                      <p className="text-slate-500 font-medium text-xs">{profile.university}</p>
                     )}
                  </div>
               </div>
 
               {/* Avatar Icon Choice Selection Grid */}
               {isEditing && (
-                <div className="pt-4 border-t border-slate-100 space-y-3">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                <div className="pt-4 border-t border-slate-100 space-y-2.5">
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
                     Choose Profile Avatar Icon
                   </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5">
                     {AVATAR_OPTIONS.map((opt) => {
                       const isSelected = (editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap') === opt.id;
                       return (
@@ -97,15 +97,15 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                           key={opt.id}
                           type="button"
                           onClick={() => setEditedProfile({ ...editedProfile, avatarIcon: opt.id })}
-                          className={`flex flex-col items-center justify-center p-3 rounded-2xl transition-all cursor-pointer ${
+                          className={`flex flex-col items-center justify-center p-2.5 rounded-lg transition-all cursor-pointer ${
                             isSelected
-                              ? 'bg-blue-50 border-2 border-blue-600 shadow-sm scale-105'
+                              ? 'bg-blue-50 border-2 border-blue-600 shadow-2xs'
                               : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
                           }`}
                           title={opt.name}
                         >
                           <UserAvatar avatarIcon={opt.id} size="sm" />
-                          <span className="text-[9px] font-bold text-slate-600 truncate w-full text-center mt-1.5">
+                          <span className="text-[9px] font-semibold text-slate-600 truncate w-full text-center mt-1">
                             {opt.name}
                           </span>
                         </button>
@@ -115,22 +115,22 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6 pt-2">
-                 <div className="space-y-1 px-4 border-l-2 border-slate-50">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">User ID</p>
-                    <p className="text-sm font-bold text-slate-900 truncate">SCL-882-991-X</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 pt-1">
+                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">User ID</p>
+                    <p className="text-xs font-mono font-bold text-slate-800 truncate">SCL-882-991-X</p>
                  </div>
-                 <div className="space-y-1 px-4 border-l-2 border-slate-50">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Email Address</p>
-                    <p className="text-sm font-bold text-slate-900 truncate">{profile.email}</p>
+                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Email Address</p>
+                    <p className="text-xs font-medium text-slate-800 truncate">{profile.email}</p>
                  </div>
-                 <div className="space-y-1 px-4 border-l-2 border-slate-50">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Level of Study</p>
+                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Level of Study</p>
                     {isEditing ? (
                       <select 
                         value={editedProfile.level}
                         onChange={e => setEditedProfile({...editedProfile, level: e.target.value})}
-                        className="text-sm font-bold text-slate-900 bg-transparent focus:outline-none cursor-pointer"
+                        className="text-xs font-semibold text-slate-900 bg-white border border-slate-200 rounded px-2 py-0.5 focus:outline-none cursor-pointer"
                       >
                          <option>Freshman</option>
                          <option>Sophomore</option>
@@ -142,24 +142,11 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                          <option>PhD / Research</option>
                       </select>
                     ) : (
-                      <p className="text-sm font-bold text-slate-900">{profile.level}</p>
+                      <p className="text-xs font-semibold text-slate-800">{profile.level}</p>
                     )}
                  </div>
-                 <div className="space-y-1 px-4 border-l-2 border-slate-50">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Age</p>
-                    {isEditing ? (
-                      <input 
-                        type="number"
-                        value={editedProfile.age || ''}
-                        onChange={e => setEditedProfile({...editedProfile, age: e.target.value === '' ? '' as any : parseInt(e.target.value) || 0})}
-                        className="text-sm font-bold text-slate-900 bg-transparent focus:outline-none w-16"
-                      />
-                    ) : (
-                      <p className="text-sm font-bold text-slate-900">{profile.age || 18}</p>
-                    )}
-                 </div>
-                 <div className="space-y-1 px-4 border-l-2 border-slate-50">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-indigo-500">Targeted CGPA</p>
+                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Targeted CGPA</p>
                     {isEditing ? (
                       <input 
                         type="number"
@@ -168,45 +155,42 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                         max="5.00"
                         value={editedProfile.targetCGPA !== undefined ? editedProfile.targetCGPA : 0.00}
                         onChange={e => setEditedProfile({...editedProfile, targetCGPA: parseFloat(e.target.value) || 0})}
-                        className="text-sm font-bold text-indigo-600 bg-transparent focus:outline-none w-20 border-b border-indigo-300"
+                        className="text-xs font-bold text-blue-600 bg-white border border-slate-200 rounded px-2 py-0.5 focus:outline-none w-20 font-mono"
                       />
                     ) : (
-                      <p className="text-sm font-bold text-indigo-600">{(profile?.targetCGPA ?? 0.00).toFixed(2)}</p>
+                      <p className="text-xs font-bold text-blue-600 font-mono">{(profile?.targetCGPA ?? 0.00).toFixed(2)}</p>
                     )}
                  </div>
               </div>
            </div>
-         </section>
+        </section>
 
-
-         {/* Preferences Section */}
-        <section className="space-y-4">
+        {/* Preferences Section */}
+        <section className="space-y-2">
            <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Preferences</h3>
+              <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Preferences</h3>
               <button 
                 onClick={() => setProfile({ ...profile, tutorialSeen: false })}
-                className="group flex items-center gap-2.5 px-4 py-2 bg-slate-50 hover:bg-blue-50 border border-slate-100 hover:border-blue-100 rounded-full transition-all duration-500"
+                className="group flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-all cursor-pointer text-xs"
               >
-                <div className="w-5 h-5 bg-white text-blue-500 rounded-full flex items-center justify-center shadow-sm group-hover:rotate-12 transition-transform">
-                  <Sparkles size={10} />
-                </div>
-                <span className="text-[9px] font-bold text-slate-500 group-hover:text-blue-700 uppercase tracking-widest">Re-show Tutorial</span>
+                <Sparkles size={11} className="text-blue-600" />
+                <span className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider">Reset Tutorial</span>
               </button>
            </div>
-           <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm space-y-6">
+           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
               {[
                 { id: 'messages', label: 'Group Messages', desc: 'Alerts for new messages in study circles', icon: ICONS.Groups, value: profile.notifications?.messages ?? true },
                 { id: 'sessions', label: 'Upcoming Sessions', desc: 'Reminders for your scheduled study times', icon: ICONS.Schedule, value: profile.notifications?.sessions ?? true },
                 { id: 'aiContent', label: 'AI Content Readiness', desc: 'Alerts when your AI materials are processed', icon: ICONS.Sparkles, value: profile.notifications?.aiContent ?? true },
               ].map(notif => (
-                <div key={notif.id} className="flex items-center justify-between">
-                   <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
+                <div key={notif.id} className="flex items-center justify-between py-1">
+                   <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500">
                          {notif.icon}
                       </div>
                       <div className="space-y-0.5">
-                         <h4 className="text-sm font-bold text-slate-900">{notif.label}</h4>
-                         <p className="text-[10px] text-slate-500 font-medium italic">{notif.desc}</p>
+                         <h4 className="text-xs font-semibold text-slate-900">{notif.label}</h4>
+                         <p className="text-[11px] text-slate-500">{notif.desc}</p>
                       </div>
                    </div>
                    <button 
@@ -219,12 +203,9 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
                          [notif.id]: !notif.value
                        }
                      })}
-                     className={`w-11 h-6 rounded-full relative transition-all duration-500 ease-out border-2 ${notif.value ? 'bg-slate-900 border-slate-900' : 'bg-slate-50 border-slate-200'}`}
+                     className={`w-10 h-5 rounded-full relative transition-all cursor-pointer ${notif.value ? 'bg-blue-600' : 'bg-slate-200'}`}
                    >
-                     <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-500 shadow-lg ${notif.value ? 'left-6 blur-none scale-100' : 'left-0.5 blur-[1px] scale-90 opacity-80'}`} />
-                     {notif.value && (
-                       <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1 h-1 bg-blue-400 rounded-full animate-pulse" />
-                     )}
+                     <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-xs ${notif.value ? 'left-5' : 'left-0.5'}`} />
                    </button>
                 </div>
               ))}
@@ -232,39 +213,39 @@ const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDel
         </section>
 
         {/* System & Security Section */}
-        <section className="space-y-4">
-           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">System & Security</h3>
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section className="space-y-2">
+           <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Account Actions</h3>
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               <button 
                 onClick={onSignOut}
-                className="w-full p-6 text-left bg-white border border-slate-100 rounded-[1.5rem] hover:bg-slate-50 transition-all group flex items-center justify-between shadow-sm"
+                className="w-full p-4 text-left bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-all group flex items-center justify-between shadow-2xs cursor-pointer"
               >
-                <div className="flex items-center gap-4">
-                   <div className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-all">
-                      <LogOut size={18} />
+                <div className="flex items-center gap-3">
+                   <div className="w-8 h-8 bg-slate-100 text-slate-600 rounded-lg flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-all">
+                      <LogOut size={15} />
                    </div>
                    <div className="space-y-0.5">
-                      <h4 className="text-sm font-serif font-bold text-slate-900 italic tracking-tight">Sign Out</h4>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">End Session</p>
+                      <h4 className="text-xs font-bold text-slate-900">Sign Out</h4>
+                      <p className="text-[10px] text-slate-500">End your current session</p>
                    </div>
                 </div>
-                <ArrowRight size={14} className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-1 transition-all" />
+                <ArrowRight size={13} className="text-slate-300 group-hover:text-slate-800 group-hover:translate-x-0.5 transition-all" />
               </button>
 
               <button 
                 onClick={() => { if(confirm("Permanently delete academic records?")) onDelete(); }}
-                className="w-full p-6 text-left bg-rose-50/30 border border-rose-100 rounded-[1.5rem] hover:bg-rose-50 transition-all group flex items-center justify-between shadow-sm"
+                className="w-full p-4 text-left bg-white border border-rose-200 rounded-xl hover:bg-rose-50/50 transition-all group flex items-center justify-between shadow-2xs cursor-pointer"
               >
-                <div className="flex items-center gap-4">
-                   <div className="w-10 h-10 bg-rose-100 text-rose-500 rounded-xl flex items-center justify-center group-hover:bg-rose-600 group-hover:text-white transition-all">
-                      <X size={18} />
+                <div className="flex items-center gap-3">
+                   <div className="w-8 h-8 bg-rose-50 text-rose-600 rounded-lg flex items-center justify-center group-hover:bg-rose-600 group-hover:text-white transition-all">
+                      <X size={15} />
                    </div>
                    <div className="space-y-0.5">
-                      <h4 className="text-sm font-serif font-bold text-rose-900 italic tracking-tight">Delete Account</h4>
-                      <p className="text-[9px] font-bold text-rose-400 uppercase tracking-widest">Wipe Data</p>
+                      <h4 className="text-xs font-bold text-rose-900">Delete Account</h4>
+                      <p className="text-[10px] text-rose-500">Permanently wipe all data</p>
                    </div>
                 </div>
-                <ArrowRight size={14} className="text-rose-300 group-hover:text-rose-900 group-hover:translate-x-1 transition-all" />
+                <ArrowRight size={13} className="text-rose-300 group-hover:text-rose-700 group-hover:translate-x-0.5 transition-all" />
               </button>
            </div>
         </section>

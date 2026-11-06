@@ -648,19 +648,19 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-24 max-w-7xl mx-auto">
+    <div className="space-y-6 animate-in fade-in duration-300 pb-24 max-w-7xl mx-auto">
       
       {/* Top Header & Navigation */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-100 pb-6">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-md">
               Academic Intelligence
             </span>
             <span className="text-xs text-slate-400">•</span>
             <span className="text-xs font-semibold text-slate-500">Grading System: {gradingScale.toFixed(2)} Scale</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 tracking-tight mt-1">
+          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 tracking-tight mt-1.5">
             CGPA Target & Study Planner
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-sans mt-0.5">
@@ -669,11 +669,11 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80 text-xs font-bold">
+        <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-medium">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'overview' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'overview' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Target size={13} />
@@ -681,8 +681,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('records')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'records' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'records' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <FileText size={13} />
@@ -690,8 +690,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('analysis')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'analysis' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'analysis' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Sparkles size={13} />
@@ -699,8 +699,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('timetable')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'timetable' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'timetable' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Calendar size={13} />
@@ -708,8 +708,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('techniques')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'techniques' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'techniques' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Brain size={13} />
@@ -717,8 +717,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('chat')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'chat' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'chat' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <MessageSquare size={13} />
@@ -726,8 +726,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('calendar')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'calendar' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'calendar' ? 'bg-white text-blue-600 font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Bell size={13} />
@@ -738,21 +738,21 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 1. OVERVIEW & CGPA TARGET TAB ---------------- */}
       {activeTab === 'overview' && (
-        <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-200">
           
           {/* Key Metric Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             
             {/* Current CGPA */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Current CGPA</span>
-                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Current CGPA</span>
+                <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                   {semesters.length} {semesters.length === 1 ? 'Period' : 'Periods'}
                 </span>
               </div>
               <div className="my-3">
-                <div className="text-4xl font-black text-slate-900 tracking-tight font-serif">
+                <div className="text-3xl font-black text-slate-900 tracking-tight font-serif">
                   {currentCGPA > 0 ? currentCGPA.toFixed(2) : '0.00'}
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-1">
@@ -763,7 +763,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               </div>
               <button 
                 onClick={() => setActiveTab('records')}
-                className="text-xs text-indigo-600 font-bold hover:underline flex items-center gap-1 cursor-pointer self-start"
+                className="text-xs text-blue-600 font-semibold hover:underline flex items-center gap-1 cursor-pointer self-start"
               >
                 <span>Manage Course Records</span>
                 <ChevronRight size={13} />
@@ -771,13 +771,13 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             </div>
 
             {/* Target CGPA (Strictly defaults to 0.00 for new users) */}
-            <div className="bg-white p-6 rounded-3xl border border-indigo-100 bg-indigo-50/15 shadow-xs flex flex-col justify-between relative overflow-hidden group">
+            <div className="bg-white p-5 rounded-xl border border-blue-100 bg-blue-50/20 shadow-xs flex flex-col justify-between relative overflow-hidden group">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
                   <Target size={12} />
                   Target CGPA Goal
                   {targetSavedSuccess && (
-                    <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-0.5 animate-in fade-in">
+                    <span className="text-[9px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-0.5 animate-in fade-in">
                       <Check size={9} /> Saved
                     </span>
                   )}
@@ -789,14 +789,14 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       setTempTargetInput(targetCGPA.toFixed(2));
                       setIsEditingTarget(true);
                     }}
-                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-100/70 px-2.5 py-1 rounded-full cursor-pointer transition-colors"
+                    className="text-[10px] font-semibold text-blue-700 hover:text-blue-900 bg-blue-100/70 px-2.5 py-1 rounded-md cursor-pointer transition-colors"
                   >
                     Edit Target
                   </button>
                 ) : (
                   <button
                     onClick={() => setIsEditingTarget(false)}
-                    className="text-[10px] font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
+                    className="text-[10px] font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -806,14 +806,14 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               {!isEditingTarget ? (
                 <div className="my-3">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-black text-indigo-600 tracking-tight font-serif">
+                    <span className="text-3xl font-black text-blue-600 tracking-tight font-serif">
                       {targetCGPA.toFixed(2)}
                     </span>
                     <span className="text-xs text-slate-400 font-semibold">/ {gradingScale.toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-indigo-900/80 font-medium mt-1">
+                  <p className="text-xs text-slate-600 font-medium mt-1">
                     {targetCGPA <= 0.00 ? (
-                      <span className="text-amber-600 font-bold">Goal not configured yet — Click to set your goal</span>
+                      <span className="text-amber-600 font-semibold">Goal not configured yet — Click to set your goal</span>
                     ) : (
                       currentCGPA >= targetCGPA 
                         ? 'Target achieved! Outstanding work. 🎉' 
@@ -832,13 +832,13 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       value={tempTargetInput}
                       onChange={e => setTempTargetInput(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleSaveTargetCGPA(); }}
-                      className="w-24 bg-white border border-indigo-300 rounded-xl px-3 py-1.5 text-lg font-bold text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      className="w-24 bg-white border border-slate-300 focus:border-blue-500 rounded-lg px-3 py-1.5 text-base font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-100"
                       placeholder="0.00"
                       autoFocus
                     />
                     <button
                       onClick={() => handleSaveTargetCGPA()}
-                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer"
                     >
                       Save
                     </button>
@@ -849,7 +849,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       <button
                         key={val}
                         onClick={() => handleSaveTargetCGPA(val)}
-                        className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-indigo-600 font-bold hover:bg-indigo-50 cursor-pointer"
+                        className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-blue-600 font-semibold hover:bg-blue-50 cursor-pointer"
                       >
                         {val.toFixed(2)}
                       </button>
@@ -860,23 +860,23 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
               <div className="flex items-center justify-between text-xs pt-1">
                 <span className="text-slate-400">Remaining Semesters:</span>
-                <span className="font-bold text-slate-800">
+                <span className="font-semibold text-slate-800">
                   {Math.max(1, academicConfig.totalSemesters - academicConfig.completedSemesters)}
                 </span>
               </div>
             </div>
 
             {/* Academic Settings & Scale Card */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Grading System</span>
-                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Grading System</span>
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-semibold">
                   <button
                     onClick={() => {
                       setGradingScale(5.0);
                       localStorage.setItem('korsiq_cgpa_scale', '5.0');
                     }}
-                    className={`px-2 py-0.5 rounded ${gradingScale === 5.0 ? 'bg-white text-indigo-600 shadow-2xs' : 'text-slate-500'}`}
+                    className={`px-2 py-0.5 rounded ${gradingScale === 5.0 ? 'bg-white text-blue-600 shadow-2xs' : 'text-slate-500'}`}
                   >
                     5.0 Scale
                   </button>
@@ -885,7 +885,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       setGradingScale(4.0);
                       localStorage.setItem('korsiq_cgpa_scale', '4.0');
                     }}
-                    className={`px-2 py-0.5 rounded ${gradingScale === 4.0 ? 'bg-white text-indigo-600 shadow-2xs' : 'text-slate-500'}`}
+                    className={`px-2 py-0.5 rounded ${gradingScale === 4.0 ? 'bg-white text-blue-600 shadow-2xs' : 'text-slate-500'}`}
                   >
                     4.0 Scale
                   </button>
@@ -898,7 +898,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                   <select
                     value={academicConfig.currentLevel}
                     onChange={e => updateAcademicConfig({ currentLevel: e.target.value })}
-                    className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-bold"
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-semibold"
                   >
                     <option value="100L">100 Level</option>
                     <option value="200L">200 Level</option>
@@ -911,7 +911,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Daily Study Target:</span>
-                  <div className="flex items-center gap-1 font-bold text-slate-800">
+                  <div className="flex items-center gap-1 font-semibold text-slate-800">
                     <input
                       type="number"
                       min="1"
@@ -928,9 +928,9 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               <button
                 onClick={runAiAnalysis}
                 disabled={isAnalyzing}
-                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Sparkles size={13} className={isAnalyzing ? 'animate-spin' : 'text-indigo-400'} />
+                <Sparkles size={13} className={isAnalyzing ? 'animate-spin' : 'text-blue-400'} />
                 <span>{isAnalyzing ? 'Analyzing Academic Data...' : 'Run Academic Evaluation'}</span>
               </button>
             </div>
@@ -938,34 +938,32 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </div>
 
           {/* Quick Actions & AI Overview Summary */}
-          <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl">
-            <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/20 blur-[100px] pointer-events-none rounded-full" />
-            
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-2 max-w-2xl">
+          <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="space-y-1.5 max-w-2xl">
                 <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+                  <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200/60 rounded-md text-[10px] font-semibold uppercase tracking-wider">
                     AI Academic Guidance
                   </span>
                   <span className="text-xs text-slate-400">• Grounded Analysis</span>
                 </div>
-                <h3 className="text-xl sm:text-2xl font-serif font-bold text-white tracking-tight">
+                <h3 className="text-xl font-serif font-bold text-slate-900 tracking-tight">
                   {targetCGPA <= 0
                     ? "Set your Target CGPA to unlock full academic reasoning"
                     : `Academic Path to ${targetCGPA.toFixed(2)} CGPA`}
                 </h3>
-                <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
+                <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
                   {targetCGPA <= 0
                     ? "KorsIQ requires your target goal and registered courses to calculate the required semester GPA, identify high-credit weight priorities, and build your revision schedule."
                     : (aiAnalysis?.advisorySummary || `Your goal of ${targetCGPA.toFixed(2)} on a ${gradingScale.toFixed(2)} scale requires focused mastery on your 3-unit and 4-unit courses. Run the evaluation to generate your personalized timetable.`)}
                 </p>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 shrink-0 relative z-10">
+              <div className="flex flex-col sm:flex-row gap-2.5 shrink-0">
                 <button
                   onClick={runAiAnalysis}
                   disabled={isAnalyzing}
-                  className="px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <Sparkles size={14} className={isAnalyzing ? 'animate-spin' : ''} />
                   <span>{isAnalyzing ? 'Analyzing...' : 'Analyze CGPA Feasibility'}</span>
@@ -973,7 +971,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                 <button
                   onClick={runAiPlanner}
                   disabled={isGeneratingPlan}
-                  className="px-5 py-3 bg-white/10 hover:bg-white/15 text-white border border-white/20 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <Calendar size={14} />
                   <span>{isGeneratingPlan ? 'Generating...' : 'Build Timetable'}</span>
@@ -987,11 +985,11 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 2. RECORDS & TRANSCRIPT IMPORT TAB ---------------- */}
       {activeTab === 'records' && (
-        <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-200">
           
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-serif font-bold text-slate-900">Academic Records & Transcripts</h3>
+              <h3 className="text-base font-serif font-bold text-slate-900">Academic Records & Transcripts</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Upload official transcripts or past semester results (PDF or photo) to automatically import your grades.
               </p>
@@ -1008,7 +1006,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               <button
                 onClick={() => transcriptInputRef.current?.click()}
                 disabled={isUploadingTranscript}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <Upload size={14} className={isUploadingTranscript ? 'animate-bounce' : ''} />
                 <span>{isUploadingTranscript ? 'Extracting Results...' : 'Upload Transcript (PDF/Image)'}</span>
@@ -1019,29 +1017,29 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           {/* Semesters & Courses List */}
           <div className="space-y-4">
             {semesters.length === 0 ? (
-              <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-200 text-center space-y-3">
-                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 mx-auto border border-slate-100">
-                  <FileText size={20} />
+              <div className="bg-white p-10 rounded-xl border border-dashed border-slate-200 text-center space-y-3">
+                <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 mx-auto border border-slate-100">
+                  <FileText size={18} />
                 </div>
-                <h4 className="text-sm font-bold text-slate-800">No Academic Records Added Yet</h4>
+                <h4 className="text-sm font-semibold text-slate-800">No Academic Records Added Yet</h4>
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
                   Upload an academic transcript document above to extract all course units and grades, or add past semester scores to begin calculating your CGPA trajectory.
                 </p>
               </div>
             ) : (
               semesters.map((sem, sIdx) => (
-                <div key={sem.id || sIdx} className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+                <div key={sem.id || sIdx} className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                     <div>
                       <h4 className="text-base font-serif font-bold text-slate-900">{sem.label}</h4>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-0.5">
                         {sem.courses?.length || 0} Registered Courses • Total Units: {sem.totalCredits || 20}
                       </p>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Semester GPA</span>
-                        <span className="text-lg font-bold text-indigo-600 font-mono">{sem.gpa.toFixed(2)}</span>
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Semester GPA</span>
+                        <span className="text-lg font-bold text-blue-600 font-mono">{sem.gpa.toFixed(2)}</span>
                       </div>
                       <button
                         onClick={() => {
@@ -1060,7 +1058,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
                         <thead>
-                          <tr className="text-slate-400 uppercase text-[9px] font-bold border-b border-slate-100">
+                          <tr className="text-slate-400 uppercase text-[9px] font-semibold border-b border-slate-100">
                             <th className="pb-2">Course Code</th>
                             <th className="pb-2">Title</th>
                             <th className="pb-2 text-center">Credit Units</th>
@@ -1073,13 +1071,13 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                             <tr key={cIdx} className="hover:bg-slate-50/50">
                               <td className="py-2.5 font-bold text-slate-900 font-mono">{c.code}</td>
                               <td className="py-2.5 text-slate-600">{c.title || 'Course Module'}</td>
-                              <td className="py-2.5 text-center font-bold text-slate-700">{c.creditUnits}</td>
+                              <td className="py-2.5 text-center font-semibold text-slate-700">{c.creditUnits}</td>
                               <td className="py-2.5 text-center">
-                                <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-bold font-mono">
+                                <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-semibold font-mono">
                                   {c.grade}
                                 </span>
                               </td>
-                              <td className="py-2.5 text-right font-bold text-slate-800 font-mono">
+                              <td className="py-2.5 text-right font-semibold text-slate-800 font-mono">
                                 {(getGradePoint(c.grade, gradingScale) * (c.creditUnits || 3)).toFixed(1)}
                               </td>
                             </tr>
@@ -1098,13 +1096,13 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 3. AI REASONING & PERFORMANCE ANALYSIS TAB ---------------- */}
       {activeTab === 'analysis' && (
-        <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-200">
           
           {aiAnalysis ? (
-            <div className="space-y-6">
+            <div className="space-y-5">
               
               {/* Feasibility Alert Card */}
-              <div className={`p-6 rounded-3xl border ${
+              <div className={`p-5 rounded-xl border ${
                 aiAnalysis.isAchievable ? 'bg-emerald-50/40 border-emerald-200' : 'bg-amber-50/50 border-amber-200'
               } space-y-3`}>
                 <div className="flex items-center gap-2">
@@ -1124,37 +1122,37 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                 </p>
                 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs">
-                  <div className="bg-white/80 p-3 rounded-xl border border-slate-200/60">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Current CGPA</span>
+                  <div className="bg-white/90 p-3 rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Current CGPA</span>
                     <span className="text-base font-bold text-slate-900 font-mono">{aiAnalysis.currentCgpa.toFixed(2)}</span>
                   </div>
-                  <div className="bg-white/80 p-3 rounded-xl border border-slate-200/60">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Target CGPA</span>
-                    <span className="text-base font-bold text-indigo-600 font-mono">{aiAnalysis.targetCgpa.toFixed(2)}</span>
+                  <div className="bg-white/90 p-3 rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Target CGPA</span>
+                    <span className="text-base font-bold text-blue-600 font-mono">{aiAnalysis.targetCgpa.toFixed(2)}</span>
                   </div>
-                  <div className="bg-white/80 p-3 rounded-xl border border-slate-200/60">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Required Semester GPA</span>
+                  <div className="bg-white/90 p-3 rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Required Semester GPA</span>
                     <span className={`text-base font-bold font-mono ${aiAnalysis.requiredSemesterGpa > gradingScale ? 'text-rose-600' : 'text-emerald-700'}`}>
                       {aiAnalysis.requiredSemesterGpa.toFixed(2)}
                     </span>
                   </div>
-                  <div className="bg-white/80 p-3 rounded-xl border border-slate-200/60">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Max Achievable</span>
+                  <div className="bg-white/90 p-3 rounded-lg border border-slate-200">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Max Achievable</span>
                     <span className="text-base font-bold text-slate-900 font-mono">{aiAnalysis.maxPossibleCgpa.toFixed(2)}</span>
                   </div>
                 </div>
 
                 {!aiAnalysis.isAchievable && aiAnalysis.alternativeTarget && (
-                  <div className="pt-2 flex items-center justify-between bg-white p-3 rounded-xl border border-amber-300">
+                  <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-lg border border-amber-300">
                     <div>
-                      <span className="text-xs font-bold text-slate-900">Recommended Alternative Goal:</span>
+                      <span className="text-xs font-semibold text-slate-900">Recommended Alternative Goal:</span>
                       <span className="text-xs text-slate-500 ml-1">
                         Achieving perfect {gradingScale.toFixed(2)} GPAs yields {aiAnalysis.maxPossibleCgpa.toFixed(2)}. Consider aiming for {aiAnalysis.alternativeTarget.toFixed(2)}.
                       </span>
                     </div>
                     <button
                       onClick={() => handleSaveTargetCGPA(aiAnalysis.alternativeTarget)}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold cursor-pointer"
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold cursor-pointer shrink-0"
                     >
                       Adopt {aiAnalysis.alternativeTarget.toFixed(2)} Target
                     </button>
@@ -1163,14 +1161,14 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               </div>
 
               {/* Strategic Action Checklist */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
                 <h4 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wide">
                   Strategic Steps for Academic Excellence
                 </h4>
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {aiAnalysis.strategicSteps.map((step, idx) => (
-                    <div key={idx} className="flex items-start gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-150 text-xs">
-                      <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 mt-0.5 text-[11px]">
+                    <div key={idx} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center shrink-0 mt-0.5 text-[11px]">
                         {idx + 1}
                       </span>
                       <span className="text-slate-700 leading-relaxed font-medium">{step}</span>
@@ -1181,7 +1179,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
               {/* High-Credit Unit Leverage Ranking */}
               {aiAnalysis.highCreditPriorities && aiAnalysis.highCreditPriorities.length > 0 && (
-                <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wide">
                       High-Credit Courses Weighting (Highest Leverage)
@@ -1190,10 +1188,10 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {aiAnalysis.highCreditPriorities.map((item, idx) => (
-                      <div key={idx} className="p-4 bg-slate-50 rounded-2xl border border-slate-150 space-y-1">
+                      <div key={idx} className="p-3.5 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-900 font-mono text-sm">{item.code}</span>
-                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md text-[10px] font-bold">
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200/60 rounded-md text-[10px] font-semibold">
                             {item.units} Credit Units
                           </span>
                         </div>
@@ -1206,16 +1204,16 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
             </div>
           ) : (
-            <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-200 text-center space-y-3">
-              <Sparkles size={24} className="text-indigo-600 mx-auto" />
-              <h4 className="text-sm font-bold text-slate-800">No Analysis Generated Yet</h4>
+            <div className="bg-white p-10 rounded-xl border border-dashed border-slate-200 text-center space-y-3">
+              <Sparkles size={24} className="text-blue-600 mx-auto" />
+              <h4 className="text-sm font-semibold text-slate-800">No Analysis Generated Yet</h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
                 Click below to have KorsIQ evaluate your courses, credit weight distribution, and required GPA trajectory.
               </p>
               <button
                 onClick={runAiAnalysis}
                 disabled={isAnalyzing}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer inline-flex items-center gap-2"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs cursor-pointer inline-flex items-center gap-2"
               >
                 <Sparkles size={13} className={isAnalyzing ? 'animate-spin' : ''} />
                 <span>{isAnalyzing ? 'Analyzing...' : 'Generate Academic Analysis'}</span>
@@ -1228,11 +1226,11 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 4. PERSONALIZED AI STUDY TIMETABLE TAB ---------------- */}
       {activeTab === 'timetable' && (
-        <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-200">
           
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
             <div>
-              <h3 className="text-lg font-serif font-bold text-slate-900">Personalized Weekly Timetable</h3>
+              <h3 className="text-base font-serif font-bold text-slate-900">Personalized Weekly Timetable</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Calculated from your registered courses, credit weights, and cognitive reading techniques.
               </p>
@@ -1241,7 +1239,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={handleExportIcs}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
                 title="Download .ics file for Google Calendar, Apple Calendar, and Outlook"
               >
                 <Download size={13} />
@@ -1250,7 +1248,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               <button
                 onClick={runAiPlanner}
                 disabled={isGeneratingPlan}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw size={13} className={isGeneratingPlan ? 'animate-spin' : ''} />
                 <span>{isGeneratingPlan ? 'Building...' : 'Regenerate Schedule'}</span>
@@ -1259,16 +1257,16 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </div>
 
           {plannedTimetable.length === 0 ? (
-            <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-200 text-center space-y-3">
+            <div className="bg-white p-10 rounded-xl border border-dashed border-slate-200 text-center space-y-3">
               <Calendar size={24} className="text-slate-400 mx-auto" />
-              <h4 className="text-sm font-bold text-slate-800">No Timetable Generated Yet</h4>
+              <h4 className="text-sm font-semibold text-slate-800">No Timetable Generated Yet</h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
                 KorsIQ can assemble a balanced weekly study schedule that balances hard courses with proven techniques and spaced recovery intervals.
               </p>
               <button
                 onClick={runAiPlanner}
                 disabled={isGeneratingPlan}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer inline-flex items-center gap-2"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs cursor-pointer inline-flex items-center gap-2"
               >
                 <Sparkles size={13} />
                 <span>Generate Weekly Schedule</span>
@@ -1279,15 +1277,15 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               {plannedTimetable.map((session) => (
                 <div
                   key={session.id}
-                  className={`p-5 rounded-3xl border transition-all ${
+                  className={`p-4 rounded-xl border transition-all ${
                     session.completed 
                       ? 'bg-slate-50 border-slate-200 opacity-60' 
-                      : 'bg-white border-slate-200/80 shadow-xs hover:border-slate-300'
+                      : 'bg-white border-slate-200 shadow-xs hover:border-slate-300'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 bg-slate-100 text-slate-800 rounded-lg text-xs font-bold uppercase tracking-wider font-mono">
+                      <span className="px-2.5 py-0.5 bg-slate-100 text-slate-800 rounded-md text-xs font-semibold uppercase tracking-wider font-mono">
                         {session.day}
                       </span>
                       <span className="text-xs text-slate-400 font-mono font-semibold">
@@ -1300,17 +1298,17 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                         href={getGoogleCalendarUrl(session)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
                         title="Add this session to Google Calendar"
                       >
                         <ExternalLink size={13} />
                       </a>
                       <button
                         onClick={() => toggleSessionCompleted(session.id)}
-                        className={`w-6 h-6 rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
+                        className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all cursor-pointer ${
                           session.completed 
                             ? 'bg-emerald-600 border-emerald-600 text-white' 
-                            : 'border-slate-300 hover:border-indigo-500 text-transparent'
+                            : 'border-slate-300 hover:border-blue-500 text-transparent'
                         }`}
                         title={session.completed ? 'Mark uncompleted' : 'Mark completed'}
                       >
@@ -1325,13 +1323,13 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       <span className="text-slate-300">•</span>
                       <span className="text-xs text-slate-600 truncate">{session.courseTitle}</span>
                     </div>
-                    <p className="text-xs font-semibold text-indigo-700">{session.topic}</p>
+                    <p className="text-xs font-semibold text-blue-700">{session.topic}</p>
                     <p className="text-[11px] text-slate-500 leading-relaxed mt-1">{session.instructions}</p>
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400 uppercase font-bold text-[9px] tracking-wider">Method:</span>
-                    <span className="font-bold text-slate-700 bg-slate-50 px-2.5 py-0.5 rounded-full border border-slate-200/60">
+                    <span className="text-slate-400 uppercase font-semibold text-[9px] tracking-wider">Method:</span>
+                    <span className="font-semibold text-slate-700 bg-slate-50 px-2.5 py-0.5 rounded-full border border-slate-200">
                       {session.recommendedTechnique}
                     </span>
                   </div>
@@ -1345,10 +1343,10 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 5. READING TECHNIQUES & REVISION STRATEGIES TAB ---------------- */}
       {activeTab === 'techniques' && (
-        <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-200">
           
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
-            <h3 className="text-lg font-serif font-bold text-slate-900">Evidence-Based Academic Techniques</h3>
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+            <h3 className="text-base font-serif font-bold text-slate-900">Evidence-Based Academic Techniques</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               KorsIQ leverages cognitive science methodologies to maximize retention, recall speed, and exam performance.
             </p>
@@ -1359,12 +1357,12 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             {READING_TECHNIQUES_INFO.map((tech, idx) => {
               const IconComp = tech.icon;
               return (
-                <div key={idx} className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs space-y-3">
+                <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center">
-                      <IconComp size={18} />
+                    <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center">
+                      <IconComp size={16} />
                     </span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 px-2 py-0.5 rounded">
+                    <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
                       {tech.tag}
                     </span>
                   </div>
@@ -1383,17 +1381,17 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
           {/* Course-by-Course Revision Plans */}
           {revisionPlans.length > 0 && (
-            <div className="space-y-4 pt-4">
+            <div className="space-y-4 pt-2">
               <h3 className="text-base font-serif font-bold text-slate-900">Personalized Course Revision Blueprints</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {revisionPlans.map((plan, idx) => (
-                  <div key={idx} className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-3">
+                  <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
                         <span className="font-mono font-bold text-slate-900 text-sm">{plan.courseCode}</span>
                         <span className="text-xs text-slate-500 ml-2">{plan.courseTitle}</span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
                         plan.priority === 'high' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-100 text-slate-700'
                       }`}>
                         {plan.priority} priority
@@ -1403,7 +1401,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                     <div className="space-y-1.5 text-xs">
                       <div>
                         <span className="text-slate-400 font-semibold">Assigned Technique: </span>
-                        <span className="font-bold text-indigo-700">{plan.readingTechnique}</span>
+                        <span className="font-semibold text-blue-700">{plan.readingTechnique}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 font-semibold">Revision Frequency: </span>
@@ -1429,15 +1427,15 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 6. CONVERSATIONAL ACADEMIC ADVISER CHAT TAB ---------------- */}
       {activeTab === 'chat' && (
-        <div className="space-y-4 animate-in fade-in duration-300">
+        <div className="space-y-4 animate-in fade-in duration-200">
           
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold">
-                <Sparkles size={18} />
+              <span className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+                <Sparkles size={16} />
               </span>
               <div>
-                <h3 className="text-base font-serif font-bold text-slate-900">KorsIQ Academic Mentor</h3>
+                <h3 className="text-sm font-serif font-bold text-slate-900">KorsIQ Academic Mentor</h3>
                 <p className="text-xs text-slate-500">Ask questions regarding your CGPA target, course prioritization, and study schedules.</p>
               </div>
             </div>
@@ -1448,22 +1446,22 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           </div>
 
           {/* Chat Container */}
-          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs flex flex-col h-[520px] overflow-hidden">
-            <div className="flex-1 p-6 overflow-y-auto space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs flex flex-col h-[520px] overflow-hidden">
+            <div className="flex-1 p-5 overflow-y-auto space-y-4">
               {chatMessages.map(msg => (
                 <div
                   key={msg.id}
                   className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl p-4 text-xs leading-relaxed ${
+                    className={`max-w-[80%] rounded-xl p-3.5 text-xs leading-relaxed ${
                       msg.sender === 'user'
-                        ? 'bg-slate-900 text-white rounded-tr-xs'
-                        : 'bg-slate-50 border border-slate-200/70 text-slate-800 rounded-tl-xs space-y-1'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-50 border border-slate-200 text-slate-800 space-y-1'
                     }`}
                   >
                     <p className="whitespace-pre-wrap">{msg.text}</p>
-                    <span className="text-[9px] opacity-40 block text-right mt-1">
+                    <span className={`text-[9px] block text-right mt-1 ${msg.sender === 'user' ? 'text-blue-100' : 'text-slate-400'}`}>
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -1471,8 +1469,8 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               ))}
               {isChatThinking && (
                 <div className="flex justify-start">
-                  <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-4 text-xs flex items-center gap-2 text-slate-500">
-                    <Sparkles size={13} className="animate-spin text-indigo-600" />
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs flex items-center gap-2 text-slate-500">
+                    <Sparkles size={13} className="animate-spin text-blue-600" />
                     <span>KorsIQ is evaluating your academic records...</span>
                   </div>
                 </div>
@@ -1481,7 +1479,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             </div>
 
             {/* Suggested Prompts */}
-            <div className="px-6 py-2 border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto text-[11px] text-slate-600">
+            <div className="px-5 py-2 border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto text-[11px] text-slate-600 bg-slate-50/50">
               <span className="font-semibold text-slate-400 shrink-0">Ask:</span>
               {[
                 "Which courses should I prioritize?",
@@ -1494,7 +1492,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                   onClick={() => {
                     setChatInput(prompt);
                   }}
-                  className="px-2.5 py-1 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 rounded-full border border-slate-200 shrink-0 cursor-pointer transition-colors"
+                  className="px-2.5 py-1 bg-white hover:bg-blue-50 hover:text-blue-700 rounded-md border border-slate-200 shrink-0 cursor-pointer transition-colors"
                 >
                   {prompt}
                 </button>
@@ -1502,18 +1500,18 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             </div>
 
             {/* Chat Input Bar */}
-            <form onSubmit={handleSendChat} className="p-4 border-t border-slate-100 flex items-center gap-2 bg-slate-50/50">
+            <form onSubmit={handleSendChat} className="p-3.5 border-t border-slate-200 flex items-center gap-2 bg-white">
               <input
                 type="text"
                 placeholder="Ask KorsIQ about your academic plan..."
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
-                className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2 text-xs outline-none focus:border-blue-500 focus:bg-white text-slate-800"
               />
               <button
                 type="submit"
                 disabled={!chatInput.trim() || isChatThinking}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
               >
                 <Send size={13} />
                 <span>Send</span>
@@ -1526,22 +1524,22 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- 7. CALENDAR & SMART STUDY REMINDERS TAB ---------------- */}
       {activeTab === 'calendar' && (
-        <div className="space-y-8 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-200">
           
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-1">
-            <h3 className="text-lg font-serif font-bold text-slate-900">Calendar Integration & Smart Notifications</h3>
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-1">
+            <h3 className="text-base font-serif font-bold text-slate-900">Calendar Integration & Smart Notifications</h3>
             <p className="text-xs text-slate-500">
               Connect your study timetable to Google Calendar and configure smart reminders so you never miss a revision session.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             
             {/* Google Calendar & Export Card */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-5">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                  <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
                     <Calendar size={16} />
                   </span>
                   <div>
@@ -1556,7 +1554,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                     setCalendarConnected(next);
                     localStorage.setItem('korsiq_calendar_connected', next.toString());
                   }}
-                  className={`px-3 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                     calendarConnected 
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
                       : 'bg-slate-100 text-slate-600 border border-slate-200'
@@ -1571,23 +1569,23 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                   Export your full recurring study schedule into Google Calendar with RFC-5545 compliant `.ics` formatting, including custom alarm triggers and course instructions.
                 </p>
 
-                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-150 space-y-1.5">
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-150 space-y-1.5">
                   <div className="flex justify-between">
                     <span className="text-slate-400">Local Time Zone:</span>
-                    <span className="font-bold text-slate-800 font-mono">
+                    <span className="font-semibold text-slate-800 font-mono">
                       {Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Total Timetable Sessions:</span>
-                    <span className="font-bold text-slate-800">{plannedTimetable.length || schedule.length} Sessions</span>
+                    <span className="font-semibold text-slate-800">{plannedTimetable.length || schedule.length} Sessions</span>
                   </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-2 pt-2">
                   <button
                     onClick={handleExportIcs}
-                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                    className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs"
                   >
                     <Download size={14} />
                     <span>{copiedIcs ? 'ICS Downloaded!' : 'Download Complete Schedule (.ICS)'}</span>
@@ -1596,7 +1594,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                     href="https://calendar.google.com/calendar/r/settings/export"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs"
                   >
                     <ExternalLink size={14} />
                     <span>Google Calendar Import</span>
@@ -1606,9 +1604,9 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             </div>
 
             {/* Smart Study Notification Preferences */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-5">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
               <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
-                <span className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
                   <Bell size={16} />
                 </span>
                 <div>
@@ -1619,17 +1617,17 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
               <div className="space-y-4 text-xs">
                 {/* Browser Push Permission */}
-                <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-150">
+                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-150">
                   <div>
-                    <span className="font-bold text-slate-900 block">Browser Push Notifications</span>
+                    <span className="font-semibold text-slate-900 block">Browser Push Notifications</span>
                     <span className="text-[11px] text-slate-500">Receive system notifications when a session approaches</span>
                   </div>
                   <button
                     onClick={requestBrowserPush}
-                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
                       browserPushEnabled 
                         ? 'bg-emerald-100 text-emerald-800' 
-                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
                     {browserPushEnabled ? 'Enabled' : 'Enable'}
@@ -1638,7 +1636,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
                 {/* Reminder Timing Interval */}
                 <div className="space-y-2">
-                  <label className="font-bold text-slate-700 block uppercase text-[10px] tracking-wider">
+                  <label className="font-semibold text-slate-700 block uppercase text-[10px] tracking-wider">
                     Reminder Notification Timing
                   </label>
                   <div className="grid grid-cols-3 gap-2">
@@ -1657,9 +1655,9 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                             });
                           }
                         }}
-                        className={`py-2 rounded-xl border text-center font-bold text-xs transition-colors cursor-pointer ${
+                        className={`py-2 rounded-lg border text-center font-semibold text-xs transition-colors cursor-pointer ${
                           reminderInterval === mins 
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700' 
+                            ? 'bg-blue-50 border-blue-200 text-blue-700' 
                             : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                         }`}
                       >
@@ -1670,15 +1668,15 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                 </div>
 
                 {/* Examination Countdown Reminder */}
-                <div className="space-y-1.5 pt-2">
-                  <label className="font-bold text-slate-700 block uppercase text-[10px] tracking-wider">
+                <div className="space-y-1.5 pt-1">
+                  <label className="font-semibold text-slate-700 block uppercase text-[10px] tracking-wider">
                     Upcoming Examination Date
                   </label>
                   <input
                     type="date"
                     value={academicConfig.examDate || ''}
                     onChange={e => updateAcademicConfig({ examDate: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
                   />
                   <p className="text-[10px] text-slate-400 italic">
                     KorsIQ dispatches 1-day advance revision countdown alerts prior to registered exams.
@@ -1694,12 +1692,12 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
       {/* ---------------- REVIEW EXTRACTED TRANSCRIPT MODAL ---------------- */}
       {showReviewModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-2xl p-6 rounded-3xl shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-xl border border-slate-200 space-y-4 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
             
             <div className="flex justify-between items-center pb-3 border-b border-slate-100">
               <div>
-                <h3 className="text-lg font-serif font-bold text-slate-900">Review Extracted Academic Results</h3>
+                <h3 className="text-base font-serif font-bold text-slate-900">Review Extracted Academic Results</h3>
                 <p className="text-xs text-slate-500">
                   Verify course credit units and grades extracted from your document before adding to your official records.
                 </p>
@@ -1708,25 +1706,25 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                 onClick={() => setShowReviewModal(false)}
                 className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-700">Semester Label:</label>
+                <label className="text-xs font-semibold text-slate-700">Semester Label:</label>
                 <input
                   type="text"
                   value={transcriptSemesterLabel}
                   onChange={e => setTranscriptSemesterLabel(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800"
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-800"
                 />
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
-                    <tr className="text-slate-400 uppercase text-[9px] font-bold border-b border-slate-100">
+                    <tr className="text-slate-400 uppercase text-[9px] font-semibold border-b border-slate-100">
                       <th className="pb-2">Course Code</th>
                       <th className="pb-2">Units</th>
                       <th className="pb-2">Grade</th>
@@ -1759,7 +1757,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                               updated[idx].creditUnits = parseInt(e.target.value, 10) || 1;
                               setExtractedCoursesReview(updated);
                             }}
-                            className="bg-slate-50 border border-slate-200 rounded px-2 py-1 font-bold text-xs w-16 text-center"
+                            className="bg-slate-50 border border-slate-200 rounded px-2 py-1 font-semibold text-xs w-16 text-center"
                           />
                         </td>
                         <td className="py-2">
@@ -1770,7 +1768,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                               updated[idx].grade = e.target.value.toUpperCase();
                               setExtractedCoursesReview(updated);
                             }}
-                            className="bg-slate-50 border border-slate-200 rounded px-2 py-1 font-bold text-xs font-mono"
+                            className="bg-slate-50 border border-slate-200 rounded px-2 py-1 font-semibold text-xs font-mono"
                           >
                             <option value="A">A</option>
                             <option value="B">B</option>
@@ -1803,7 +1801,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                     { code: 'COURSE', creditUnits: 3, grade: 'A' }
                   ]);
                 }}
-                className="text-xs text-indigo-600 font-bold hover:underline cursor-pointer"
+                className="text-xs text-blue-600 font-semibold hover:underline cursor-pointer"
               >
                 + Add Another Course Row
               </button>
@@ -1812,14 +1810,14 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
               <button
                 onClick={() => setShowReviewModal(false)}
-                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmTranscript}
                 disabled={extractedCoursesReview.length === 0}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs"
               >
                 Save & Add to Academic Records
               </button>

@@ -867,29 +867,27 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {/* VIEW 1: MAIN DASHBOARD & DOCUMENT LIST                    */}
       {/* ========================================================= */}
       {!activeDocument && (
-        <div className="space-y-8">
-          {/* Top Banner / Studio Branding */}
-          <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 rounded-3xl p-6 sm:p-8 text-white relative overflow-hidden shadow-2xl border border-slate-800">
-            <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-radial from-indigo-500/10 via-transparent to-transparent pointer-events-none" />
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-2 max-w-2xl">
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/20 text-indigo-300 rounded-full text-xs font-bold uppercase tracking-widest border border-indigo-400/30">
-                  <Sparkles size={12} className="text-indigo-400" />
-                  <span>KorsIQ Academic Studio</span>
-                  <span className="bg-amber-400 text-slate-950 text-[9px] px-1.5 py-0.2 rounded font-black">PRO</span>
+        <div className="space-y-6">
+          {/* Top Clean Header / Studio Overview */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="space-y-1.5 max-w-2xl">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-md text-[11px] font-semibold">
+                  <Sparkles size={12} />
+                  <span>Academic Studio</span>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-serif font-bold tracking-tight text-white leading-tight">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                   Academic Planning, Writing &amp; Review Studio
                 </h1>
-                <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
-                  Formulate tailored academic plans, inspect and approve outlines before generation, draft section-by-section with genuine reference intelligence, and export publication-ready Word DOCX and PDF documents.
+                <p className="text-slate-500 text-xs sm:text-sm leading-relaxed">
+                  Formulate tailored academic plans, review and approve outlines before generation, draft section-by-section with genuine source citations, and export formatted Word (.docx) and PDF documents.
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 shrink-0">
+              <div className="flex items-center gap-3 shrink-0">
                 <button
                   onClick={handleStartCreation}
-                  className="px-5 py-3 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
                 >
                   <Plus size={16} />
                   <span>New Document</span>
@@ -898,46 +896,46 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             </div>
 
             {/* Quick Metrics Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-8 pt-6 border-t border-slate-800/80">
-              <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Papers</p>
-                <p className="text-xl font-bold text-white mt-0.5">{documents.length}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 border border-slate-200/60 dark:border-slate-800">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Active Papers</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">{documents.length}</p>
               </div>
-              <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Words Generated</p>
-                <p className="text-xl font-bold text-indigo-300 mt-0.5">{overallWordCount.toLocaleString()}</p>
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 border border-slate-200/60 dark:border-slate-800">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Words Written</p>
+                <p className="text-lg font-bold text-blue-600 dark:text-blue-400 mt-0.5">{overallWordCount.toLocaleString()}</p>
               </div>
-              <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Doc Types</p>
-                <p className="text-xl font-bold text-white mt-0.5">{DOCUMENT_TYPES.length} Supported</p>
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 border border-slate-200/60 dark:border-slate-800">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Document Types</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">{DOCUMENT_TYPES.length} formats</p>
               </div>
-              <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Export Formats</p>
-                <p className="text-xl font-bold text-emerald-400 mt-0.5">DOCX &amp; PDF</p>
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 border border-slate-200/60 dark:border-slate-800">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Supported Exports</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">Word &amp; PDF</p>
               </div>
             </div>
           </div>
 
           {/* Search, Filter & Quick Action Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search manuscripts by title, course..."
-                className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs font-medium outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 transition-all"
+                placeholder="Search documents by title or subject..."
+                className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors"
               />
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               <button
                 onClick={() => setTypeFilter('all')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                   typeFilter === 'all'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
                 }`}
               >
                 All
@@ -946,10 +944,10 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                 <button
                   key={t}
                   onClick={() => setTypeFilter(t)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                     typeFilter === t
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
                   }`}
                 >
                   {t.replace('_', ' ')}
@@ -960,31 +958,31 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
 
           {/* Document Cards Grid */}
           {isLoadingDocs ? (
-            <div className="p-12 text-center space-y-3">
-              <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Loading Academic Manuscripts...</p>
+            <div className="p-12 text-center space-y-2">
+              <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-xs text-slate-400 font-medium">Loading documents...</p>
             </div>
           ) : filteredDocuments.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-10 text-center space-y-4">
-              <div className="w-14 h-14 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mx-auto">
-                <FileText size={28} />
+            <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl p-10 text-center space-y-3">
+              <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-xl flex items-center justify-center mx-auto">
+                <FileText size={24} />
               </div>
               <div className="max-w-md mx-auto space-y-1">
-                <h3 className="font-serif font-bold text-lg text-slate-900 dark:text-white">No academic documents yet</h3>
+                <h3 className="font-semibold text-base text-slate-900 dark:text-white">No academic documents yet</h3>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Start your first university assignment, term paper, or dissertation. KorsIQ generates custom chapter outlines based on your assignment instructions.
+                  Start your first assignment, term paper, or dissertation outline. KorsIQ structures chapters based on your course syllabus and assignment instructions.
                 </p>
               </div>
               <button
                 onClick={handleStartCreation}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/10"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                <Plus size={16} />
-                <span>Create New Paper</span>
+                <Plus size={15} />
+                <span>Create New Document</span>
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredDocuments.map((doc) => {
                 const progressPct = Math.min(100, Math.round(((doc.currentWordCount || 0) / (doc.targetWordCount || 1)) * 100));
                 const statusColor =
@@ -994,52 +992,52 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     ? 'bg-amber-50 text-amber-700 border-amber-200'
                     : doc.status === 'planning'
                     ? 'bg-rose-50 text-rose-700 border-rose-200'
-                    : 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                    : 'bg-blue-50 text-blue-700 border-blue-200';
 
                 return (
                   <div
                     key={doc.id}
                     onClick={() => setActiveDocId(doc.id)}
-                    className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all duration-200 flex flex-col justify-between group cursor-pointer"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs hover:border-blue-300 dark:hover:border-blue-700 transition-all flex flex-col justify-between group cursor-pointer"
                   >
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                           {doc.docType.replace('_', ' ')}
                         </span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusColor}`}>
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${statusColor}`}>
                           {doc.status.replace('_', ' ')}
                         </span>
                       </div>
 
                       <div className="space-y-1">
-                        <h3 className="font-serif font-bold text-base text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors line-clamp-2">
+                        <h3 className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors line-clamp-2">
                           {doc.title}
                         </h3>
                         {doc.subject && (
-                          <p className="text-xs text-slate-400 font-medium truncate">
+                          <p className="text-xs text-slate-500 font-medium truncate">
                             {doc.subject}
                           </p>
                         )}
                       </div>
                     </div>
 
-                    <div className="space-y-3 pt-5 mt-4 border-t border-slate-100 dark:border-slate-800/80">
+                    <div className="space-y-2 pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
                       <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                        <div className="flex items-center justify-between text-xs text-slate-500">
                           <span>{doc.currentWordCount.toLocaleString()} / {doc.targetWordCount.toLocaleString()} words</span>
-                          <span className="font-bold text-slate-700 dark:text-slate-300">{progressPct}%</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">{progressPct}%</span>
                         </div>
                         <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                            className="h-full bg-blue-600 rounded-full transition-all duration-300"
                             style={{ width: `${progressPct}%` }}
                           />
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between pt-1">
-                        <span className="text-[10px] text-slate-400">
+                        <span className="text-[11px] text-slate-400">
                           {doc.citationStyle} • {doc.sections.length} Sections
                         </span>
 
@@ -1051,7 +1049,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                               handleDuplicateDocument(doc.id);
                             }}
                             title="Duplicate Document"
-                            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                           >
                             <Copy size={14} />
                           </button>
@@ -1062,7 +1060,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                               handleDeleteDocument(doc.id);
                             }}
                             title="Delete Document"
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950 cursor-pointer"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -1087,38 +1085,38 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
           <div className="flex items-center justify-between gap-4">
             <button
               onClick={() => setActiveDocId(null)}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 dark:hover:text-white uppercase tracking-wider cursor-pointer transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
             >
               <ArrowLeft size={16} />
               <span>Back to Documents</span>
             </button>
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-600 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 px-3 py-1 rounded-full">
+            <span className="text-xs font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 px-3 py-1 rounded-md">
               Outline Approval Required
             </span>
           </div>
 
           {/* Outline Inspection Card */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 sm:p-8 space-y-6 shadow-xs">
             <div className="space-y-2">
-              <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">
+              <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
                 {activeDocument.docType.replace('_', ' ')} • {activeDocument.citationStyle} Citation
               </span>
-              <h2 className="font-serif font-bold text-2xl text-slate-950 dark:text-white">
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
                 {activeDocument.title}
               </h2>
               {activeDocument.metadata?.abstract && (
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300 leading-relaxed italic">
-                  <strong>AI Strategic Plan: </strong>
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200/60 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  <strong className="text-slate-900 dark:text-white">Strategic Plan: </strong>
                   {activeDocument.metadata.abstract}
                 </div>
               )}
             </div>
 
-            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 rounded-2xl flex items-start gap-3">
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-lg flex items-start gap-3">
               <ShieldAlert size={18} className="text-amber-600 shrink-0 mt-0.5" />
               <div className="space-y-1 text-xs">
-                <p className="font-bold text-amber-900 dark:text-amber-300">
-                  Student Verification Mandatory Before Generation
+                <p className="font-semibold text-amber-900 dark:text-amber-200">
+                  Outline Verification Mandatory Before Generation
                 </p>
                 <p className="text-amber-800/90 dark:text-amber-300/80 leading-relaxed">
                   You are in complete control of this manuscript. Review the recommended structure below, reorder chapters, edit titles, add custom guidance, or remove unwanted sections. KorsIQ will only generate approved sections.
@@ -1129,12 +1127,12 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             {/* Editable Outline List */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="font-serif font-bold text-base text-slate-900 dark:text-white">
-                  Document Outline &amp; Chapters ({activeDocument.outline.length} Sections)
+                <h3 className="font-semibold text-sm text-slate-900 dark:text-white">
+                  Document Outline ({activeDocument.outline.length} Sections)
                 </h3>
                 <button
                   onClick={handleAddOutlineItem}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1 cursor-pointer"
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 cursor-pointer"
                 >
                   <Plus size={14} />
                   <span>Add Section</span>
@@ -1145,18 +1143,18 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                 {activeDocument.outline.map((item, idx) => (
                   <div
                     key={item.id}
-                    className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl space-y-3 transition-all"
+                    className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 rounded-lg space-y-3 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-2.5 flex-1">
-                        <span className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center justify-center shrink-0">
+                        <span className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center shrink-0">
                           {idx + 1}
                         </span>
                         <input
                           type="text"
                           value={item.title}
                           onChange={(e) => handleUpdateOutlineItemTitle(item.id, e.target.value)}
-                          className="font-serif font-bold text-sm text-slate-900 dark:text-white bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-600 focus:outline-none w-full"
+                          className="font-semibold text-sm text-slate-900 dark:text-white bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-600 focus:outline-none w-full"
                         />
                       </div>
 
@@ -1198,20 +1196,20 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                         </p>
                       )}
                       {item.rationale && (
-                        <div className="text-[11px] text-indigo-700 dark:text-indigo-400 bg-indigo-50/60 dark:bg-indigo-950/40 p-2 rounded-xl border border-indigo-100 dark:border-indigo-900/60">
-                          <span className="font-bold">Why AI Recommends This: </span>
+                        <div className="text-xs text-blue-800 dark:text-blue-300 bg-blue-50/70 dark:bg-blue-950/40 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/60 leading-relaxed">
+                          <span className="font-semibold">Why AI Recommends This: </span>
                           {item.rationale}
                         </div>
                       )}
 
                       {/* Personal Student Guidance input */}
-                      <div className="pt-2">
+                      <div className="pt-1">
                         <input
                           type="text"
                           value={item.personalInstructions || ''}
                           onChange={(e) => handleUpdateOutlineItemInstructions(item.id, e.target.value)}
-                          placeholder="Add custom instructions for this section (optional, e.g. cite 2023 IEEE papers)..."
-                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-600"
+                          placeholder="Add custom instructions for this section (optional)..."
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:border-blue-600"
                         />
                       </div>
                     </div>
@@ -1221,7 +1219,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             </div>
 
             {/* Approval Action Footer */}
-            <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="pt-5 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="text-xs text-slate-500 font-medium">
                 Allocated word goal: <strong>{activeDocument.targetWordCount.toLocaleString()} words</strong> across {activeDocument.outline.length} sections.
               </div>
@@ -1229,7 +1227,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
               <button
                 type="button"
                 onClick={handleApproveEntireOutline}
-                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/20 transition-all"
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors"
               >
                 <Check size={16} />
                 <span>Approve Outline &amp; Begin Writing</span>
@@ -1246,20 +1244,20 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {activeDocument && activeDocument.status !== 'planning' && (
         <div className="space-y-4">
           {/* Top Control Bar */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-center gap-3">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setActiveDocId(null)}
-                className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 title="Back to Documents"
               >
                 <ArrowLeft size={16} />
               </button>
-              <div>
-                <h2 className="font-serif font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate max-w-xs sm:max-w-md">
+              <div className="min-w-0">
+                <h2 className="font-semibold text-sm text-slate-900 dark:text-white truncate max-w-xs sm:max-w-md">
                   {activeDocument.title}
                 </h2>
-                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                <p className="text-[11px] text-slate-500 font-medium">
                   {activeDocument.docType.replace('_', ' ')} • {activeDocument.citationStyle} • {activeDocument.currentWordCount.toLocaleString()} words
                 </p>
               </div>
@@ -1269,68 +1267,68 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
               <button
                 onClick={handleBatchGenerateAll}
                 disabled={isSectionGenerating || !!batchProgress}
-                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                <Wand2 size={14} className="text-indigo-600" />
+                <Wand2 size={13} className="text-blue-600" />
                 <span>Batch Generate All</span>
               </button>
 
               <button
                 onClick={handleRunDocumentReview}
                 disabled={isReviewLoading}
-                className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                <FileCheck size={14} />
-                <span>Run Audit</span>
+                <FileCheck size={13} />
+                <span>Review Audit</span>
               </button>
 
               <button
                 onClick={() => setShowExportModal(true)}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/10"
+                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                <Download size={14} />
-                <span>Export DOCX / PDF</span>
+                <Download size={13} />
+                <span>Export (.docx / PDF)</span>
               </button>
             </div>
           </div>
 
-          {/* Batch Progress Modal */}
+          {/* Batch Progress Bar */}
           {batchProgress && (
-            <div className="p-4 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-2xl flex items-center justify-between gap-4">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900 rounded-lg flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
                 <div className="text-xs">
-                  <p className="font-bold text-indigo-900 dark:text-indigo-200">
+                  <p className="font-semibold text-blue-900 dark:text-blue-200">
                     Drafting Section {batchProgress.current} of {batchProgress.total}
                   </p>
-                  <p className="text-indigo-700 dark:text-indigo-400 truncate max-w-sm">
+                  <p className="text-blue-700 dark:text-blue-400 truncate max-w-sm">
                     {batchProgress.title}
                   </p>
                 </div>
               </div>
-              <div className="text-xs font-bold text-indigo-600">
+              <div className="text-xs font-semibold text-blue-600">
                 {Math.round((batchProgress.current / batchProgress.total) * 100)}%
               </div>
             </div>
           )}
 
           {/* 3-COLUMN WORKSPACE GRID */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[650px]">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[640px]">
             {/* COLUMN 1: LEFT SIDEBAR - OUTLINE & NAVIGATION (3 Cols) */}
-            <div className="lg:col-span-3 space-y-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 space-y-4 h-full flex flex-col justify-between shadow-xs">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Sections ({activeDocument.sections.length})
+            <div className="lg:col-span-3 space-y-3">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-3 h-full flex flex-col justify-between shadow-xs">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                      Outline ({activeDocument.sections.length})
                     </span>
-                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-full">
-                      {Math.min(100, Math.round((activeDocument.currentWordCount / activeDocument.targetWordCount) * 100))}% Complete
+                    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded">
+                      {Math.min(100, Math.round((activeDocument.currentWordCount / activeDocument.targetWordCount) * 100))}%
                     </span>
                   </div>
 
                   {/* Section List */}
-                  <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
+                  <div className="space-y-1 max-h-[500px] overflow-y-auto pr-1">
                     {activeDocument.sections.map((sec, idx) => {
                       const isActive = sec.id === activeSectionId;
                       const hasContent = sec.content && sec.content.trim().length > 0;
@@ -1340,28 +1338,28 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                           key={sec.id}
                           type="button"
                           onClick={() => setActiveSectionId(sec.id)}
-                          className={`w-full text-left p-3 rounded-2xl transition-all cursor-pointer flex items-start gap-2.5 ${
+                          className={`w-full text-left p-2.5 rounded-lg transition-colors cursor-pointer flex items-start gap-2.5 ${
                             isActive
-                              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                              : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold border-l-2 border-blue-600'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           <span
-                            className={`w-5 h-5 rounded-md text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5 ${
+                            className={`w-5 h-5 rounded text-[10px] font-semibold flex items-center justify-center shrink-0 mt-0.5 ${
                               isActive
-                                ? 'bg-white/20 text-white'
+                                ? 'bg-blue-600 text-white'
                                 : hasContent
                                 ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-slate-200 text-slate-600'
+                                : 'bg-slate-100 text-slate-600'
                             }`}
                           >
                             {hasContent ? '✓' : idx + 1}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold truncate leading-tight">
+                            <p className="text-xs truncate leading-tight">
                               {sec.title}
                             </p>
-                            <p className={`text-[10px] mt-0.5 ${isActive ? 'text-indigo-200' : 'text-slate-400'}`}>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
                               {sec.wordCount || 0} words
                             </p>
                           </div>
@@ -1371,44 +1369,44 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </div>
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-[11px] text-slate-500 space-y-1 border border-slate-100 dark:border-slate-800">
-                  <div className="flex justify-between font-semibold">
-                    <span>Target Word Goal:</span>
-                    <span>{activeDocument.targetWordCount.toLocaleString()}</span>
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-xs text-slate-500 space-y-1 border border-slate-200/60 dark:border-slate-800">
+                  <div className="flex justify-between">
+                    <span>Goal:</span>
+                    <span>{activeDocument.targetWordCount.toLocaleString()} words</span>
                   </div>
                   <div className="flex justify-between font-semibold">
-                    <span>Written So Far:</span>
-                    <span className="text-indigo-600 dark:text-indigo-400 font-bold">
-                      {activeDocument.currentWordCount.toLocaleString()}
+                    <span>Written:</span>
+                    <span className="text-blue-600 dark:text-blue-400">
+                      {activeDocument.currentWordCount.toLocaleString()} words
                     </span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* COLUMN 2: CENTER - RICH DOCUMENT EDITOR (6 Cols) */}
-            <div className="lg:col-span-6 space-y-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xs flex flex-col h-full">
+            {/* COLUMN 2: CENTER - NOTION / WORD PAPER CANVAS (6 Cols) */}
+            <div className="lg:col-span-6 space-y-3">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4 shadow-xs flex flex-col h-full">
                 {/* Active Section Header */}
                 {(() => {
                   const currentSec = activeDocument.sections.find((s) => s.id === activeSectionId);
                   const currentOutline = activeDocument.outline.find((o) => o.id === currentSec?.outlineItemId);
 
                   return (
-                    <div className="space-y-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <div className="space-y-1.5 pb-3 border-b border-slate-100 dark:border-slate-800">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded">
                           Section {currentSec?.order || 1} of {activeDocument.sections.length}
                         </span>
                         <span className="text-xs text-slate-400 font-medium">
-                          Target: ~{currentOutline?.targetWords || 400} words
+                          Goal: ~{currentOutline?.targetWords || 400} words
                         </span>
                       </div>
-                      <h3 className="font-serif font-bold text-lg text-slate-900 dark:text-white">
+                      <h3 className="font-semibold text-base text-slate-900 dark:text-white">
                         {currentSec?.title || 'Section Editor'}
                       </h3>
                       {currentOutline?.description && (
-                        <p className="text-xs text-slate-500 italic">
+                        <p className="text-xs text-slate-500 leading-relaxed">
                           {currentOutline.description}
                         </p>
                       )}
@@ -1416,21 +1414,21 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   );
                 })()}
 
-                {/* AI Section Generation Tools */}
-                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                {/* Ribbon Toolbar */}
+                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200/60 dark:border-slate-800">
                   <button
                     onClick={() => handleGenerateActiveSection('generate')}
                     disabled={isSectionGenerating}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                    className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                   >
                     <Wand2 size={12} />
-                    <span>{isSectionGenerating ? 'Generating...' : 'Generate Draft'}</span>
+                    <span>{isSectionGenerating ? 'Generating...' : 'Generate Section'}</span>
                   </button>
 
                   <button
                     onClick={() => handleGenerateActiveSection('expand')}
                     disabled={isSectionGenerating || !editorText}
-                    className="px-2.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-[11px] font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
+                    className="px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
                   >
                     Expand
                   </button>
@@ -1438,15 +1436,15 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   <button
                     onClick={() => handleGenerateActiveSection('academic_tone')}
                     disabled={isSectionGenerating || !editorText}
-                    className="px-2.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-[11px] font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
+                    className="px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
                   >
-                    Academic Tone
+                    Tone
                   </button>
 
                   <button
                     onClick={() => handleGenerateActiveSection('grammar')}
                     disabled={isSectionGenerating || !editorText}
-                    className="px-2.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-[11px] font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
+                    className="px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
                   >
                     Grammar
                   </button>
@@ -1454,14 +1452,14 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   <button
                     onClick={() => handleGenerateActiveSection('regenerate')}
                     disabled={isSectionGenerating}
-                    className="px-2.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-[11px] font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40 ml-auto"
+                    className="p-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-600 dark:text-slate-300 rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40 ml-auto"
                     title="Regenerate Section"
                   >
-                    <RefreshCw size={12} />
+                    <RefreshCw size={13} />
                   </button>
                 </div>
 
-                {/* Editor Textarea */}
+                {/* Editor Textarea (Clean Paper Canvas) */}
                 <div className="flex-1 flex flex-col relative">
                   <textarea
                     value={editorText}
@@ -1474,23 +1472,23 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                         setEditorSelectionRange({ start: target.selectionStart, end: target.selectionEnd });
                       }
                     }}
-                    placeholder="Draft your section content here in scholarly prose, or click 'Generate Draft' to create the initial section based on your approved outline and uploaded reference materials..."
-                    className="w-full flex-1 min-h-[380px] p-4 bg-slate-50/50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-2xl font-serif text-sm leading-relaxed text-slate-800 dark:text-slate-200 outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-indigo-600 transition-all resize-none custom-scrollbar"
+                    placeholder="Draft section content here in scholarly prose, or click 'Generate Section' to compose the draft based on your approved outline and research citations..."
+                    className="w-full flex-1 min-h-[380px] p-4 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg font-serif text-sm leading-relaxed text-slate-900 dark:text-slate-100 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors resize-none"
                   />
 
                   {/* Selected Text Floating Helper */}
                   {selectedTextSnippet && (
-                    <div className="absolute bottom-4 left-4 right-4 bg-slate-950 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between gap-3 text-xs border border-slate-800">
+                    <div className="absolute bottom-4 left-4 right-4 bg-slate-900 text-white p-3 rounded-lg shadow-xl flex items-center justify-between gap-3 text-xs border border-slate-800">
                       <div className="truncate flex-1">
-                        <span className="text-indigo-400 font-bold">Selected: </span>
+                        <span className="text-blue-400 font-semibold">Selected: </span>
                         <span className="italic truncate">"{selectedTextSnippet}"</span>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           onClick={() => handleContextualAssist('Elevate academic tone and vocabulary')}
-                          className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-semibold cursor-pointer"
                         >
-                          Scholarly Rewrite
+                          Rewrite
                         </button>
                         <button
                           onClick={() => setSelectedTextSnippet('')}
@@ -1504,23 +1502,23 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                 </div>
 
                 {/* Editor Footer Status */}
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <span>
-                    Words in section: <strong className="text-slate-700 dark:text-slate-300">{editorText.trim().split(/\s+/).filter(Boolean).length}</strong>
+                    Words in section: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{editorText.trim().split(/\s+/).filter(Boolean).length}</strong>
                   </span>
-                  <span>Autosaved locally &amp; to cloud</span>
+                  <span>Autosaved to cloud</span>
                 </div>
               </div>
             </div>
 
             {/* COLUMN 3: RIGHT SIDEBAR - TABBED ASSISTANT (3 Cols) */}
-            <div className="lg:col-span-3 space-y-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 space-y-4 h-full flex flex-col shadow-xs">
+            <div className="lg:col-span-3 space-y-3">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-3 h-full flex flex-col shadow-xs">
                 {/* Tabs */}
-                <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl text-[10px] font-bold uppercase tracking-wider">
+                <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-semibold">
                   <button
                     onClick={() => setActiveRightTab('assistant')}
-                    className={`flex-1 py-1.5 rounded-xl cursor-pointer transition-colors ${
+                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
                       activeRightTab === 'assistant' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
                     }`}
                   >
@@ -1528,7 +1526,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveRightTab('references')}
-                    className={`flex-1 py-1.5 rounded-xl cursor-pointer transition-colors ${
+                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
                       activeRightTab === 'references' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
                     }`}
                   >
@@ -1536,7 +1534,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveRightTab('review')}
-                    className={`flex-1 py-1.5 rounded-xl cursor-pointer transition-colors ${
+                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
                       activeRightTab === 'review' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
                     }`}
                   >
@@ -1544,11 +1542,11 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveRightTab('versions')}
-                    className={`flex-1 py-1.5 rounded-xl cursor-pointer transition-colors ${
+                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
                       activeRightTab === 'versions' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
                     }`}
                   >
-                    Versions
+                    History
                   </button>
                 </div>
 
@@ -1556,16 +1554,16 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                 {activeRightTab === 'assistant' && (
                   <div className="space-y-3 flex-1 flex flex-col justify-between">
                     <div className="space-y-3">
-                      <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-indigo-900/60 text-xs space-y-1">
-                        <p className="font-bold text-indigo-900 dark:text-indigo-300">Contextual Writing AI</p>
-                        <p className="text-indigo-800 dark:text-indigo-300/80 text-[11px]">
-                          Select text in your editor to transform specific paragraphs, or request section-wide improvements below.
+                      <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-lg border border-blue-100 dark:border-blue-900/60 text-xs space-y-1">
+                        <p className="font-semibold text-blue-900 dark:text-blue-300">Contextual Writing Assistant</p>
+                        <p className="text-blue-800 dark:text-blue-300/80 text-[11px] leading-relaxed">
+                          Select text in the editor to rewrite specific passages, or choose a quick action below.
                         </p>
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          Quick Actions
+                        <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                          Suggested Improvements
                         </label>
                         <div className="space-y-1">
                           {[
@@ -1578,7 +1576,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                               key={chip}
                               onClick={() => handleContextualAssist(chip)}
                               disabled={isAssistLoading}
-                              className="w-full text-left p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-indigo-50 dark:hover:bg-indigo-950 text-[11px] text-slate-700 dark:text-slate-300 hover:text-indigo-600 font-medium transition-colors cursor-pointer border border-slate-100 dark:border-slate-800"
+                              className="w-full text-left p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 hover:bg-blue-50 dark:hover:bg-blue-950 text-xs text-slate-700 dark:text-slate-300 hover:text-blue-600 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-800"
                             >
                               + {chip}
                             </button>
@@ -1591,8 +1589,8 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       <textarea
                         value={contextualAssistPrompt}
                         onChange={(e) => setContextualAssistPrompt(e.target.value)}
-                        placeholder="Custom instruction for AI (e.g. 'Draft 2 sentences bridging to Chapter 3')..."
-                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none focus:border-indigo-600 border border-slate-200 dark:border-slate-700 resize-none h-20"
+                        placeholder="Instruction for AI assistant (e.g. 'Add a smooth transition to section 3')..."
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs outline-none focus:border-blue-600 border border-slate-200 dark:border-slate-700 resize-none h-20"
                       />
                       <button
                         onClick={() => {
@@ -1602,7 +1600,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                           }
                         }}
                         disabled={isAssistLoading || !contextualAssistPrompt.trim()}
-                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer"
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                       >
                         {isAssistLoading ? 'Processing...' : 'Apply Instruction'}
                       </button>
@@ -1615,25 +1613,25 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   <div className="space-y-3 flex-1 flex flex-col justify-between">
                     <div className="space-y-2.5">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                           Linked Sources ({activeDocument.references.length})
                         </span>
                         <button
                           onClick={() => setShowAddRefModal(true)}
-                          className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer"
+                          className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                         >
                           + Add Source
                         </button>
                       </div>
 
                       {activeDocument.references.length === 0 ? (
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-center text-xs text-slate-400 space-y-2">
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg text-center text-xs text-slate-400 space-y-2">
                           <p>No reference materials linked yet.</p>
                           <button
                             onClick={() => setShowAddRefModal(true)}
-                            className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+                            className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-semibold cursor-pointer"
                           >
-                            Add First Source
+                            Add Source
                           </button>
                         </div>
                       ) : (
@@ -1641,16 +1639,16 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                           {activeDocument.references.map((ref) => (
                             <div
                               key={ref.id}
-                              className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-800 rounded-2xl space-y-1.5 text-xs"
+                              className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5 text-xs"
                             >
                               <div className="flex items-start justify-between gap-2">
-                                <p className="font-bold text-slate-900 dark:text-white line-clamp-2">
+                                <p className="font-semibold text-slate-900 dark:text-white line-clamp-2">
                                   {ref.title}
                                 </p>
                                 <button
                                   type="button"
                                   onClick={() => handleInsertCitation(ref)}
-                                  className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-md text-[10px] font-bold hover:bg-indigo-200 cursor-pointer shrink-0"
+                                  className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-xs font-semibold hover:bg-blue-100 cursor-pointer shrink-0"
                                   title="Insert in-text citation at cursor"
                                 >
                                   Cite
@@ -1660,7 +1658,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                                 {ref.authors} ({ref.year || 'n.d.'})
                               </p>
                               {ref.contentSnippet && (
-                                <p className="text-[10px] text-slate-400 italic line-clamp-2 bg-white dark:bg-slate-900 p-1.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                                <p className="text-[11px] text-slate-400 italic line-clamp-2 bg-white dark:bg-slate-900 p-1.5 rounded border border-slate-100 dark:border-slate-800">
                                   "{ref.contentSnippet}"
                                 </p>
                               )}
@@ -1677,39 +1675,39 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   <div className="space-y-3 flex-1 flex flex-col justify-between">
                     {isReviewLoading ? (
                       <div className="p-8 text-center space-y-2 my-auto">
-                        <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-                        <p className="text-xs text-slate-400 font-semibold">Running 9-Dimension Scholarly Audit...</p>
+                        <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                        <p className="text-xs text-slate-400 font-medium">Running Scholarly Audit...</p>
                       </div>
                     ) : !reviewResult ? (
                       <div className="p-4 text-center space-y-3 my-auto text-xs text-slate-500">
-                        <p>Evaluate your document across grammar, tone, citation integrity, and unsupported claims.</p>
+                        <p>Evaluate your document across grammar, scholarly tone, and citation integrity.</p>
                         <button
                           onClick={handleRunDocumentReview}
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs"
                         >
-                          Start Academic Review
+                          Run Academic Review
                         </button>
                       </div>
                     ) : (
                       <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
                         {/* Score Card */}
-                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-2xl flex items-center justify-between">
+                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg flex items-center justify-between">
                           <div>
-                            <p className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-widest">
-                              Academic Quality
+                            <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                              Quality Score
                             </p>
                             <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
                               {reviewResult.summary}
                             </p>
                           </div>
-                          <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 ml-2">
+                          <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400 ml-2">
                             {reviewResult.academicQualityScore}%
                           </span>
                         </div>
 
                         {/* Suggestions List */}
                         <div className="space-y-2">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                             Suggestions ({reviewResult.suggestions.length})
                           </p>
                           {reviewResult.suggestions.map((sug) => {
@@ -1718,25 +1716,25 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                             return (
                               <div
                                 key={sug.id}
-                                className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 rounded-2xl space-y-2 text-xs"
+                                className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2 text-xs"
                               >
                                 <div className="flex items-center justify-between">
-                                  <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">
+                                  <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
                                     {sug.type}
                                   </span>
-                                  <span className="text-[9px] text-slate-400 capitalize">
+                                  <span className="text-[10px] text-slate-400 capitalize">
                                     {sug.severity}
                                   </span>
                                 </div>
-                                <p className="font-bold text-slate-900 dark:text-white leading-tight">
+                                <p className="font-semibold text-slate-900 dark:text-white leading-tight">
                                   {sug.title}
                                 </p>
-                                <p className="text-[11px] text-slate-500 leading-snug">
+                                <p className="text-slate-500 leading-relaxed text-[11px]">
                                   {sug.explanation}
                                 </p>
 
                                 {sug.suggestedReplacement && (
-                                  <div className="p-2 bg-emerald-50/60 dark:bg-emerald-950/40 rounded-xl border border-emerald-200/60 text-[11px] text-emerald-800 dark:text-emerald-300">
+                                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 rounded border border-emerald-200 text-xs text-emerald-800 dark:text-emerald-300">
                                     <strong>Recommended: </strong>"{sug.suggestedReplacement}"
                                   </div>
                                 )}
@@ -1745,7 +1743,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleDismissReviewSuggestion(sug.id)}
-                                    className="px-2 py-1 text-slate-400 hover:text-slate-600 text-[10px] font-semibold cursor-pointer"
+                                    className="px-2 py-1 text-slate-400 hover:text-slate-600 text-xs font-medium cursor-pointer"
                                   >
                                     Dismiss
                                   </button>
@@ -1753,7 +1751,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleApplyReviewSuggestion(sug)}
-                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold cursor-pointer"
                                     >
                                       Accept
                                     </button>
@@ -1777,13 +1775,13 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                           type="text"
                           value={versionNote}
                           onChange={(e) => setVersionNote(e.target.value)}
-                          placeholder="Note for snapshot (e.g. Before Chapter 3 rewrite)..."
-                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none border border-slate-200 dark:border-slate-700"
+                          placeholder="Note for snapshot..."
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700"
                         />
                         <button
                           onClick={handleSaveVersionSnapshot}
                           disabled={isVersionSaving}
-                          className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                          className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
                         >
                           {isVersionSaving ? 'Saving...' : 'Save Snapshot'}
                         </button>
@@ -1793,15 +1791,15 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                         {versions.map((ver) => (
                           <div
                             key={ver.id}
-                            className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-xs space-y-1"
+                            className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 text-xs space-y-1"
                           >
                             <div className="flex items-center justify-between">
-                              <span className="font-bold text-slate-800 dark:text-slate-200">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">
                                 {ver.wordCount.toLocaleString()} words
                               </span>
                               <button
                                 onClick={() => handleRestoreVersion(ver)}
-                                className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer"
+                                className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                               >
                                 Restore
                               </button>
@@ -1830,20 +1828,20 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {/* MODAL 1: NEW DOCUMENT CREATION WIZARD                     */}
       {/* ========================================================= */}
       {isCreatingDoc && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-2xl w-full p-6 space-y-5 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">
+                <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
                   Step {wizardStep} of 3
                 </span>
-                <h3 className="font-serif font-bold text-xl text-slate-900 dark:text-white">
+                <h3 className="font-semibold text-lg text-slate-900 dark:text-white">
                   {wizardStep === 1 ? 'Manuscript Parameters' : wizardStep === 2 ? 'Assignment Prompt & Instructions' : 'Reference Materials & Sources'}
                 </h3>
               </div>
               <button
                 onClick={() => setIsCreatingDoc(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -1853,7 +1851,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             {wizardStep === 1 && (
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                     Document Title or Working Topic *
                   </label>
                   <input
@@ -1862,13 +1860,13 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     value={newDocTitle}
                     onChange={(e) => setNewDocTitle(e.target.value)}
                     placeholder="e.g. Distributed Consensus in Cloud Infrastructure: An Empirical Comparison"
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium outline-none focus:border-indigo-600"
+                    className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                       Document Type
                     </label>
                     <select
@@ -1879,7 +1877,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                         const match = DOCUMENT_TYPES.find((d) => d.id === t);
                         if (match) setNewDocWords(match.defaultWords);
                       }}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-600"
+                      className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold outline-none focus:border-blue-600"
                     >
                       {DOCUMENT_TYPES.map((dt) => (
                         <option key={dt.id} value={dt.id}>
@@ -1890,13 +1888,13 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                       Citation Style
                     </label>
                     <select
                       value={newDocCitation}
                       onChange={(e) => setNewDocCitation(e.target.value as CitationStyle)}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-600"
+                      className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold outline-none focus:border-blue-600"
                     >
                       {CITATION_STYLES.map((cs) => (
                         <option key={cs.id} value={cs.id}>
@@ -1909,7 +1907,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                       Course Code / Subject
                     </label>
                     <input
@@ -1917,12 +1915,12 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       value={newDocSubject}
                       onChange={(e) => setNewDocSubject(e.target.value)}
                       placeholder="e.g. CSC 401"
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-600"
+                      className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:border-blue-600"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                       Target Word Count Goal
                     </label>
                     <input
@@ -1930,12 +1928,12 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       step={100}
                       value={newDocWords}
                       onChange={(e) => setNewDocWords(Number(e.target.value))}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none focus:border-indigo-600"
+                      className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold outline-none focus:border-blue-600"
                     />
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-4">
+                <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => {
@@ -1945,9 +1943,9 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       }
                       setWizardStep(2);
                     }}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
                   >
-                    <span>Next: Assignment Prompt</span>
+                    <span>Next: Assignment Guidelines</span>
                     <ArrowRight size={14} />
                   </button>
                 </div>
@@ -1958,24 +1956,24 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             {wizardStep === 2 && (
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                     Assignment Instructions / Rubric Guidelines
                   </label>
                   <textarea
                     rows={5}
                     value={newDocInstructions}
                     onChange={(e) => setNewDocInstructions(e.target.value)}
-                    placeholder="Paste your lecturer's assignment instructions, guidelines, specific questions to address, or theoretical expectations here..."
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-600"
+                    placeholder="Paste assignment instructions, questions to address, or theoretical scope here..."
+                    className="w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:border-blue-600 leading-relaxed"
                   />
                   <p className="text-[11px] text-slate-400">
-                    The AI planning engine strictly follows these instructions when structuring chapters.
+                    The planning engine structures chapters based directly on these instructions.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                       Department / Faculty
                     </label>
                     <input
@@ -1983,12 +1981,12 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       value={newDocDepartment}
                       onChange={(e) => setNewDocDepartment(e.target.value)}
                       placeholder="e.g. Department of Computer Science"
-                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none"
+                      className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                       Lecturer / Supervisor Name
                     </label>
                     <input
@@ -1996,23 +1994,23 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       value={newDocLecturer}
                       onChange={(e) => setNewDocLecturer(e.target.value)}
                       placeholder="e.g. Prof. R. Sterling"
-                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none"
+                      className="w-full p-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="flex justify-between pt-4">
+                <div className="flex justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => setWizardStep(1)}
-                    className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-bold uppercase cursor-pointer"
+                    className="px-3 py-1.5 text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer"
                   >
                     Back
                   </button>
                   <button
                     type="button"
                     onClick={() => setWizardStep(3)}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
                   >
                     <span>Next: References</span>
                     <ArrowRight size={14} />
@@ -2024,29 +2022,29 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             {/* STEP 3: Reference Intelligence */}
             {wizardStep === 3 && (
               <div className="space-y-4">
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200">
+                    <h4 className="font-semibold text-xs text-slate-800 dark:text-slate-200">
                       Reference Material ({newDocReferences.length} added)
                     </h4>
                     <button
                       type="button"
                       onClick={() => setShowAddRefModal(true)}
-                      className="text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
+                      className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                     >
                       + Add Reference
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-500">
-                    KorsIQ associates generated arguments with real references. Never fabricates citations.
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    KorsIQ grounds arguments in real references. Never fabricates citations.
                   </p>
                 </div>
 
-                <div className="flex justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => setWizardStep(2)}
-                    className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-bold uppercase cursor-pointer"
+                    className="px-3 py-1.5 text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer"
                   >
                     Back
                   </button>
@@ -2055,16 +2053,16 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     type="button"
                     onClick={handleGenerateOutline}
                     disabled={isPlanningLoading}
-                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/30 disabled:opacity-50"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                   >
                     {isPlanningLoading ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         <span>Formulating Plan &amp; Outline...</span>
                       </>
                     ) : (
                       <>
-                        <Wand2 size={16} />
+                        <Wand2 size={14} />
                         <span>Generate Academic Plan</span>
                       </>
                     )}
@@ -2080,15 +2078,15 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {/* MODAL 2: ADD REFERENCE MODAL                              */}
       {/* ========================================================= */}
       {showAddRefModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-serif font-bold text-base text-slate-900 dark:text-white">
+              <h3 className="font-semibold text-sm text-slate-900 dark:text-white">
                 Add Reference Source
               </h3>
               <button
                 onClick={() => setShowAddRefModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-full cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-md cursor-pointer"
               >
                 <X size={16} />
               </button>
@@ -2096,7 +2094,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
 
             <div className="space-y-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                   Paper / Book Title *
                 </label>
                 <input
@@ -2104,12 +2102,12 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   value={newRefTitle}
                   onChange={(e) => setNewRefTitle(e.target.value)}
                   placeholder="e.g. Deep Residual Learning for Image Recognition"
-                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none border border-slate-200 dark:border-slate-700"
+                  className="w-full p-2 bg-white dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700 focus:border-blue-600"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                   Authors *
                 </label>
                 <input
@@ -2117,25 +2115,25 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   value={newRefAuthors}
                   onChange={(e) => setNewRefAuthors(e.target.value)}
                   placeholder="e.g. He, K., Zhang, X., Ren, S., & Sun, J."
-                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none border border-slate-200 dark:border-slate-700"
+                  className="w-full p-2 bg-white dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700 focus:border-blue-600"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Year of Publication
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Year
                   </label>
                   <input
                     type="text"
                     value={newRefYear}
                     onChange={(e) => setNewRefYear(e.target.value)}
                     placeholder="2023"
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none border border-slate-200 dark:border-slate-700"
+                    className="w-full p-2 bg-white dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700 focus:border-blue-600"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                     DOI / Link
                   </label>
                   <input
@@ -2143,13 +2141,13 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     value={newRefDoi}
                     onChange={(e) => setNewRefDoi(e.target.value)}
                     placeholder="10.1109/CVPR.2016.90"
-                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none border border-slate-200 dark:border-slate-700"
+                    className="w-full p-2 bg-white dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700 focus:border-blue-600"
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                   Relevant Excerpt / Key Findings
                 </label>
                 <textarea
@@ -2157,7 +2155,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   value={newRefSnippet}
                   onChange={(e) => setNewRefSnippet(e.target.value)}
                   placeholder="Paste excerpt or key quotation for the AI to synthesize..."
-                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs outline-none border border-slate-200 dark:border-slate-700 resize-none"
+                  className="w-full p-2 bg-white dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700 resize-none focus:border-blue-600"
                 />
               </div>
             </div>
@@ -2166,14 +2164,14 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAddRefModal(false)}
-                className="px-4 py-2 text-slate-500 text-xs font-semibold cursor-pointer"
+                className="px-3 py-1.5 text-slate-500 text-xs font-semibold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveManualReference}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer"
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
               >
                 Save Reference
               </button>
@@ -2186,87 +2184,87 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {/* MODAL 3: EXPORT & PRINT PREVIEW MODAL                     */}
       {/* ========================================================= */}
       {showExportModal && activeDocument && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full p-6 sm:p-8 space-y-6 shadow-2xl max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-4xl w-full p-6 space-y-5 shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">
-                  Manuscript Export &amp; Print
+                <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+                  Export &amp; Print
                 </span>
-                <h3 className="font-serif font-bold text-xl text-slate-900 dark:text-white">
-                  Document Assembly Preview
+                <h3 className="font-semibold text-base text-slate-900 dark:text-white">
+                  Manuscript Preview
                 </h3>
               </div>
               <button
                 onClick={() => setShowExportModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-md cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
             {/* Quick Export Actions */}
-            <div className="flex flex-wrap items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200/80 dark:border-slate-800">
               <button
                 onClick={handleExportDocx}
                 disabled={isExportingDocx}
-                className="px-5 py-2.5 bg-blue-700 hover:bg-blue-600 active:scale-95 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md shadow-blue-700/20 disabled:opacity-50"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
               >
-                <Download size={14} />
-                <span>{isExportingDocx ? 'Exporting Word...' : 'Microsoft Word (.docx)'}</span>
+                <Download size={13} />
+                <span>{isExportingDocx ? 'Exporting...' : 'Microsoft Word (.docx)'}</span>
               </button>
 
               <button
                 onClick={handlePrintPdf}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/20"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                <Printer size={14} />
+                <Printer size={13} />
                 <span>Print / Save as PDF</span>
               </button>
 
-              <div className="text-xs text-slate-400 ml-auto font-medium">
-                {activeDocument.currentWordCount.toLocaleString()} total words • {activeDocument.citationStyle}
+              <div className="text-xs text-slate-500 ml-auto font-medium">
+                {activeDocument.currentWordCount.toLocaleString()} words • {activeDocument.citationStyle}
               </div>
             </div>
 
             {/* Live Visual Academic Preview */}
-            <div className="p-8 sm:p-12 bg-white text-slate-900 border border-slate-200 rounded-2xl shadow-inner font-serif text-sm space-y-8 max-h-[500px] overflow-y-auto custom-scrollbar">
+            <div className="p-8 sm:p-10 bg-white text-slate-900 border border-slate-200 rounded-lg shadow-inner font-serif text-sm space-y-6 max-h-[480px] overflow-y-auto custom-scrollbar">
               {/* Cover Page */}
-              <div className="text-center space-y-6 pb-12 border-b border-dashed border-slate-300">
-                <p className="text-sm font-bold uppercase tracking-wider">
+              <div className="text-center space-y-4 pb-8 border-b border-dashed border-slate-300">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
                   {activeDocument.metadata?.institution || 'INSTITUTION OF HIGHER LEARNING'}
                 </p>
-                <p className="text-xs uppercase font-medium">
+                <p className="text-[11px] uppercase text-slate-500">
                   {activeDocument.metadata?.faculty || activeDocument.metadata?.department || 'FACULTY OF ACADEMIC STUDIES'}
                 </p>
-                <div className="py-8">
-                  <h1 className="text-2xl font-bold uppercase tracking-wide leading-tight max-w-xl mx-auto">
+                <div className="py-4">
+                  <h1 className="text-xl font-bold uppercase tracking-wide leading-tight max-w-xl mx-auto">
                     {activeDocument.title}
                   </h1>
-                  <p className="text-xs italic mt-3 text-slate-600">
+                  <p className="text-xs italic mt-2 text-slate-600">
                     A {activeDocument.docType.replace('_', ' ').toUpperCase()} SUBMITTED FOR {activeDocument.metadata?.courseCode || activeDocument.subject || 'ACADEMIC COURSE'}
                   </p>
                 </div>
-                <div className="space-y-1 text-xs">
-                  <p className="uppercase text-[11px] text-slate-500 font-sans font-bold">BY</p>
-                  <p className="font-bold text-sm">{activeDocument.metadata?.studentName || profile.name}</p>
-                  {activeDocument.metadata?.studentId && <p>ID: {activeDocument.metadata.studentId}</p>}
+                <div className="space-y-0.5 text-xs">
+                  <p className="text-[10px] text-slate-400 font-sans uppercase">BY</p>
+                  <p className="font-bold">{activeDocument.metadata?.studentName || profile.name}</p>
+                  {activeDocument.metadata?.studentId && <p className="text-slate-500">ID: {activeDocument.metadata.studentId}</p>}
                 </div>
                 {activeDocument.metadata?.lecturerName && (
-                  <p className="text-xs pt-4">
+                  <p className="text-xs pt-2 text-slate-600">
                     SUPERVISOR / LECTURER: <strong>{activeDocument.metadata.lecturerName}</strong>
                   </p>
                 )}
-                <p className="text-xs font-sans text-slate-400 pt-4">
+                <p className="text-xs font-sans text-slate-400 pt-2">
                   {activeDocument.metadata?.submissionDate || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                 </p>
               </div>
 
               {/* Sections & Body Content */}
-              <div className="space-y-8">
+              <div className="space-y-6">
                 {activeDocument.sections.map((sec, idx) => (
-                  <div key={sec.id} className="space-y-3">
-                    <h2 className="text-lg font-bold uppercase tracking-wide border-b border-slate-100 pb-1">
+                  <div key={sec.id} className="space-y-2">
+                    <h2 className="text-base font-bold uppercase tracking-wide border-b border-slate-100 pb-1">
                       {sec.level === 1 ? `CHAPTER ${idx + 1}: ` : ''}{sec.title}
                     </h2>
                     <div className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap font-serif indent-6">
@@ -2278,9 +2276,9 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
 
               {/* References List */}
               {activeDocument.references.length > 0 && (
-                <div className="pt-8 border-t border-slate-200 space-y-3">
-                  <h2 className="text-lg font-bold uppercase tracking-wide">REFERENCES</h2>
-                  <div className="space-y-2 text-xs font-serif pl-6 -indent-6">
+                <div className="pt-6 border-t border-slate-200 space-y-2">
+                  <h2 className="text-base font-bold uppercase tracking-wide">REFERENCES</h2>
+                  <div className="space-y-1.5 text-xs font-serif pl-6 -indent-6">
                     {activeDocument.references.map((ref) => (
                       <p key={ref.id} className="leading-relaxed">
                         {ref.authors} ({ref.year || 'n.d.'}). {ref.title}. {ref.doi && `https://doi.org/${ref.doi}`}
@@ -2298,40 +2296,36 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {/* MODAL 4: PREMIUM UPGRADE PROMPT                           */}
       {/* ========================================================= */}
       {showUpgradeModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-6 shadow-2xl text-center">
-            <div className="w-16 h-16 bg-gradient-to-tr from-amber-400 to-indigo-600 text-white rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-indigo-600/20">
-              <Crown size={32} />
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl text-center">
+            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mx-auto">
+              <Crown size={24} />
             </div>
 
-            <div className="space-y-2 max-w-md mx-auto">
-              <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest bg-amber-50 dark:bg-amber-950/60 px-3 py-1 rounded-full border border-amber-200 dark:border-amber-900">
-                Exclusive Scholar Tier
+            <div className="space-y-1 max-w-sm mx-auto">
+              <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+                Scholar Plan Feature
               </span>
-              <h3 className="font-serif font-bold text-2xl text-slate-900 dark:text-white">
+              <h3 className="font-semibold text-lg text-slate-900 dark:text-white">
                 Unlock KorsIQ Academic Studio
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                Academic Studio gives you multi-chapter dissertation planning, student outline approval, section-by-section writing, genuine reference intelligence, and export to Microsoft Word &amp; PDF.
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Academic Studio provides multi-chapter dissertation planning, student outline approval, section-by-section writing, real source citations, and Word &amp; PDF export.
               </p>
             </div>
 
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-left space-y-2 text-xs border border-slate-100 dark:border-slate-800">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg text-left space-y-1.5 text-xs border border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                <span>Multi-chapter Dissertation, Term Paper &amp; Proposal generation</span>
+                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                <span>Multi-chapter Thesis, Term Paper &amp; Proposal generation</span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                <span>Reference Intelligence: Real source citations in APA, Harvard, MLA &amp; IEEE</span>
+                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                <span>Source Citations: APA, Harvard, MLA &amp; IEEE styles</span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                <span>Export directly to formatted Microsoft Word (.docx) &amp; PDF</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                <span>Comprehensive 9-dimension scholarly peer review audit</span>
+                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                <span>Direct export to formatted Microsoft Word (.docx) &amp; PDF</span>
               </div>
             </div>
 
@@ -2350,7 +2344,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   showToast('Upgraded to Scholar Tier! Academic Studio unlocked.');
                   handleStartCreation();
                 }}
-                className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-2xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-lg shadow-indigo-600/20"
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs transition-colors"
               >
                 Upgrade to Scholar Plan
               </button>
@@ -2358,7 +2352,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setShowUpgradeModal(false)}
-                className="w-full py-2.5 text-slate-400 hover:text-slate-600 text-xs font-semibold cursor-pointer"
+                className="w-full py-2 text-slate-500 hover:text-slate-700 text-xs font-medium cursor-pointer"
               >
                 Maybe later
               </button>

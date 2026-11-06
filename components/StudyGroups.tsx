@@ -550,85 +550,85 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   };
 
   return (
-    <div className="h-[calc(100vh-140px)] flex flex-col xl:flex-row gap-6 animate-in fade-in duration-500">
+    <div className="h-[calc(100vh-140px)] flex flex-col xl:flex-row gap-5 animate-in fade-in duration-300">
       
       {/* SIDEBAR: Group Navigation & Discovery */}
-      <div className="w-full xl:w-80 flex flex-col gap-4 shrink-0 h-auto xl:h-full">
-        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+      <div className="w-full xl:w-72 flex flex-col gap-3 shrink-0 h-auto xl:h-full">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-serif font-bold text-slate-900 tracking-tight">Study Groups</h1>
-            <p className="text-[11px] text-slate-500 font-medium">Collaborative Academic Circles</p>
+            <h1 className="text-base font-bold text-slate-900 dark:text-white">Study Circles</h1>
+            <p className="text-xs text-slate-500">Collaborative Academic Groups</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => setShowJoinModal(true)}
-              title="Join via Group Code"
-              className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 flex items-center justify-center hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all cursor-pointer"
+              title="Join via Code"
+              className="w-8 h-8 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors cursor-pointer"
             >
-              <LinkIcon size={16} />
+              <LinkIcon size={14} />
             </button>
             <button
               onClick={() => setShowCreateModal(true)}
-              title="Create New Group"
-              className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 transition-all shadow-xs cursor-pointer"
+              title="Create New Circle"
+              className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 transition-colors shadow-xs cursor-pointer"
             >
-              <Plus size={18} />
+              <Plus size={16} />
             </button>
           </div>
         </div>
 
         {/* Directory Switcher Tabs */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs flex-1 flex flex-col overflow-hidden min-h-[280px] xl:min-h-0">
-          <div className="p-1 border-b border-slate-100 bg-slate-50/50 flex">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex-1 flex flex-col overflow-hidden min-h-[260px] xl:min-h-0">
+          <div className="p-1 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex">
             <button
               onClick={() => setSidebarMode('my')}
-              className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-wider rounded-2xl transition-all flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
                 sidebarMode === 'my' 
-                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200/60' 
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs border border-slate-200/60 dark:border-slate-700' 
                   : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              <Users size={12} /> My Circles ({myGroups.length})
+              <Users size={13} /> My Circles ({myGroups.length})
             </button>
             <button
               onClick={() => setSidebarMode('explore')}
-              className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-wider rounded-2xl transition-all flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
                 sidebarMode === 'explore' 
-                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200/60' 
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs border border-slate-200/60 dark:border-slate-700' 
                   : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              <Globe size={12} /> Discover
+              <Globe size={13} /> Discover
             </button>
           </div>
 
           {sidebarMode === 'explore' && (
-            <div className="p-3 border-b border-slate-100">
+            <div className="p-2.5 border-b border-slate-100 dark:border-slate-800">
               <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Filter general groups..."
+                  placeholder="Filter circles..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200/80 rounded-xl pl-8 pr-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white text-slate-800 placeholder:text-slate-400"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-7 pr-2.5 py-1 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200 placeholder:text-slate-400"
                 />
               </div>
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
             {sidebarMode === 'my' ? (
               myGroups.length === 0 ? (
-                <div className="p-8 text-center space-y-3">
-                  <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center mx-auto">
-                    <Users size={22} />
+                <div className="p-6 text-center space-y-2">
+                  <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg flex items-center justify-center mx-auto">
+                    <Users size={18} />
                   </div>
-                  <p className="text-xs font-semibold text-slate-700">No Groups Joined Yet</p>
-                  <p className="text-[11px] text-slate-500">Create a group for your course or enter an invite code to join a study circle.</p>
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No circles joined yet</p>
+                  <p className="text-[11px] text-slate-500">Create a circle for your course or enter an invite code.</p>
                   <button
                     onClick={() => setShowCreateModal(true)}
-                    className="mt-2 text-xs font-bold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
+                    className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                   >
                     + Form a Study Circle
                   </button>
@@ -643,37 +643,29 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                     <button
                       key={g.id}
                       onClick={() => setActiveGroupId(g.id)}
-                      className={`w-full p-3.5 rounded-2xl text-left transition-all duration-200 border cursor-pointer ${
+                      className={`w-full p-3 rounded-lg text-left transition-colors border cursor-pointer ${
                         isActive
-                          ? 'bg-indigo-900 border-indigo-900 text-white shadow-md'
-                          : 'bg-white hover:bg-slate-50 border-slate-200/70 text-slate-800'
+                          ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-900 text-blue-950 dark:text-blue-100 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200/70 dark:border-slate-800 text-slate-800 dark:text-slate-200'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className={`text-xs font-bold uppercase tracking-tight truncate ${isActive ? 'text-white' : 'text-slate-900'}`}>
+                        <span className="text-xs font-semibold truncate">
                           {g.name}
                         </span>
                         {isPrivate ? (
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 ${
-                            isActive ? 'bg-indigo-800 text-indigo-200' : 'bg-slate-100 text-slate-600'
-                          }`}>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium flex items-center gap-1 bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             <Lock size={9} /> Private
                           </span>
                         ) : (
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 ${
-                            isActive ? 'bg-indigo-800 text-indigo-200' : 'bg-emerald-50 text-emerald-700'
-                          }`}>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium flex items-center gap-1 bg-emerald-50 text-emerald-700">
                             <Globe size={9} /> General
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className={`truncate ${isActive ? 'text-indigo-200' : 'text-slate-500'}`}>
-                          {g.course || 'General Subject'}
-                        </span>
-                        <span className={`font-medium ${isActive ? 'text-indigo-300' : 'text-slate-400'}`}>
-                          {memberCount} member{memberCount === 1 ? '' : 's'}
-                        </span>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                        <span className="truncate">{g.course || 'General Subject'}</span>
+                        <span className="shrink-0 font-medium">{memberCount} member{memberCount === 1 ? '' : 's'}</span>
                       </div>
                     </button>
                   );
@@ -681,26 +673,26 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
               )
             ) : (
               exploreGroups.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500 italic">
-                  No public general study groups discovered matching your query.
+                <div className="p-6 text-center text-xs text-slate-400">
+                  No public general circles found.
                 </div>
               ) : (
                 exploreGroups.map(g => (
-                  <div key={g.id} className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl space-y-2">
+                  <div key={g.id} className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 uppercase tracking-tight">{g.name}</span>
-                      <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-md font-bold">
+                      <span className="text-xs font-semibold text-slate-900 dark:text-white">{g.name}</span>
+                      <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
                         General
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-600 line-clamp-2">{g.description || `Group for ${g.course}`}</p>
+                    <p className="text-[11px] text-slate-500 line-clamp-2">{g.description || `Group for ${g.course}`}</p>
                     <div className="flex items-center justify-between pt-1">
-                      <span className="text-[10px] text-slate-500 font-medium">{g.course}</span>
+                      <span className="text-[10px] text-slate-400 font-medium">{g.course}</span>
                       <button
                         onClick={() => handleJoinGeneralGroup(g)}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-xl transition-all cursor-pointer"
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold rounded-md transition-colors cursor-pointer"
                       >
-                        Join Circle
+                        Join
                       </button>
                     </div>
                   </div>
@@ -712,85 +704,90 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
       </div>
 
       {/* MAIN WORKSPACE: Active Group Workspace */}
-      <div className="flex-1 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex flex-col overflow-hidden">
+      <div className="flex-1 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col overflow-hidden">
         {!activeGroup ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mb-4">
-              <Users size={32} />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
+            <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-xl flex items-center justify-center">
+              <Users size={24} />
             </div>
-            <h2 className="text-xl font-serif font-bold text-slate-900 mb-2">Select a Study Group</h2>
-            <p className="text-sm text-slate-500 max-w-md">Choose a circle from your directory on the left or enter an invite code to join a new group.</p>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Select a Study Circle</h2>
+            <p className="text-xs text-slate-500 max-w-sm">Choose a circle from your directory on the left or enter an invitation code to join a private group.</p>
             <button
               onClick={() => setShowJoinModal(true)}
-              className="mt-6 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl shadow-xs transition-all cursor-pointer"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer shadow-xs"
             >
               Enter Invite Code
             </button>
           </div>
         ) : (
           <>
-            {/* Header Header */}
-            <div className="p-5 border-b border-slate-100 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="space-y-1">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <h2 className="text-lg md:text-xl font-serif font-bold text-slate-900 uppercase tracking-tight">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
                     {activeGroup.name}
                   </h2>
                   {activeGroup.type === 'private' ? (
-                    <span className="inline-flex items-center gap-1 text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-bold">
-                      <Lock size={10} /> Private Group
+                    <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-900 px-2 py-0.5 rounded font-semibold">
+                      <Lock size={10} /> Private Circle
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                    <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold">
                       <Globe size={10} /> General Group
                     </span>
                   )}
-                  <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-semibold">
+                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded font-medium">
                     {activeGroup.course}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
+
+                <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                   <span>{activeGroup.description || 'Collaborative Academic Circle'}</span>
                   <span className="text-slate-300">•</span>
-                  <span className="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2.5 py-0.5 rounded-md flex items-center gap-1.5 shadow-2xs">
-                    <span className="text-[10px] text-slate-400 font-sans font-semibold uppercase">Code:</span>
+                  {/* Automatic Invite Code display */}
+                  <span className="font-mono font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-xs inline-flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-400 font-sans font-medium uppercase">Invite:</span>
                     <span>{activeGroup.inviteCode}</span>
                     {activeGroup.inviteCodeActive === false ? (
-                      <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded font-sans font-bold">Revoked</span>
+                      <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-sans font-semibold">Revoked</span>
                     ) : (
-                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-sans font-bold">Active</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1 rounded font-sans font-semibold">Active</span>
                     )}
                   </span>
+
                   <button
                     onClick={copyInviteCodeOnly}
                     title="Copy Invite Code"
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer bg-slate-50 hover:bg-indigo-50 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
+                    className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1 cursor-pointer bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 transition-colors"
                   >
                     {copiedCode ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-                    <span>{copiedCode ? 'Code Copied!' : 'Copy Code'}</span>
+                    <span>{copiedCode ? 'Copied' : 'Copy'}</span>
                   </button>
+
                   <button
                     onClick={shareInvite}
                     title="Share Circle Invitation"
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer bg-slate-50 hover:bg-indigo-50 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
+                    className="text-xs text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1 cursor-pointer bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 transition-colors"
                   >
                     <Share2 size={12} />
                     <span>Share</span>
                   </button>
+
                   {activeGroup.ownerId === currentUserId && (
                     <>
                       <button
                         onClick={regenerateCode}
-                        title="Generate a new invite code (invalidates previous code)"
-                        className="text-[11px] text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer hover:underline"
+                        title="Generate a new invite code"
+                        className="text-[11px] text-slate-500 hover:text-slate-800 font-medium flex items-center gap-1 cursor-pointer"
                       >
                         <RefreshCw size={11} /> Regen
                       </button>
                       <button
                         onClick={revokeCodeToggle}
                         title={activeGroup.inviteCodeActive === false ? 'Reactivate invite code' : 'Revoke invite code'}
-                        className={`text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:underline ${
-                          activeGroup.inviteCodeActive === false ? 'text-emerald-600 hover:text-emerald-800' : 'text-rose-600 hover:text-rose-800'
+                        className={`text-[11px] font-semibold flex items-center gap-1 cursor-pointer ${
+                          activeGroup.inviteCodeActive === false ? 'text-emerald-600 hover:text-emerald-700' : 'text-rose-600 hover:text-rose-700'
                         }`}
                       >
                         {activeGroup.inviteCodeActive === false ? 'Reactivate' : 'Revoke'}
@@ -801,154 +798,154 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
               </div>
 
               {/* Navigation Tabs */}
-              <div className="flex items-center gap-2">
-                <div className="bg-slate-100 p-1 rounded-2xl flex border border-slate-200/80">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg flex border border-slate-200/80 dark:border-slate-700 text-xs font-semibold">
                   <button
                     onClick={() => setActiveTab('ai')}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
                       activeTab === 'ai'
-                        ? 'bg-white text-indigo-900 shadow-xs'
+                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Bot size={14} className="text-indigo-600" /> KorsIQ
+                    <Bot size={13} /> KorsIQ AI
                   </button>
                   <button
                     onClick={() => setActiveTab('materials')}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
                       activeTab === 'materials'
-                        ? 'bg-white text-indigo-900 shadow-xs'
+                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Files size={14} /> Materials ({(activeGroup.sharedMaterials || []).length})
+                    <Files size={13} /> Materials ({(activeGroup.sharedMaterials || []).length})
                   </button>
                   <button
                     onClick={() => setActiveTab('discussions')}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
                       activeTab === 'discussions'
-                        ? 'bg-white text-indigo-900 shadow-xs'
+                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <MessageSquare size={14} /> Forum
+                    <MessageSquare size={13} /> Forum
                   </button>
                   <button
                     onClick={() => setActiveTab('overview')}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
                       activeTab === 'overview'
-                        ? 'bg-white text-indigo-900 shadow-xs'
+                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Users size={14} /> Info
+                    <Users size={13} /> Members
                   </button>
                 </div>
               </div>
             </div>
 
             {/* TAB CONTENT */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-slate-50/30">
+            <div className="flex-1 overflow-y-auto p-5 bg-slate-50/40 dark:bg-slate-950/40">
               
               {/* 1. KORSIQ TAB */}
               {activeTab === 'ai' && (
-                <div className="max-w-4xl mx-auto space-y-6 flex flex-col h-full">
+                <div className="max-w-4xl mx-auto space-y-4 flex flex-col h-full">
                   
                   {/* Preset AI Action Badges */}
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-2">
+                  <div className="bg-white dark:bg-slate-900 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Sparkles size={16} className="text-indigo-600" />
-                        <span className="text-xs font-bold text-slate-800">Group AI Study Assistant</span>
-                        <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">
-                          Grounded in Group Materials
+                        <Sparkles size={14} className="text-blue-600" />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Group AI Study Assistant</span>
+                        <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded font-medium">
+                          Grounded in Uploaded Files
                         </span>
                       </div>
-                      <span className="text-[11px] text-slate-500">
+                      <span className="text-xs text-slate-400">
                         {(activeGroup.sharedMaterials || []).length} Document(s) Indexed
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
                       <button
                         onClick={() => handleSendAiPrompt(undefined, "Generate a 5-question study quiz based on all uploaded group notes.", 'quiz')}
-                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-indigo-100"
+                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
                       >
-                        <HelpCircle size={13} /> Quiz Practice
+                        <HelpCircle size={12} /> Quiz Practice
                       </button>
                       <button
                         onClick={() => handleSendAiPrompt(undefined, "Synthesize and summarize all uploaded group study materials.", 'summarize')}
-                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-emerald-100"
+                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
                       >
-                        <FileText size={13} /> Group Summary
+                        <FileText size={12} /> Group Summary
                       </button>
                       <button
                         onClick={() => handleSendAiPrompt(undefined, "Identify top 5 high-yield exam topics from our group materials.", 'topics')}
-                        className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-amber-100"
+                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
                       >
-                        <Lightbulb size={13} /> High-Yield Revision
+                        <Lightbulb size={12} /> High-Yield Revision
                       </button>
                     </div>
                   </div>
 
                   {/* Chat Messages Log */}
-                  <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+                  <div className="flex-1 space-y-3 overflow-y-auto pr-1">
                     {aiMessages.map((msg, idx) => {
                       const isAi = isAiSender(msg.sender);
                       return (
-                        <div key={idx} className={`flex gap-3 ${isAi ? 'items-start' : 'items-end justify-end'}`}>
+                        <div key={idx} className={`flex gap-2.5 ${isAi ? 'items-start' : 'items-end justify-end'}`}>
                           {isAi && (
-                            <div className="w-8 h-8 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-1">
-                              <Bot size={18} />
+                            <div className="w-7 h-7 rounded-md bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                              <Bot size={15} />
                             </div>
                           )}
-                          <div className={`p-4 rounded-2xl max-w-[85%] text-sm leading-relaxed shadow-xs ${
+                          <div className={`p-3.5 rounded-lg max-w-[85%] text-xs leading-relaxed ${
                             isAi 
-                              ? 'bg-white border border-slate-200/80 text-slate-800 font-normal' 
-                              : 'bg-indigo-900 text-white font-medium'
+                              ? 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 shadow-xs' 
+                              : 'bg-blue-600 text-white font-medium'
                           }`}>
-                            <div className="flex items-center justify-between mb-1 pb-1 border-b border-slate-100/50">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${isAi ? 'text-indigo-600' : 'text-indigo-200'}`}>
+                            <div className="flex items-center justify-between mb-1 pb-1 border-b border-slate-100 dark:border-slate-800">
+                              <span className={`text-[10px] font-semibold uppercase tracking-wider ${isAi ? 'text-blue-600 dark:text-blue-400' : 'text-blue-100'}`}>
                                 {msg.sender}
                               </span>
-                              <span className="text-[9px] text-slate-400">
+                              <span className={`text-[9px] ${isAi ? 'text-slate-400' : 'text-blue-200'}`}>
                                 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
                             <div className="whitespace-pre-wrap">{msg.text}</div>
                           </div>
                           {!isAi && (
-                            <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="sm" />
+                            <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="xs" />
                           )}
                         </div>
                       );
                     })}
 
                     {isAiThinking && (
-                      <div className="flex items-center gap-3 text-indigo-600 font-medium text-xs bg-indigo-50/80 p-3.5 rounded-2xl border border-indigo-100 animate-pulse">
-                        <Sparkles size={16} className="animate-spin" />
-                        KorsIQ is analyzing group materials and generating response...
+                      <div className="flex items-center gap-2 text-blue-600 font-medium text-xs bg-blue-50 dark:bg-blue-950/60 p-3 rounded-lg border border-blue-200 dark:border-blue-900">
+                        <Sparkles size={14} className="animate-spin" />
+                        <span>KorsIQ is analyzing group materials and generating response...</span>
                       </div>
                     )}
                     <div ref={chatEndRef} />
                   </div>
 
                   {/* Prompt Input Field */}
-                  <form onSubmit={e => handleSendAiPrompt(e)} className="bg-white p-2 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-2">
+                  <form onSubmit={e => handleSendAiPrompt(e)} className="bg-white dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs flex items-center gap-2">
                     <input
                       type="text"
                       placeholder={`Ask KorsIQ about materials in "${activeGroup.name}"...`}
                       value={aiPrompt}
                       onChange={e => setAiPrompt(e.target.value)}
                       disabled={isAiThinking}
-                      className="flex-1 px-4 py-2.5 text-xs outline-none text-slate-800 placeholder:text-slate-400 bg-transparent"
+                      className="flex-1 px-3 py-2 text-xs outline-none text-slate-800 dark:text-slate-200 placeholder:text-slate-400 bg-transparent"
                     />
                     <button
                       type="submit"
                       disabled={!aiPrompt.trim() || isAiThinking}
-                      className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl disabled:opacity-50 transition-all cursor-pointer shrink-0"
+                      className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors cursor-pointer shrink-0"
                     >
-                      <Send size={16} />
+                      <Send size={14} />
                     </button>
                   </form>
                 </div>
@@ -956,64 +953,64 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
               {/* 2. SHARED MATERIALS TAB */}
               {activeTab === 'materials' && (
-                <div className="max-w-4xl mx-auto space-y-6">
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="max-w-4xl mx-auto space-y-4">
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-serif font-bold text-slate-900">Group Learning Repository</h3>
-                      <p className="text-xs text-slate-500">Shared lecture slides, PDF notes, and course documents accessible to group members.</p>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Group Learning Repository</h3>
+                      <p className="text-xs text-slate-500">Shared lecture slides, PDF notes, and course documents accessible to circle members.</p>
                     </div>
                     <div>
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
-                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                       >
-                        {isUploading ? <Sparkles size={14} className="animate-spin" /> : <Upload size={14} />}
-                        {isUploading ? 'Uploading & Indexing...' : 'Upload Study Material'}
+                        {isUploading ? <Sparkles size={13} className="animate-spin" /> : <Upload size={13} />}
+                        <span>{isUploading ? 'Uploading...' : 'Upload Material'}</span>
                       </button>
                       <input type="file" ref={fileInputRef} onChange={handleMaterialUpload} className="hidden" />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {(activeGroup.sharedMaterials || []).length === 0 ? (
-                      <div className="col-span-full py-16 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8 space-y-3">
-                        <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
-                          <Files size={24} />
+                      <div className="col-span-full py-12 text-center bg-white dark:bg-slate-900 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-6 space-y-2">
+                        <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-lg flex items-center justify-center mx-auto">
+                          <Files size={20} />
                         </div>
-                        <p className="text-xs font-bold text-slate-700">No Study Materials Uploaded</p>
-                        <p className="text-xs text-slate-500">Upload your PDF course notes or slides so KorsIQ can answer questions for your group!</p>
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No Materials Uploaded</p>
+                        <p className="text-xs text-slate-500">Upload PDF notes or slides to empower KorsIQ AI for all members.</p>
                       </div>
                     ) : (
                       (activeGroup.sharedMaterials || []).map((mat, idx) => (
-                        <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between space-y-4">
-                          <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 font-bold text-xs">
+                        <div key={idx} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-3">
+                          <div className="flex items-start gap-2.5">
+                            <div className="w-9 h-9 rounded-md bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 flex items-center justify-center shrink-0 font-semibold text-xs">
                               PDF
                             </div>
                             <div className="min-w-0 flex-1">
-                              <h4 className="text-xs font-bold text-slate-900 truncate" title={mat.fileName}>
+                              <h4 className="text-xs font-semibold text-slate-900 dark:text-white truncate" title={mat.fileName}>
                                 {mat.fileName}
                               </h4>
-                              <p className="text-[10px] text-slate-500 mt-0.5">
-                                Uploaded by {mat.sharedBy || mat.uploadedByName || 'Group Member'}
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                By {mat.sharedBy || mat.uploadedByName || 'Member'}
                               </p>
                             </div>
                           </div>
 
-                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
                             <span>{new Date(mat.timestamp || Date.now()).toLocaleDateString()}</span>
                             {mat.downloadUrl ? (
                               <a
                                 href={mat.downloadUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl flex items-center gap-1 transition-all"
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium rounded flex items-center gap-1 transition-colors"
                               >
                                 <Download size={11} /> Download
                               </a>
                             ) : (
-                              <span className="text-[10px] text-emerald-600 font-bold">Indexed for AI</span>
+                              <span className="text-[10px] text-emerald-600 font-medium">Indexed for AI</span>
                             )}
                           </div>
                         </div>
@@ -1025,30 +1022,30 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
               {/* 3. DISCUSSIONS / FORUM TAB */}
               {activeTab === 'discussions' && (
-                <div className="max-w-4xl mx-auto space-y-6">
-                  <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+                <div className="max-w-4xl mx-auto space-y-4">
+                  <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
                     <div>
-                      <h3 className="text-base font-serif font-bold text-slate-900">Academic Forum</h3>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Academic Forum</h3>
                       <p className="text-xs text-slate-500">Ask questions, share study tips, and collaborate on assignments.</p>
                     </div>
                     <button
                       onClick={() => setShowNewDiscussion(!showNewDiscussion)}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl flex items-center gap-1.5 transition-all cursor-pointer"
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <Plus size={14} /> New Post
+                      <Plus size={13} /> New Post
                     </button>
                   </div>
 
                   {/* Create Discussion Form */}
                   {showNewDiscussion && (
-                    <form onSubmit={handleCreateDiscussion} className="bg-white p-5 rounded-3xl border border-indigo-100 shadow-xs space-y-3 animate-in slide-in-from-top-2">
-                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Start Discussion Thread</h4>
+                    <form onSubmit={handleCreateDiscussion} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-blue-200 dark:border-blue-900 shadow-xs space-y-2.5">
+                      <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Start Discussion Thread</h4>
                       <input
                         type="text"
                         placeholder="Thread Topic / Question Title"
                         value={newDiscussionTitle}
                         onChange={e => setNewDiscussionTitle(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200"
                       />
                       <textarea
                         rows={3}
@@ -1056,60 +1053,60 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                         value={newDiscussionContent}
                         onChange={e => setNewDiscussionContent(e.target.value)}
                         required
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 resize-none"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200 resize-none"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setShowNewDiscussion(false)}
-                          className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                          className="px-3 py-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium rounded-lg cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                          className="px-3.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
                         >
-                          Post Discussion
+                          Post Thread
                         </button>
                       </div>
                     </form>
                   )}
 
                   {/* Discussions List */}
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {(activeGroup.discussions || []).length === 0 ? (
-                      <div className="py-12 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8">
-                        <MessageSquare size={24} className="text-slate-400 mx-auto mb-2" />
-                        <p className="text-xs font-bold text-slate-700">No Discussions Started Yet</p>
-                        <p className="text-xs text-slate-500">Be the first to post a study topic or ask a course question!</p>
+                      <div className="py-10 text-center bg-white dark:bg-slate-900 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-6">
+                        <MessageSquare size={20} className="text-slate-400 mx-auto mb-1.5" />
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No Discussions Started Yet</p>
+                        <p className="text-xs text-slate-500">Be the first to post a study topic or ask a question!</p>
                       </div>
                     ) : (
                       (activeGroup.discussions || []).map(post => (
-                        <div key={post.id} className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs space-y-3">
+                        <div key={post.id} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-2.5">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <UserAvatar avatarIcon={post.authorAvatar || 'graduation-cap'} name={post.authorName} size="xs" />
-                              <span className="text-xs font-bold text-slate-900">{post.authorName}</span>
+                              <span className="text-xs font-semibold text-slate-900 dark:text-white">{post.authorName}</span>
                             </div>
                             <span className="text-[10px] text-slate-400">
                               {new Date(post.timestamp).toLocaleDateString()}
                             </span>
                           </div>
 
-                          {post.title && <h4 className="text-xs font-bold text-indigo-900">{post.title}</h4>}
-                          <p className="text-xs text-slate-700 whitespace-pre-wrap">{post.content}</p>
+                          {post.title && <h4 className="text-xs font-semibold text-slate-900 dark:text-white">{post.title}</h4>}
+                          <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{post.content}</p>
 
                           {/* Replies */}
                           {(post.replies || []).length > 0 && (
-                            <div className="pl-4 border-l-2 border-indigo-100 space-y-2 pt-2">
+                            <div className="pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-1.5 pt-1">
                               {post.replies.map(reply => (
-                                <div key={reply.id} className="bg-slate-50 p-2.5 rounded-xl text-xs space-y-1">
+                                <div key={reply.id} className="bg-slate-50 dark:bg-slate-800 p-2 rounded-lg text-xs space-y-0.5">
                                   <div className="flex items-center justify-between">
-                                    <span className="font-bold text-slate-800 text-[11px]">{reply.authorName}</span>
+                                    <span className="font-semibold text-slate-800 dark:text-slate-200 text-[11px]">{reply.authorName}</span>
                                     <span className="text-[9px] text-slate-400">{new Date(reply.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
-                                  <p className="text-slate-600">{reply.content}</p>
+                                  <p className="text-slate-600 dark:text-slate-300">{reply.content}</p>
                                 </div>
                               ))}
                             </div>
@@ -1117,17 +1114,17 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
                           {/* Reply Trigger */}
                           {activeReplyPostId === post.id ? (
-                            <div className="flex gap-2 pt-2">
+                            <div className="flex gap-2 pt-1">
                               <input
                                 type="text"
                                 placeholder="Write a reply..."
                                 value={replyText}
                                 onChange={e => setReplyText(e.target.value)}
-                                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200"
                               />
                               <button
                                 onClick={() => handleAddReply(post.id)}
-                                className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                                className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg cursor-pointer"
                               >
                                 Reply
                               </button>
@@ -1135,7 +1132,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                           ) : (
                             <button
                               onClick={() => setActiveReplyPostId(post.id)}
-                              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 pt-1 cursor-pointer"
+                              className="text-xs font-semibold text-blue-600 hover:text-blue-700 pt-0.5 cursor-pointer"
                             >
                               + Reply to thread
                             </button>
@@ -1149,158 +1146,130 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
               {/* 4. OVERVIEW / GROUP INFO TAB */}
               {activeTab === 'overview' && (
-                <div className="max-w-4xl mx-auto space-y-6">
+                <div className="max-w-4xl mx-auto space-y-4">
                   {/* Private Circle Invitation & Access Management Card */}
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-5">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
                       <div>
-                        <span className="text-[10px] uppercase font-bold tracking-widest text-indigo-600 block mb-1">
-                          Private Circle Invitation
+                        <span className="text-[10px] uppercase font-semibold text-blue-600 dark:text-blue-400 tracking-wider block mb-0.5">
+                          Circle Invitation
                         </span>
-                        <h3 className="text-xl font-serif font-bold text-slate-900">{activeGroup.name}</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">{activeGroup.description || 'Collaborative Academic Study Circle'}</p>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white">{activeGroup.name}</h3>
+                        <p className="text-xs text-slate-500">{activeGroup.description || 'Collaborative Academic Study Circle'}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {activeGroup.inviteCodeActive === false ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-full">
-                            <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                            Code Revoked (Inactive)
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium rounded">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                            Code Revoked
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-full">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium rounded">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                             Active Invitation Code
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-4">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-200 dark:border-slate-700 space-y-3">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                         <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Unique Invite Code</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl font-mono font-black text-indigo-950 tracking-widest bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-2xs">
-                              {activeGroup.inviteCode}
-                            </span>
-                          </div>
+                          <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Invitation Code</span>
+                          <span className="text-xl font-mono font-bold text-slate-900 dark:text-white tracking-widest bg-white dark:bg-slate-900 px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 shadow-2xs inline-block">
+                            {activeGroup.inviteCode}
+                          </span>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             onClick={copyInviteCodeOnly}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
                           >
-                            {copiedCode ? <Check size={14} /> : <Copy size={14} />}
-                            <span>{copiedCode ? 'Code Copied!' : 'Copy Code'}</span>
+                            {copiedCode ? <Check size={13} /> : <Copy size={13} />}
+                            <span>{copiedCode ? 'Code Copied' : 'Copy Code'}</span>
                           </button>
                           <button
                             onClick={shareInvite}
-                            className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
+                            className="px-3.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
                           >
-                            <Share2 size={14} />
-                            <span>Share Invite</span>
+                            <Share2 size={13} />
+                            <span>Share</span>
                           </button>
                         </div>
                       </div>
 
                       {activeGroup.ownerId === currentUserId && (
-                        <div className="pt-3 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={regenerateCode}
-                              className="px-3 py-1.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                              className="px-2.5 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 rounded text-xs font-medium flex items-center gap-1 cursor-pointer"
                             >
-                              <RefreshCw size={12} />
+                              <RefreshCw size={11} />
                               <span>Regenerate Code</span>
                             </button>
                             <button
                               onClick={revokeCodeToggle}
-                              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                              className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 cursor-pointer ${
                                 activeGroup.inviteCodeActive === false
-                                  ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800'
-                                  : 'bg-rose-100 hover:bg-rose-200 text-rose-800'
+                                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                  : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
                               }`}
                             >
-                              <span>{activeGroup.inviteCodeActive === false ? 'Reactivate Invite Code' : 'Revoke Current Code'}</span>
+                              <span>{activeGroup.inviteCodeActive === false ? 'Reactivate Code' : 'Revoke Code'}</span>
                             </button>
                           </div>
-                          <p className="text-[11px] text-slate-500 italic">
+                          <p className="text-[11px] text-slate-400">
                             {activeGroup.inviteCodeActive === false
-                              ? 'This code is currently deactivated. Students cannot join until reactivated.'
-                              : 'Regenerating will immediately invalidate previous codes.'}
+                              ? 'This code is inactive. Students cannot join until reactivated.'
+                              : 'Regenerating will invalidate previous codes.'}
                           </p>
                         </div>
                       )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                      <div className="bg-white p-3 rounded-xl border border-slate-150">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Current Members</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block">{(activeGroup.members || []).length} Students</span>
+                      <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Members</span>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5 block">{(activeGroup.members || []).length} Students</span>
                       </div>
-                      <div className="bg-white p-3 rounded-xl border border-slate-150">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Creator / Admin</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block truncate">
-                          {activeGroup.ownerId === currentUserId ? 'You (Circle Admin)' : 'Course Leader'}
+                      <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Admin</span>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5 block truncate">
+                          {activeGroup.ownerId === currentUserId ? 'You (Admin)' : 'Circle Admin'}
                         </span>
                       </div>
-                      <div className="bg-white p-3 rounded-xl border border-slate-150">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Visibility</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block capitalize">{activeGroup.type} Circle</span>
+                      <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Visibility</span>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5 block capitalize">{activeGroup.type} Circle</span>
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-                    <h3 className="text-base font-serif font-bold text-slate-900">Group Metadata & Access</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                      <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Group Type</span>
-                        <span className="font-bold text-slate-800 capitalize">{activeGroup.type} Circle</span>
-                      </div>
-                      <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Course / Subject</span>
-                        <span className="font-bold text-slate-800">{activeGroup.course || 'General'}</span>
-                      </div>
-                      {activeGroup.department && (
-                        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Department</span>
-                          <span className="font-bold text-slate-800">{activeGroup.department}</span>
-                        </div>
-                      )}
-                      {activeGroup.level && (
-                        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Academic Level</span>
-                          <span className="font-bold text-slate-800">{activeGroup.level}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
 
                   {/* Members List */}
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-serif font-bold text-slate-900">Group Members ({(activeGroup.members || []).length})</h3>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Circle Members ({(activeGroup.members || []).length})</h3>
                       {activeGroup.ownerId === currentUserId && (
-                        <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">
-                          Owner Controls Active
+                        <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded font-semibold">
+                          Admin Controls
                         </span>
                       )}
                     </div>
 
-                    <div className="divide-y divide-slate-100">
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
                       {(activeGroup.members || []).map((mem: any, i) => {
                         const mName = typeof mem === 'string' ? mem : mem.name;
                         const mRole = typeof mem === 'string' ? (activeGroup.ownerId === currentUserId ? 'owner' : 'member') : (mem.role || 'member');
                         const mUid = typeof mem === 'string' ? mem : mem.userId;
 
                         return (
-                          <div key={i} className="py-3 flex items-center justify-between text-xs">
+                          <div key={i} className="py-2.5 flex items-center justify-between text-xs">
                             <div className="flex items-center gap-2.5">
                               <UserAvatar avatarIcon="graduation-cap" name={mName} size="xs" />
                               <div>
-                                <span className="font-bold text-slate-900 block">{mName}</span>
+                                <span className="font-semibold text-slate-900 dark:text-white block">{mName}</span>
                                 <span className="text-[10px] text-slate-400 capitalize">{mRole}</span>
                               </div>
                             </div>
@@ -1308,7 +1277,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                             {activeGroup.ownerId === currentUserId && mUid !== currentUserId && (
                               <button
                                 onClick={() => handleRemoveMember(mUid)}
-                                className="text-rose-600 hover:text-rose-800 text-[11px] font-bold cursor-pointer"
+                                className="text-rose-600 hover:text-rose-700 text-xs font-semibold cursor-pointer"
                               >
                                 Remove
                               </button>
@@ -1328,124 +1297,100 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
       {/* CREATE GROUP MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar animate-in zoom-in-95">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-              <h3 className="text-lg font-serif font-bold text-slate-900">Create New Study Group</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg p-6 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white">Create Study Circle</h3>
               <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateGroup} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateGroup} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Name *</label>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Circle Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Organic Chemistry Study Circle"
                   value={createName}
                   onChange={e => setCreateName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Course / Subject *</label>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Course Code / Subject *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. CHM 301"
                   value={createCourse}
                   onChange={e => setCreateCourse(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Description</label>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Circle Description</label>
                 <textarea
                   rows={2}
-                  placeholder="Brief overview of group goals..."
+                  placeholder="Brief overview of group focus..."
                   value={createDesc}
                   onChange={e => setCreateDesc(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 resize-none"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200 resize-none"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Group Privacy / Type *</label>
-                <div className="grid grid-cols-2 gap-3">
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Privacy Type *</label>
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setCreateType('general')}
-                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-colors ${
                       createType === 'general'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold'
-                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <Globe size={14} /> General Group
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <Globe size={13} /> General
                     </div>
-                    <p className="text-[10px] font-normal opacity-80">Discoverable by all students to join freely.</p>
+                    <p className="text-[10px] font-normal opacity-80">Discoverable by all students.</p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setCreateType('private')}
-                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-colors ${
                       createType === 'private'
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
-                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                        ? 'bg-blue-50 border-blue-300 text-blue-900 font-semibold'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <Lock size={14} /> Private Group
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <Lock size={13} /> Private Circle
                     </div>
-                    <p className="text-[10px] font-normal opacity-80">Restricted to members with invite code/link.</p>
+                    <p className="text-[10px] font-normal opacity-80">Requires auto-generated invite code.</p>
                   </button>
                 </div>
               </div>
 
-              {/* Optional Fields */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Department (Optional)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Biochemistry"
-                    value={createDept}
-                    onChange={e => setCreateDept(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Level (Optional)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 300 Level"
-                    value={createLevel}
-                    onChange={e => setCreateLevel(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl cursor-pointer"
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!createName.trim() || !createCourse.trim()}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl disabled:opacity-50 transition-all cursor-pointer"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer shadow-xs"
                 >
-                  Create Study Group
+                  Create Circle
                 </button>
               </div>
             </form>
@@ -1455,18 +1400,18 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
 
       {/* JOIN GROUP MODAL */}
       {showJoinModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4 animate-in zoom-in-95">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-              <h3 className="text-lg font-serif font-bold text-slate-900">Join via Invite Code</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md p-6 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white">Join via Invite Code</h3>
               <button onClick={() => { setShowJoinModal(false); setJoinError(''); }} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             <form onSubmit={handleJoinByCode} className="space-y-4 text-xs">
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Circle Invite Code or Link</label>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase mb-1">Circle Invite Code</label>
                 <input
                   type="text"
                   required
@@ -1480,30 +1425,30 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                     setJoinCode(val.trim());
                     setJoinError('');
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-center text-sm font-mono font-bold tracking-widest outline-none focus:ring-2 focus:ring-indigo-500/20 text-indigo-900 uppercase"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-2.5 text-center text-sm font-mono font-bold tracking-widest outline-none focus:border-blue-600 text-slate-900 dark:text-white uppercase"
                 />
-                <p className="text-[10px] text-slate-400 mt-1 text-center">
-                  Enter the 6-character code (format: KOR-XXXXXX) shared by your circle leader.
+                <p className="text-[11px] text-slate-400 mt-1 text-center">
+                  Enter the unique code shared by your circle creator.
                 </p>
                 {joinError && (
-                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold mt-2 animate-in fade-in">
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs font-medium mt-2">
                     {joinError}
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowJoinModal(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl cursor-pointer"
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!joinCode.trim()}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl disabled:opacity-50 transition-all cursor-pointer"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer shadow-xs"
                 >
                   Join Circle
                 </button>
