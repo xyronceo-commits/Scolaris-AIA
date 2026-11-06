@@ -492,7 +492,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
     if (!fileContent || !fileContent.trim()) return alert("Upload or paste some study material first!");
     
     if (fileContent.startsWith('%PDF-') || fileContent.includes('/FlateDecode')) {
-      alert("The currently loaded material contains raw unparsed binary PDF data. Please re-upload your file so Scolaris can extract clean readable text.");
+      alert("The currently loaded material contains raw unparsed binary PDF data. Please re-upload your file so KorsIQ can extract clean readable text.");
       return;
     }
 
@@ -518,7 +518,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
     const shareMessage: GroupMessage = {
       id: 'share-' + Date.now(),
-      sender: 'Scolaris AI',
+      sender: 'KorsIQ',
       text: `${profile.name} shared a Study Hub for ${currentCourse.code}!`,
       timestamp: Date.now()
     };
@@ -606,7 +606,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/20 flex flex-col items-center justify-center min-h-[140px] animate-pulse relative z-10">
                 <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-3" />
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-widest leading-none">
-                  Scolaris is Analyzing...
+                  KorsIQ is Analyzing...
                 </p>
                 <span className="text-[8px] text-slate-400 mt-1.5 uppercase tracking-wide">Extracting file knowledge</span>
               </div>
@@ -1245,7 +1245,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                       </div>
                       
                       <div className="pt-8 border-t border-white/5 mt-8 flex flex-col sm:flex-row justify-between items-center gap-4 relative z-10">
-                        <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 leading-none">Scolaris AI Assessment Engine</p>
+                        <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 leading-none">KorsIQ Assessment Engine</p>
                         <button 
                           onClick={() => {
                             setSelectedAnswers({});
@@ -1453,7 +1453,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           </div>
                           
                           <div className="pt-8 border-t border-white/5 mt-8 flex flex-col sm:flex-row justify-between items-center gap-4 relative z-10">
-                            <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 leading-none font-sans">Scolaris Simulated Exam Division</p>
+                            <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 leading-none font-sans">KorsIQ Simulated Exam Division</p>
                             <button 
                               onClick={() => {
                                 setSelectedTestAnswers({});

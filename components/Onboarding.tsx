@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, SubscriptionTier } from '../types';
 import { AVATAR_OPTIONS, UserAvatar } from './UserAvatar';
-import ScolarisLogo from './ScolarisLogo';
+import KorsIQLogo from './KorsIQLogo';
 
 interface OnboardingProps {
   userEmail: string;
@@ -199,10 +199,10 @@ export const Onboarding: React.FC<OnboardingProps> = ({
         {/* Header Branding */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center p-3.5 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-3">
-            <ScolarisLogo variant="icon" size={32} colorClass="text-white" />
+            <KorsIQLogo variant="icon" size={44} onDark />
           </div>
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">
-            Welcome to Scolaris AI
+            Welcome to KorsIQ
           </h1>
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">
             Step {step} of {totalSteps} — {step === 1 ? 'Personal Profile' : step === 2 ? 'Academic Context' : 'Study Preferences'}

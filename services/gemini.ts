@@ -356,7 +356,7 @@ export const GeminiService = {
     }
 
     if (!script || !wavUrl) {
-      script = `Alex: Welcome to Scolaris AI Revision Seminar! Dr. Taylor, could you summarize the key concept for ${topic.slice(0, 70)}?
+      script = `Alex: Welcome to KorsIQ Revision Seminar! Dr. Taylor, could you summarize the key concept for ${topic.slice(0, 70)}?
 Dr. Taylor: Absolutely, Alex! The essential strategy is active recall and concept mapping. Testing yourself on core principles builds far stronger neural pathways than passive reading.
 Alex: That explains why timed practice quizzes and summary cards are so critical for exam preparation!
 Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitions ensures long-term memory consolidation.`;
@@ -396,7 +396,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       return data.text;
     } catch (err) {
       console.warn("Group chat fallback active:", err);
-      return `[Scolaris AI Tutor] Let's break down this topic together! Ask any question regarding ${groupName || 'this module'} and we can analyze it step by step.`;
+      return `[KorsIQ Tutor] Let's break down this topic together! Ask any question regarding ${groupName || 'this module'} and we can analyze it step by step.`;
     }
   },
 
@@ -419,9 +419,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         method: 'POST',
         headers: await getHeaders(),
         body: JSON.stringify({ studyMaterial, mode })
-      }, 'Scolaris generation failed');
+      }, 'KorsIQ generation failed');
     } catch (err) {
-      console.warn("Scolaris generation fallback active:", err);
+      console.warn("KorsIQ generation fallback active:", err);
       if (mode === 'flashcards') {
         return {
           flashcards: [
@@ -450,9 +450,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         method: 'POST',
         headers: await getHeaders(),
         body: JSON.stringify({ messages, courseContext, fileContent })
-      }, 'Scolaris chatbot request failed');
+      }, 'KorsIQ chatbot request failed');
     } catch (err) {
-      console.warn("Scolaris chat fallback active:", err);
+      console.warn("KorsIQ chat fallback active:", err);
       return { text: "I am ready to help! What key concept or question from your coursework would you like us to break down next?" };
     }
   },

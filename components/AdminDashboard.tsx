@@ -194,7 +194,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-serif font-bold text-white tracking-tight">
-                Scolaris AI Administration
+                KorsIQ Administration
               </h1>
               <span className="px-2.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-full text-[10px] font-bold uppercase tracking-wider">
                 Read-Only
@@ -263,7 +263,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {loading ? (
         <div className="p-16 text-center space-y-4">
           <RefreshCw className="w-8 h-8 text-blue-400 animate-spin mx-auto" />
-          <p className="text-sm font-medium text-slate-400">Loading Scolaris Backend Telemetry...</p>
+          <p className="text-sm font-medium text-slate-400">Loading KorsIQ Backend Telemetry...</p>
         </div>
       ) : error ? (
         <div className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-300 text-sm font-medium flex items-center gap-3">

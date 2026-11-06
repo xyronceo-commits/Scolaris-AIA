@@ -24,7 +24,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
 import { DBService } from './services/db';
 import { cleanupLegacyApiKeyStorage } from './services/gemini';
-import ScolarisLogo from './components/ScolarisLogo';
+import KorsIQLogo from './components/KorsIQLogo';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
@@ -98,35 +98,35 @@ const App: React.FC = () => {
   // Update Page Title Metadata based on Active State
   useEffect(() => {
     if (showAdminLoginForm) {
-      document.title = 'Admin | Scolaris AI';
+      document.title = 'Admin | KorsIQ';
       return;
     }
     if (!authUser && showAuth) {
-      document.title = authMode === 'signup' ? 'Create Account | Scolaris AI' : 'Sign In | Scolaris AI';
+      document.title = authMode === 'signup' ? 'Create Account | KorsIQ' : 'Sign In | KorsIQ';
       return;
     }
     if (!authUser) {
-      document.title = 'Scolaris AI — AI-Powered Study Platform';
+      document.title = 'KorsIQ — AI-Powered Study Platform';
       return;
     }
     const tabTitles: Record<string, string> = {
-      dashboard: 'Dashboard | Scolaris AI',
-      courses: 'My Courses | Scolaris AI',
-      hub: 'Study | Scolaris AI',
-      tools: 'AI Study Tools | Scolaris AI',
-      podcast: 'AI Podcast | Scolaris AI',
-      profile: 'Profile | Scolaris AI',
-      schedule: 'Schedule | Scolaris AI',
-      groups: 'Study Circles | Scolaris AI',
-      analytics: 'Analytics | Scolaris AI',
-      paid: 'Pro Access | Scolaris AI',
-      admin: 'Admin | Scolaris AI'
+      dashboard: 'Dashboard | KorsIQ',
+      courses: 'My Courses | KorsIQ',
+      hub: 'Study | KorsIQ',
+      tools: 'AI Study Tools | KorsIQ',
+      podcast: 'AI Podcast | KorsIQ',
+      profile: 'Profile | KorsIQ',
+      schedule: 'Schedule | KorsIQ',
+      groups: 'Study Circles | KorsIQ',
+      analytics: 'Analytics | KorsIQ',
+      paid: 'Pro Access | KorsIQ',
+      admin: 'Admin | KorsIQ'
     };
     if (tabTitles[activeTab]) {
       document.title = tabTitles[activeTab];
     } else {
       const formatted = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
-      document.title = `${formatted} | Scolaris AI`;
+      document.title = `${formatted} | KorsIQ`;
     }
   }, [activeTab, authUser, showAuth, authMode, showAdminLoginForm]);
 
@@ -385,7 +385,7 @@ const App: React.FC = () => {
         {
           id: 'notif-1',
           type: 'content',
-          title: 'Welcome to Scolaris AI',
+          title: 'Welcome to KorsIQ',
           message: 'Your AI Academic Studio is active. Explore your dashboard and generate study plans!',
           timestamp: Date.now() - 1000 * 60 * 5,
           read: false,
@@ -404,7 +404,7 @@ const App: React.FC = () => {
           id: 'notif-3',
           type: 'message',
           title: 'AI Study Assistant Ready',
-          message: 'Ask Scolaris AI anything about your course materials or generate an AI podcast.',
+          message: 'Ask KorsIQ anything about your course materials or generate an AI podcast.',
           timestamp: Date.now() - 1000 * 60 * 90,
           read: false,
           link: 'hub'
@@ -499,7 +499,7 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
         <div className="p-3 bg-slate-900 dark:bg-indigo-600 text-white rounded-2xl shadow-xl mb-4 animate-bounce">
-          <ScolarisLogo variant="icon" size={32} colorClass="text-white" />
+          <KorsIQLogo variant="icon" size={32} onDark />
         </div>
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
           Resolving Academic Session...
@@ -595,7 +595,7 @@ const App: React.FC = () => {
           <div className="space-y-2">
             <h2 className="text-2xl font-serif font-bold text-slate-900">Access Denied</h2>
             <p className="text-xs text-slate-500 leading-relaxed">
-              You do not have administrator privileges. Only authorized Scolaris AI administrative accounts can access this panel.
+              You do not have administrator privileges. Only authorized KorsIQ administrative accounts can access this panel.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full">
@@ -715,7 +715,7 @@ const App: React.FC = () => {
           </button>
           
           <div className="flex items-center gap-2">
-            <ScolarisLogo variant="full" size={26} />
+            <KorsIQLogo variant="full" size={34} />
           </div>
         </div>
 
@@ -761,7 +761,7 @@ const App: React.FC = () => {
       `}>
         <div className="h-20 flex items-center justify-between px-6 border-b border-slate-50 dark:border-slate-800 lg:border-none">
           <div className="flex items-center gap-3">
-            <ScolarisLogo variant="full" size={32} showSubtitle />
+            <KorsIQLogo variant="full" size={40} showSubtitle />
           </div>
           
           <button 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Shield, Lock, Mail, ArrowLeft, KeyRound, AlertCircle, Loader2 } from 'lucide-react';
-import ScolarisLogo from './ScolarisLogo';
+import KorsIQLogo from './KorsIQLogo';
 
 interface AdminLoginProps {
   onLoginSuccess: (adminToken: string, user: { uid?: string; email: string; role: string }) => void;
@@ -59,10 +59,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         {/* Header Section */}
         <div className="text-center space-y-3">
           <div className="inline-flex items-center justify-center p-3.5 rounded-2xl bg-slate-800 text-white border border-slate-700 shadow-lg mb-2">
-            <ScolarisLogo variant="icon" size={36} colorClass="text-indigo-400" />
+            <KorsIQLogo variant="icon" size={36} onDark />
           </div>
           <h1 className="text-3xl font-serif font-bold text-white tracking-tight">
-            Scolaris AI Admin
+            KorsIQ Admin
           </h1>
           <p className="text-xs text-slate-400 font-medium tracking-wide uppercase">
             Secure Administrator Portal

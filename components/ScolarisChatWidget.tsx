@@ -3,7 +3,7 @@ import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2,
 import { GeminiService } from '../services/gemini';
 import { Course, StudyHubData } from '../types';
 import ReactMarkdown from 'react-markdown';
-import ScolarisLogo from './ScolarisLogo';
+import KorsIQLogo from './KorsIQLogo';
 
 interface ScolarisChatWidgetProps {
   courses: Course[];
@@ -13,7 +13,7 @@ interface ScolarisChatWidgetProps {
 
 interface ChatMessage {
   id: string;
-  sender: 'user' | 'Scolaris';
+  sender: 'user' | 'KorsIQ';
   text: string;
   timestamp: number;
 }
@@ -49,8 +49,8 @@ export const ScolarisChatWidget: React.FC<ScolarisChatWidgetProps> = ({
       setMessages([
         {
           id: 'welcome',
-          sender: 'Scolaris',
-          text: `Welcome to Scolaris AI! 🎓 I am your personal academic study companion. 
+          sender: 'KorsIQ',
+          text: `Welcome to KorsIQ! 🎓 I am your personal academic study companion. 
 
 ${fileName ? `I have automatically loaded and analyzed your uploaded file: **"${fileName}"**.` : ''} 
 How can I assist you with your studies or coursework today?`,
@@ -100,7 +100,7 @@ How can I assist you with your studies or coursework today?`,
         ...prev,
         {
           id: Math.random().toString(36).substring(2, 9),
-          sender: 'Scolaris',
+          sender: 'KorsIQ',
           text: reply.text || 'I encountered an error processing that question.',
           timestamp: Date.now()
         }
@@ -111,7 +111,7 @@ How can I assist you with your studies or coursework today?`,
         ...prev,
         {
           id: Math.random().toString(36).substring(2, 9),
-          sender: 'Scolaris',
+          sender: 'KorsIQ',
           text: "We're having trouble connecting to our AI service. Please try again shortly.",
           timestamp: Date.now()
         }
@@ -126,7 +126,7 @@ How can I assist you with your studies or coursework today?`,
       setMessages([
         {
           id: 'welcome-reset',
-          sender: 'Scolaris',
+          sender: 'KorsIQ',
           text: `Hi again! I am ready to start fresh. ${fileName ? `I still have your document **"${fileName}"** loaded in memory.` : ''} What should we analyze?`,
           timestamp: Date.now()
         }
@@ -183,11 +183,11 @@ How can I assist you with your studies or coursework today?`,
           <div className="bg-gradient-to-r from-slate-900 to-indigo-950 px-6 py-4 flex items-center justify-between border-b border-indigo-950/20 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-white shadow-inner p-1.5">
-                <ScolarisLogo variant="icon" size={24} colorClass="text-white" />
+                <KorsIQLogo variant="icon" size={24} onDark />
               </div>
               <div>
                 <h4 className="text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
-                  Scolaris AI Assistant
+                  KorsIQ Assistant
                   <Sparkles size={12} className="text-yellow-400 fill-yellow-400 animate-pulse" />
                 </h4>
                 <div className="flex items-center gap-2">
@@ -215,6 +215,7 @@ How can I assist you with your studies or coursework today?`,
               </button>
             </div>
           </div>
+
 
           {/* Dynamic Loaded Context Bar */}
           {(currentCourse || fileName) && (
@@ -245,7 +246,7 @@ How can I assist you with your studies or coursework today?`,
           {/* Message List */}
           <div className="flex-1 p-6 overflow-y-auto space-y-4 min-h-0 bg-slate-50 select-text scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
             {messages.map((msg) => {
-              const isAi = msg.sender === 'Scolaris';
+              const isAi = msg.sender === 'KorsIQ';
               return (
                 <div 
                   key={msg.id} 
@@ -281,7 +282,7 @@ How can I assist you with your studies or coursework today?`,
                 </div>
                 <div className="bg-white border border-slate-100/60 rounded-[1.5rem] rounded-tl-sm px-5 py-4 shadow-sm flex items-center gap-2">
                   <Loader2 size={16} className="text-blue-600 animate-spin" />
-                  <span className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">Scolaris is thinking...</span>
+                  <span className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">KorsIQ is thinking...</span>
                 </div>
               </div>
             )}

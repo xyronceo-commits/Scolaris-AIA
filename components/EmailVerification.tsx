@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { Mail, ArrowRight, RefreshCw, ArrowLeft, Check, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import ScolarisLogo from './ScolarisLogo';
+import KorsIQLogo from './KorsIQLogo';
 
 interface EmailVerificationProps {
   email: string;
@@ -239,7 +239,7 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
       <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full relative z-10">
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center p-3.5 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 hover:scale-105 transition-transform duration-300">
-            <ScolarisLogo variant="icon" size={32} colorClass="text-white" />
+            <KorsIQLogo variant="icon" size={44} onDark />
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">Verify Your Email</h1>
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">6-Digit Security Token</p>
@@ -254,7 +254,7 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
             <h2 className="text-lg font-serif font-bold text-slate-900">Enter Verification Code</h2>
             <p className="text-xs text-slate-600 font-medium leading-relaxed">
               We sent a 6-digit confirmation code to{' '}
-              <span className="font-bold text-slate-900 break-all">{email}</span>.
+              <span className="font-bold text-slate-900 break-all">{email}</span>. Enter it below to activate your KorsIQ account.
             </p>
           </div>
 

@@ -1,6 +1,6 @@
 {
-  "name": "Scolaris AI",
-  "description": "Scolaris AI helps students turn their course materials into smarter study resources, understand difficult topics, practise, revise, and learn more effectively with AI.",
+  "name": "KorsIQ",
+  "description": "KorsIQ helps students turn their course materials into smarter study resources, understand difficult topics, practise, revise, and learn more effectively with AI.",
   "requestFramePermissions": [
     "camera",
     "microphone"
