@@ -109,9 +109,72 @@ function verifyAdminToken(token: string): { email: string; role: string } | null
   }
 }
 
+const OCR_MODEL = 'gemini-3.5-flash';
+const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
+
+function pickGeminiKey(): string | null {
+  const envKey = process.env.GEMINI_API_KEY;
+  return envKey && envKey.startsWith('AIzaSy') ? envKey : null;
+}
+
+/** Reads a scanned / image-only PDF with Gemini's native PDF vision. Returns '' when it can't. */
+async function ocrPdfWithGemini(buffer: Buffer, apiKey: string): Promise<string> {
+  if (buffer.length > OCR_MAX_PDF_BYTES) {
+    console.warn(`OCR skipped: PDF is ${(buffer.length / 1048576).toFixed(1)} MB (limit ${OCR_MAX_PDF_BYTES / 1048576} MB).`);
+    return '';
+  }
+  try {
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+    const response = await ai.models.generateContent({
+      model: OCR_MODEL,
+      contents: [
+        { inlineData: { data: buffer.toString('base64'), mimeType: 'application/pdf' } },
+        'Transcribe all text in this scanned document exactly as written, in reading order, page by page. ' +
+          'Include handwritten text. Do not summarize, translate, or add commentary. ' +
+          'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
+      ],
+      config: { temperature: 0 }
+    });
+    return normalizeExtractedText(response.text || '');
+  } catch (err: any) {
+    console.warn('Gemini PDF OCR failed:', err?.message || err);
+    return '';
+  }
+}
+
+/** Normal extraction first; if a PDF turns out to be scanned, fall back to Gemini OCR. */
+async function extractDocumentWithOcrFallback(
+  buffer: Buffer,
+  fileName: string,
+  fileType: string
+) {
+  const result = await processDocumentBuffer(buffer, fileName, fileType);
+  if (result.success || !result.isScannedPdf) return { ...result, usedOcr: false };
+
+  const key = pickGeminiKey();
+  if (!key) return { ...result, usedOcr: false };
+
+  const text = await ocrPdfWithGemini(buffer, key);
+  if (text.length >= 20 && validateExtractedText(text, 'txt').isValid) {
+    return {
+      success: true,
+      extractedText: text,
+      fileTypeDetected: 'pdf',
+      pageCount: result.pageCount,
+      usedOcr: true
+    };
+  }
+
+  return {
+    ...result,
+    error: "This PDF looks scanned and we couldn't read the text from it. Try a clearer scan, or use the Vision Document Scanner with photos of the pages.",
+    usedOcr: false
+  };
+}
+
 async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   try {
-    const res = await processDocumentBuffer(buffer, 'document.pdf', 'application/pdf');
+    const res = await extractDocumentWithOcrFallback(buffer, 'document.pdf', 'application/pdf');
     if (res.success && res.extractedText) {
       return res.extractedText;
     }
@@ -184,35 +247,22 @@ async function startServer() {
   };
 
   // Lazy init and adapter helper for KorsIQ / Groq / Gemini
-  const getAIKey = (customKey?: string) => {
-    return customKey || process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
+  const getAIKey = () => {
+    return process.env.SCOLARIS_AI_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
   };
 
-  const getCustomKey = (req: express.Request) => {
-    return (
-      (req.headers['x-scolaris-ai-key'] as string) ||
-      (req.headers['x-groq-api-key'] as string) ||
-      (req.headers['x-gemini-api-key'] as string)
-    );
-  };
-
-  const isUsingGemini = (customKey?: string) => {
-    if (customKey) {
-      if (customKey.startsWith('AIzaSy')) return true;
-      if (customKey.startsWith('gsk_')) return false;
-    }
+  const isUsingGemini = () => {
     if (!process.env.SCOLARIS_AI_KEY && !process.env.GROQ_API_KEY && process.env.GEMINI_API_KEY) return true;
     return false;
   };
 
-  const getAI = (customKey?: string) => {
-    const apiKey = getAIKey(customKey);
+  const getAI = () => {
+    const apiKey = getAIKey();
     if (!apiKey) throw new Error('API Key is required');
     return new Groq({ apiKey });
   };
 
   interface AIParams {
-    customKey?: string;
     systemInstruction?: string;
     messages: { role: string; content: string }[];
     temperature?: number;
@@ -316,14 +366,12 @@ async function startServer() {
     return null;
   };
 
-  const runAICall = async ({ customKey, systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
-    const key = getAIKey(customKey);
+  const runAICall = async ({ systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
+    const key = getAIKey();
     if (!key) throw new Error('API Key is required');
 
-    // 1. Try SCOLARIS_AI_KEY or custom key via OpenRouter / OpenAI
-    const scolarisKey = (customKey && !customKey.startsWith('AIzaSy') && !customKey.startsWith('gsk_'))
-      ? customKey
-      : (process.env.SCOLARIS_AI_KEY || (customKey && customKey.startsWith('sk-') ? customKey : null));
+    // 1. Try SCOLARIS_AI_KEY via OpenRouter / OpenAI
+    const scolarisKey = process.env.SCOLARIS_AI_KEY || null;
 
     if (scolarisKey && !preferGroq) {
       const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
@@ -333,9 +381,7 @@ async function startServer() {
     }
 
     // 2. Groq Execution
-    const groqKey = (customKey && customKey.startsWith('gsk_'))
-      ? customKey
-      : (process.env.GROQ_API_KEY || (key && key.startsWith('gsk_') ? key : null));
+    const groqKey = process.env.GROQ_API_KEY || (key && key.startsWith('gsk_') ? key : null);
 
     if (groqKey) {
       try {
@@ -378,12 +424,10 @@ async function startServer() {
       }
     }
 
-    // 3. Gemini Execution - STRICTLY ONLY IF A VALID GEMINI KEY IS PROVIDED (starts with AIzaSy)
-    const geminiKey = (customKey && customKey.startsWith('AIzaSy'))
-      ? customKey
-      : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')
-          ? process.env.GEMINI_API_KEY
-          : (key && key.startsWith('AIzaSy') ? key : null));
+    // 3. Gemini Execution - STRICTLY ONLY IF A VALID GEMINI KEY IS CONFIGURED (starts with AIzaSy)
+    const geminiKey = (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy'))
+      ? process.env.GEMINI_API_KEY
+      : (key && key.startsWith('AIzaSy') ? key : null);
 
     if (geminiKey) {
       try {
@@ -739,10 +783,8 @@ async function startServer() {
       .trim();
   }
 
-  async function generateGroqPodcastScript(studyMaterial: string, customApiKey?: string): Promise<string> {
-    const groqKey = (customApiKey && customApiKey.startsWith('gsk_'))
-      ? customApiKey
-      : (process.env.GROQ_API_KEY || (customApiKey && !customApiKey.startsWith('AIzaSy') ? customApiKey : null));
+  async function generateGroqPodcastScript(studyMaterial: string): Promise<string> {
+    const groqKey = process.env.GROQ_API_KEY || null;
 
     if (!groqKey) {
       throw new Error("GROQ_API_KEY environment variable is not configured.");
@@ -964,9 +1006,8 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   // Proxy Groq / Gemini Chat
   app.post('/api/ai/chat', requireAuth, apiRateLimiter, async (req, res) => {
     const { messages, groupName, groupDesc } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getChatFallback(groupName));
       }
@@ -976,7 +1017,6 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
       
       const aiContent = await runAICall({
-        customKey,
         messages: [{ role: 'user', content: prompt }]
       });
       res.json({ text: aiContent });
@@ -989,10 +1029,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   // Dedicated Group AI Study Endpoint (Grounded strictly in group materials)
   app.post('/api/groups/ai', requireAuth, apiRateLimiter, async (req, res) => {
     const { groupId, groupName, groupCourse, materialsContent, prompt, mode } = req.body;
-    const customKey = getCustomKey(req);
 
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       
       let systemInstruction = `You are KorsIQ, an intelligent academic study companion assigned exclusively to the Study Group: "${groupName || 'Academic Study Group'}" (Course: ${groupCourse || 'General'}).
       
@@ -1022,7 +1061,6 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       const aiContent = await runAICall({
-        customKey,
         systemInstruction,
         messages: [{ role: 'user', content: prompt || 'Synthesize and analyze the group study materials.' }],
         temperature: 0.4
@@ -1040,14 +1078,12 @@ CRITICAL SECURITY & CONTEXT RULES:
   // Magic Import
   app.post('/api/ai/import', requireAuth, apiRateLimiter, async (req, res) => {
     const { text } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getImportFallback(text));
       }
       const aiContent = await runAICall({
-        customKey,
         systemInstruction: 'Extract course metadata from the following text. You must return a valid JSON object with a "courses" key containing an array of courses. Each course must have "code", "title", "units" (number), "difficulty" ("Easy", "Medium", "Hard"), and "description".',
         messages: [{ role: 'user', content: text }],
         jsonMode: true
@@ -1063,14 +1099,12 @@ CRITICAL SECURITY & CONTEXT RULES:
   // Generate Schedule
   app.post('/api/ai/schedule', requireAuth, apiRateLimiter, async (req, res) => {
     const { courses, university } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getScheduleFallback(courses, university));
       }
       const aiContent = await runAICall({
-        customKey,
         systemInstruction: `Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
         You must return a valid JSON object with a "schedule" key containing an array of sessions. 
         Each session object must have:
@@ -1093,16 +1127,15 @@ CRITICAL SECURITY & CONTEXT RULES:
   // KorsIQ Generate
   app.post('/api/scolaris/generate', requireAuth, apiRateLimiter, async (req, res) => {
     const { studyMaterial, mode } = req.body;
-    const customKey = getCustomKey(req);
 
     if (!studyMaterial) {
       return res.status(400).json({ error: "No study material provided." });
     }
 
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
-        return res.status(500).json({ error: "API key is required" });
+        return res.status(503).json({ error: "The AI service is not configured. Please try again later." });
       }
 
       let systemPrompt = "";
@@ -1152,7 +1185,6 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       const rawContent = await runAICall({
-        customKey,
         systemInstruction: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
@@ -1197,7 +1229,7 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       const buffer = Buffer.from(contentBase64, 'base64');
-      const result = await processDocumentBuffer(buffer, fileName || 'document', fileType || '');
+      const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '');
 
       if (!result.success) {
         return res.status(200).json({
@@ -1213,7 +1245,8 @@ CRITICAL SECURITY & CONTEXT RULES:
         fileName,
         fileTypeDetected: result.fileTypeDetected,
         extractedText: result.extractedText,
-        pageCount: result.pageCount
+        pageCount: result.pageCount,
+        usedOcr: result.usedOcr
       });
     } catch (error: any) {
       console.error('File extraction backend failed:', error);
@@ -1225,7 +1258,6 @@ CRITICAL SECURITY & CONTEXT RULES:
   app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
-      const customKey = getCustomKey(req);
 
       if (!contentBase64) {
         return res.status(400).json({ error: 'contentBase64 parameter is required' });
@@ -1265,9 +1297,7 @@ You MUST return a JSON object containing structured study assets with this exact
 }`;
 
       // Use Gemini vision if valid Gemini key is present
-      const geminiVisionKey = (customKey && customKey.startsWith('AIzaSy'))
-        ? customKey
-        : (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy') ? process.env.GEMINI_API_KEY : null);
+      const geminiVisionKey = (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith('AIzaSy')) ? process.env.GEMINI_API_KEY : null;
 
       if (geminiVisionKey) {
         const aiGen = new GoogleGenAI({
@@ -1309,7 +1339,6 @@ You MUST return a JSON object containing structured study assets with this exact
         }
 
         const rawContent = await runAICall({
-          customKey,
           systemInstruction: visionSchemaPrompt,
           messages: [{ role: 'user', content: `Document content:\n${textContent}` }],
           temperature: 0.3,
@@ -1350,11 +1379,10 @@ You MUST return a JSON object containing structured study assets with this exact
   // Advanced Academic AI Companion / tutoring endpoint
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
     const { messages, courseContext, fileContent } = req.body;
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json({ text: "[Offline Companion Mode] Hello! I am KorsIQ, your AI Study Assistant. To access full academic responses, please set your API key in the Profile tab." });
+        return res.json({ text: "[Offline Companion Mode] Hello! I am KorsIQ, your AI Study Assistant. The AI service is temporarily unavailable, so please try again in a little while." });
       }
 
       let systemPrompt = `You are KorsIQ Academic Chatbot, an elite, highly supportive personal AI tutor and academic study master.
@@ -1387,7 +1415,6 @@ Always refer to this context when answering questions about the material, explai
       }));
 
       const aiContent = await runAICall({
-        customKey,
         systemInstruction: systemPrompt,
         messages: clientMessages,
         temperature: 0.5
@@ -1403,7 +1430,6 @@ Always refer to this context when answering questions about the material, explai
   // Study Materials
   app.post('/api/ai/materials', requireAuth, apiRateLimiter, async (req, res) => {
     const { content, type } = req.body;
-    const customKey = getCustomKey(req);
     try {
       if (!content || typeof content !== 'string') {
         return res.status(400).json({ error: "No study material provided." });
@@ -1417,7 +1443,7 @@ Always refer to this context when answering questions about the material, explai
       }
 
       const cleanContent = normalizeExtractedText(content);
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getMaterialsFallback(cleanContent, type));
       }
@@ -1485,7 +1511,6 @@ CRITICAL WRITING RULES:
       }
       
       const text = await runAICall({
-        customKey,
         systemInstruction,
         messages: [{ role: 'user', content: userContent }],
         jsonMode: type !== 'summary',
@@ -1519,13 +1544,12 @@ CRITICAL WRITING RULES:
   // Podcast Generation via Groq AI (llama3-70b-8192) & Speech Audio Synthesis
   const handlePodcastGeneration = async (req: express.Request, res: express.Response) => {
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
-    const customKey = getCustomKey(req);
 
     try {
       // Step 1: Connect to Groq using GROQ_API_KEY and generate script via llama3-70b-8192
       let rawScript = '';
       try {
-        rawScript = await generateGroqPodcastScript(studyText, customKey);
+        rawScript = await generateGroqPodcastScript(studyText);
       } catch (groqErr: any) {
         console.warn('Direct Groq llama3-70b-8192 call failed, attempting fallback AI caller:', groqErr?.message || groqErr);
         const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
@@ -1538,7 +1562,6 @@ Dr. Taylor: [spoken text]
 Strictly NO markdown formatting.`;
 
         rawScript = await runAICall({
-          customKey,
           preferGroq: true,
           systemInstruction,
           temperature: 0.4,
@@ -1579,14 +1602,12 @@ Strictly NO markdown formatting.`;
   app.post('/api/ai/validate', requireAuth, apiRateLimiter, async (req, res) => {
     const { text, message, groupName, groupDesc } = req.body;
     const msgText = text || message || '';
-    const customKey = getCustomKey(req);
     try {
-      const apiKey = getAIKey(customKey);
+      const apiKey = getAIKey();
       if (!apiKey) {
         return res.json(getValidateFallback());
       }
       const rawContent = await runAICall({
-        customKey,
         systemInstruction: 'Evaluate if the message is relevant to the purpose of the study group. You must return a valid JSON object: { "isRelevant": boolean, "reason": string }',
         messages: [
           {
