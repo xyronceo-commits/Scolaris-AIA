@@ -816,7 +816,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       <span className="text-amber-600 font-semibold">Goal not configured yet — Click to set your goal</span>
                     ) : (
                       currentCGPA >= targetCGPA 
-                        ? 'Target achieved! Outstanding work. 🎉' 
+                        ? 'Target achieved. Outstanding performance.' 
                         : `${(targetCGPA - currentCGPA).toFixed(2)} point improvement target`
                     )}
                   </p>

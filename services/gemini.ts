@@ -262,10 +262,10 @@ export const GeminiService = {
       console.warn("Study materials fallback active:", err);
       if (type === 'summary') {
         let summary = `# Strategic Academic Summary\n\n`;
-        summary += `## 📌 Core Takeaways\n`;
+        summary += `## Core Takeaways\n`;
         summary += `- **Active Recall**: Engage continuously with self-testing and practice questions.\n`;
         summary += `- **Concept Mapping**: Review key formulas, terminology, and logical structures.\n\n`;
-        summary += `## 🔍 Key Modules\n`;
+        summary += `## Key Modules\n`;
         const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 15);
         if (sentences.length > 0) {
           const limit = Math.min(sentences.length, 6);
@@ -396,7 +396,7 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       return data.text;
     } catch (err: any) {
       console.warn("Group chat warning:", err?.message || err);
-      return `[KorsIQ Tutor] I encountered an issue connecting to the AI service (${err?.message || 'Connection error'}). Please verify GROQ_API_KEY or GEMINI_API_KEY in your hosting environment variables.`;
+      return `[KorsIQ Tutor] I encountered an issue connecting to the AI service (${err?.message || 'Connection error'}). Please verify GEMINI_API_KEY in your hosting environment variables.`;
     }
   },
 

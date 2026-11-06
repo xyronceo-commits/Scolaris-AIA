@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, MessageSquare, X, Send, GraduationCap, Bot, FileText, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { MessageSquare, X, Send, GraduationCap, FileText, Trash2, Loader2, RefreshCw } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { Course, StudyHubData } from '../types';
 import ReactMarkdown from 'react-markdown';
@@ -50,9 +50,9 @@ export const ScolarisChatWidget: React.FC<ScolarisChatWidgetProps> = ({
         {
           id: 'welcome',
           sender: 'KorsIQ',
-          text: `Welcome to KorsIQ! 🎓 I am your personal academic study companion. 
+          text: `Welcome to KorsIQ. I am your academic study companion. 
 
-${fileName ? `I have automatically loaded and analyzed your uploaded file: **"${fileName}"**.` : ''} 
+${fileName ? `I have loaded and analyzed your course document: **"${fileName}"**.` : ''} 
 How can I assist you with your studies or coursework today?`,
           timestamp: Date.now()
         }
@@ -135,15 +135,15 @@ How can I assist you with your studies or coursework today?`,
   };
 
   const presetSuggestions = [
-    ...(fileName ? [{ label: '📄 File Summary', prompt: 'Please summarize the key takeaways of the uploaded file.' }] : []),
-    ...(fileName ? [{ label: '❓ Quiz Me', prompt: 'Generate 3 quick multiple-choice questions from this uploaded document to test my active recall!' }] : []),
-    { label: '📝 Build Tasklist', prompt: `Construct a highly-efficient step-by-step study schedule for my course: ${currentCourse?.code || 'my semester classes'}.` },
-    { label: '💡 Explaining Tips', prompt: 'What are the best methods to memorize dense academic information?' }
+    ...(fileName ? [{ label: 'File Summary', prompt: 'Please summarize the key takeaways of the uploaded file.' }] : []),
+    ...(fileName ? [{ label: 'Quiz Me', prompt: 'Generate 3 quick multiple-choice questions from this uploaded document to test my active recall!' }] : []),
+    { label: 'Study Schedule', prompt: `Construct a highly-efficient step-by-step study schedule for my course: ${currentCourse?.code || 'my semester classes'}.` },
+    { label: 'Memory Techniques', prompt: 'What are the best methods to memorize dense academic information?' }
   ];
 
   return (
     <>
-      {/* Dynamic Floating Button */}
+      {/* Floating Button */}
       <button
         id="scolaris-summon-widget"
         onClick={() => {
@@ -152,20 +152,21 @@ How can I assist you with your studies or coursework today?`,
         }}
         className={`fixed bottom-6 right-6 z-50 p-3.5 rounded-full shadow-lg transition-all duration-200 flex items-center justify-center cursor-pointer border ring-2 ring-white/50 active:scale-95 ${
           isOpen
-            ? 'bg-slate-950 text-white border-slate-800'
+            ? 'bg-slate-900 text-white border-slate-800'
             : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500 hover:shadow-xl'
         }`}
+        aria-label="Toggle study chat"
       >
         <div className="relative flex items-center justify-center">
           {isOpen ? (
-            <X size={20} className="animate-in spin-in duration-200" />
+            <X size={20} />
           ) : (
             <>
-              <Bot size={22} className="text-white" />
+              <MessageSquare size={20} className="text-white" />
               {hasNewMessage && (
                 <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-white"></span>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500 border border-white"></span>
                 </span>
               )}
             </>
@@ -186,14 +187,13 @@ How can I assist you with your studies or coursework today?`,
                 <KorsIQLogo variant="icon" size={20} onDark />
               </div>
               <div>
-                <h4 className="text-xs font-serif font-bold text-white tracking-wide flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-white tracking-wide">
                   KorsIQ Assistant
-                  <Sparkles size={11} className="text-blue-400" />
                 </h4>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                   <span className="text-[9px] text-slate-300 font-medium">
-                    Live Academic Agent
+                    Academic Study Assistant
                   </span>
                 </div>
               </div>

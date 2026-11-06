@@ -36,6 +36,26 @@ body {
   background: #94A3B8;
 }
 
+#root {
+  min-height: 100vh;
+  position: relative;
+}
+
+.nav-dock-container {
+  pointer-events: none;
+}
+.nav-dock-container > * {
+  pointer-events: auto;
+}
+
+.page-transition {
+  animation: pageFade 0.3s ease-out;
+}
+@keyframes pageFade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Print Stylesheet for High-Fidelity PDF generation */
 @media print {
   body {

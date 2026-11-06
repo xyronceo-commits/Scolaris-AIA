@@ -358,21 +358,25 @@ const StudyHub: React.FC<StudyHubProps> = ({
               activeCourse?.code,
               activeCourse?.title
             );
-          } catch (stErr) {
-            console.warn('Isolated storage save warning:', stErr);
+            addNotification('content', 'Storage Confirmed', `${name} safely preserved in cloud storage.`, 'hub');
+          } catch (stErr: any) {
+            console.warn('Storage save warning:', stErr);
+            addNotification('content', 'Storage Notice', `Document parsed for study session, but could not be persisted to cloud storage: ${stErr?.message || 'Storage unavailable'}.`, 'hub');
           }
         }
         
-        // Summarize uploaded file
-        addNotification('content', 'Summarizing Document', `Summarizing core takeaways from ${name}...`, 'hub');
+        // Analyze uploaded file with Gemini
+        addNotification('content', 'Analyzing Document', `Generating academic summary for ${name}...`, 'hub');
         let summaryText = '';
         try {
           const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
           if (sumRes) {
             summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
+            addNotification('content', 'Analysis Complete', `Summary and core takeaways synthesized for ${name}.`, 'hub');
           }
-        } catch (sumErr) {
+        } catch (sumErr: any) {
           console.warn('Summary generation warning:', sumErr);
+          addNotification('content', 'Analysis Notice', `Document loaded. Analysis synthesis notice: ${sumErr?.message || 'Summary unavailable'}.`, 'hub');
         }
 
         const updatedHub = { 

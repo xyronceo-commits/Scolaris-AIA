@@ -26,15 +26,15 @@ interface CourseManagerProps {
 
 const PRESET_SYLLABUSES = [
   {
-    label: '💻 Computer Science',
+    label: 'Computer Science',
     text: 'CS203: Advanced Algorithms (3 Units). Difficulty: Advanced. Study of dynamic programming, graph algorithms, and tree search structures.'
   },
   {
-    label: '🧬 BioStatistics',
+    label: 'BioStatistics',
     text: 'BIO180: Core Biostatistics (4 Units). Difficulty: Standard. Covers regression models, statistical inference, and genetic variant screening.'
   },
   {
-    label: '📊 Finance Intro',
+    label: 'Microeconomics & Finance',
     text: 'EC102: Introduction to Microeconomics (3 Units). Difficulty: Basic. Analysis of consumer theory, competitive markets, and regulatory structures.'
   }
 ];

@@ -4,7 +4,6 @@ import path from 'path';
 import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { isAiSender } from './lib/brand';
-import Groq from 'groq-sdk';
 import { GoogleGenAI } from '@google/genai';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -203,14 +202,12 @@ async function startServer() {
 
   // Enforce server-side AI security: reject and completely strip any client-supplied provider credentials
   app.use((req, res, next) => {
-    delete req.headers['x-groq-api-key'];
     delete req.headers['x-gemini-api-key'];
     delete req.headers['x-scolaris-ai-key'];
     delete req.headers['x-api-key'];
     if (req.body && typeof req.body === 'object') {
       delete req.body.apiKey;
       delete req.body.customKey;
-      delete req.body.groqApiKey;
       delete req.body.geminiApiKey;
     }
     next();
@@ -273,9 +270,9 @@ async function startServer() {
     next();
   };
 
-  // Server-side AI provider credentials resolver (strictly from sanitized environment variables)
+  // Server-side AI provider credentials resolver (strictly Google Gemini)
   const getAIKey = (): string | null => {
-    return cleanEnvKey('GROQ_API_KEY') || cleanEnvKey('GEMINI_API_KEY') || cleanEnvKey('SCOLARIS_AI_KEY') || null;
+    return cleanEnvKey('GEMINI_API_KEY') || cleanEnvKey('SCOLARIS_AI_KEY') || null;
   };
 
   interface AIParams {
@@ -286,221 +283,66 @@ async function startServer() {
     preferGroq?: boolean;
   }
 
-  const tryOpenRouterCall = async (apiKey: string, systemInstruction?: string, messages: { role: string; content: string }[] = [], temperature?: number, jsonMode?: boolean): Promise<string | null> => {
-    if (!apiKey) return null;
+  const runAICall = async ({ systemInstruction, messages, temperature, jsonMode }: AIParams): Promise<string> => {
+    const geminiKey = pickGeminiKey();
 
-    // Direct Groq SDK execution if key starts with gsk_
-    if (apiKey.startsWith('gsk_')) {
-      try {
-        const groq = new Groq({ apiKey });
-        const apiMessages: any[] = [];
-        if (systemInstruction) apiMessages.push({ role: 'system', content: systemInstruction });
-        apiMessages.push(...messages);
-        const resp = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          messages: apiMessages,
-          temperature: temperature !== undefined ? temperature : 0.3,
-          ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-        });
-        const content = resp.choices[0]?.message?.content;
-        if (content) return content;
-      } catch (err: any) {
-        console.warn("Direct Groq call in tryOpenRouterCall warning:", err?.message || err);
-      }
+    if (!geminiKey) {
+      throw new Error('Google Gemini API key is not configured on the server. Please configure GEMINI_API_KEY in your hosting environment variables.');
     }
 
-    const candidateModels = [
-      'meta-llama/llama-3.3-70b-instruct',
-      'qwen/qwen-2.5-72b-instruct',
-      'openai/gpt-4o-mini',
-      'deepseek/deepseek-chat'
-    ];
+    const aiGen = new GoogleGenAI({
+      apiKey: geminiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
 
-    const apiMessages: any[] = [];
+    const contents = messages.map(m => {
+      let role = m.role === 'assistant' ? 'model' : m.role;
+      if (role !== 'user' && role !== 'model') {
+        role = 'user';
+      }
+      return {
+        role,
+        parts: [{ text: m.content }]
+      };
+    });
+
+    const config: any = {};
     if (systemInstruction) {
-      apiMessages.push({ role: 'system', content: systemInstruction });
+      config.systemInstruction = systemInstruction;
     }
-    apiMessages.push(...messages);
-
-    for (const model of candidateModels) {
-      try {
-        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://ai.studio/build',
-            'X-Title': 'KorsIQ'
-          },
-          body: JSON.stringify({
-            model,
-            messages: apiMessages,
-            temperature: temperature !== undefined ? temperature : 0.3,
-            ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-          })
-        });
-
-        if (resp.ok) {
-          const data = await resp.json();
-          const content = data?.choices?.[0]?.message?.content;
-          if (content) return content;
-        }
-      } catch (err: any) {
-        console.warn(`OpenRouter model '${model}' call warning:`, err?.message || err);
-      }
+    if (temperature !== undefined) {
+      config.temperature = temperature;
+    }
+    if (jsonMode) {
+      config.responseMimeType = "application/json";
     }
 
-    // Direct OpenAI API fallback if sk- key (and not sk-or-)
-    if (apiKey.startsWith('sk-') && !apiKey.startsWith('sk-or-')) {
-      try {
-        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: apiMessages,
-            temperature: temperature !== undefined ? temperature : 0.3,
-            ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-          })
-        });
-
-        if (resp.ok) {
-          const data = await resp.json();
-          const content = data?.choices?.[0]?.message?.content;
-          if (content) return content;
-        }
-      } catch (err: any) {
-        // ignore
-      }
-    }
-
-    return null;
-  };
-
-  const runAICall = async ({ systemInstruction, messages, temperature, jsonMode, preferGroq }: AIParams): Promise<string> => {
-    const groqKey = cleanEnvKey('GROQ_API_KEY') || (cleanEnvKey('SCOLARIS_AI_KEY').startsWith('gsk_') ? cleanEnvKey('SCOLARIS_AI_KEY') : '');
-    const geminiKey = cleanEnvKey('GEMINI_API_KEY') || (cleanEnvKey('SCOLARIS_AI_KEY').startsWith('AIzaSy') ? cleanEnvKey('SCOLARIS_AI_KEY') : '');
-    const scolarisKey = cleanEnvKey('SCOLARIS_AI_KEY');
-
-    if (!groqKey && !geminiKey && !scolarisKey) {
-      throw new Error('AI credentials are not configured on the server. Please configure GROQ_API_KEY or GEMINI_API_KEY in hosting environment variables.');
-    }
-
+    const geminiCandidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
     let lastError: any = null;
 
-    // 1. Try Groq Execution using server credentials (ultra-fast inference)
-    if (groqKey) {
+    for (const model of geminiCandidateModels) {
       try {
-        const groq = new Groq({ apiKey: groqKey });
-        const apiMessages: any[] = [];
-        if (systemInstruction) {
-          apiMessages.push({ role: 'system', content: systemInstruction });
-        }
-        apiMessages.push(...messages);
-
-        const candidateModels = [
-          'llama-3.3-70b-versatile',
-          'llama-3.1-8b-instant'
-        ];
-
-        for (const model of candidateModels) {
-          try {
-            const response = await groq.chat.completions.create({
-              model,
-              messages: apiMessages,
-              temperature: temperature !== undefined ? temperature : 0.3,
-              ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-            });
-
-            const content = response.choices[0]?.message?.content;
-            if (content && content.trim().length > 0) {
-              return content;
-            }
-          } catch (mErr: any) {
-            console.warn(`Groq model '${model}' call failed:`, mErr?.message || mErr);
-            lastError = mErr;
-          }
+        const response = await aiGen.models.generateContent({
+          model,
+          contents,
+          config
+        });
+        if (response.text && response.text.trim().length > 0) {
+          return response.text;
         }
       } catch (gErr: any) {
-        console.warn(`Groq execution warning:`, gErr?.message || gErr);
+        console.warn(`Gemini model '${model}' call warning:`, gErr?.message || gErr);
         lastError = gErr;
       }
     }
 
-    // 2. Gemini Execution using server credentials (multimodal & deep reasoning)
-    if (geminiKey) {
-      try {
-        const aiGen = new GoogleGenAI({
-          apiKey: geminiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            }
-          }
-        });
-
-        const contents = messages.map(m => {
-          let role = m.role === 'assistant' ? 'model' : m.role;
-          if (role !== 'user' && role !== 'model') {
-            role = 'user';
-          }
-          return {
-            role,
-            parts: [{ text: m.content }]
-          };
-        });
-
-        const config: any = {};
-        if (systemInstruction) {
-          config.systemInstruction = systemInstruction;
-        }
-        if (temperature !== undefined) {
-          config.temperature = temperature;
-        }
-        if (jsonMode) {
-          config.responseMimeType = "application/json";
-        }
-
-        const geminiCandidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
-        for (const model of geminiCandidateModels) {
-          try {
-            const response = await aiGen.models.generateContent({
-              model,
-              contents,
-              config
-            });
-            if (response.text && response.text.trim().length > 0) {
-              return response.text;
-            }
-          } catch (gErr: any) {
-            console.warn(`Gemini model '${model}' call warning:`, gErr?.message || gErr);
-            lastError = gErr;
-          }
-        }
-      } catch (gemInitErr: any) {
-        console.warn("Gemini execution warning:", gemInitErr?.message || gemInitErr);
-        lastError = gemInitErr;
-      }
-    }
-
-    // 3. OpenRouter / OpenAI fallback if scolarisKey is an OpenRouter/OpenAI key
-    if (scolarisKey && (scolarisKey.startsWith('sk-') || scolarisKey.startsWith('sk-or-'))) {
-      try {
-        const openRouterResult = await tryOpenRouterCall(scolarisKey, systemInstruction, messages, temperature, jsonMode);
-        if (openRouterResult) {
-          return openRouterResult;
-        }
-      } catch (oErr: any) {
-        lastError = oErr;
-      }
-    }
-
-    const failureReason = lastError?.message || 'All AI providers failed to generate a response';
-    console.error('[runAICall Fatal]:', failureReason);
-    throw new Error(`AI service failure: ${failureReason}`);
+    const failureReason = lastError?.message || 'Gemini API failed to generate a response';
+    console.error('[Gemini AI Execution Fatal]:', failureReason);
+    throw new Error(`Gemini AI service error: ${failureReason}`);
   };
 
   let s3Client: S3Client | null = null;
@@ -1122,10 +964,10 @@ Synthesizing these insights underscores the necessity of continuous recalibratio
     if (type === 'summary') {
       let summary = `# Strategic Academic Summary\n\n`;
       summary += `Based on the provided resource materials and lecture documents:\n\n`;
-      summary += `## 📌 Key Core Tenets\n`;
+      summary += `## Key Core Tenets\n`;
       summary += `- **Active Synthesis**: Mastery of these concepts requires dynamic application and problem set practice.\n`;
       summary += `- **Spaced Repetition**: We recommend studying this material at 1, 3, and 7-day intervals to build long-term retention.\n\n`;
-      summary += `## 🔍 Extracted Learning Modules\n`;
+      summary += `## Extracted Learning Modules\n`;
       
       const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 15);
       if (sentences.length > 0) {
@@ -1245,15 +1087,7 @@ Synthesizing these insights underscores the necessity of continuous recalibratio
       .trim();
   }
 
-  async function generateGroqPodcastScript(studyMaterial: string): Promise<string> {
-    const groqKey = cleanEnvKey('GROQ_API_KEY') || (cleanEnvKey('SCOLARIS_AI_KEY').startsWith('gsk_') ? cleanEnvKey('SCOLARIS_AI_KEY') : '');
-
-    if (!groqKey) {
-      throw new Error("Our AI podcast service is temporarily unavailable. Please try again shortly.");
-    }
-
-    const groq = new Groq({ apiKey: groqKey });
-
+  async function generateGeminiPodcastScript(studyMaterial: string): Promise<string> {
     const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
 Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
 Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
@@ -1268,41 +1102,11 @@ Strict Rules:
 Alex: [spoken text]
 Dr. Taylor: [spoken text]`;
 
-    const modelsToTry = [
-      'llama-3.3-70b-versatile',
-      'llama-3.1-8b-instant'
-    ];
-
-    let rawScript: string | null = null;
-    let lastError: any = null;
-
-    for (const model of modelsToTry) {
-      try {
-        const response = await groq.chat.completions.create({
-          model,
-          messages: [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: `Study Material / Revision Content: "${studyMaterial?.slice(0, 4500) || 'General Academic Revision'}"` }
-          ],
-          temperature: 0.4
-        });
-
-        const content = response.choices[0]?.message?.content;
-        if (content && content.trim().length > 0) {
-          rawScript = content;
-          break;
-        }
-      } catch (err: any) {
-        console.warn(`Groq podcast call with model '${model}' failed:`, err?.message || err);
-        lastError = err;
-      }
-    }
-
-    if (!rawScript) {
-      throw new Error(`Groq AI podcast script generation failed: ${lastError?.message || 'No response from Groq API'}`);
-    }
-
-    return rawScript;
+    return await runAICall({
+      systemInstruction,
+      messages: [{ role: 'user', content: `Study Material / Revision Content: "${studyMaterial?.slice(0, 8000) || 'General Academic Revision'}"` }],
+      temperature: 0.4
+    });
   }
 
   function generateSpeechWav(scriptText: string): Buffer {
@@ -1517,7 +1321,7 @@ CRITICAL SECURITY & CONTEXT RULES:
       }
 
       if (!apiKey) {
-        const fallbackText = `Analysis for group "${groupName}":\n\n### 📌 Group Study Synthesis\n- Materials Analyzed: ${materialsContent ? '1+ group documents' : 'No documents uploaded yet.'}\n\n**Query:** "${prompt || 'General Study Overview'}"\n\nI am ready to help! Upload lecture slides or notes in the Shared Materials tab to analyze concepts.`;
+        const fallbackText = `Analysis for group "${groupName}":\n\n### Group Study Synthesis\n- Materials Analyzed: ${materialsContent ? '1+ group documents' : 'No documents uploaded yet.'}\n\n**Query:** "${prompt || 'General Study Overview'}"\n\nI am ready to help! Upload lecture slides or notes in the Shared Materials tab to analyze concepts.`;
         return res.json({ text: fallbackText });
       }
 
@@ -1792,8 +1596,7 @@ RULES:
         messages: (messages || []).map((m: any) => ({
           role: m.role || (m.sender === 'user' ? 'user' : 'assistant'),
           content: m.content || m.text || ''
-        })),
-        preferGroq: true
+        }))
       });
 
       res.json({ text: aiResponse || "I am analyzing your academic question. How can I assist you with your study plan today?" });
@@ -2524,8 +2327,7 @@ CRITICAL WRITING RULES:
       const text = await runAICall({
         systemInstruction,
         messages: [{ role: 'user', content: userContent }],
-        jsonMode: type !== 'summary',
-        preferGroq: type === 'summary'
+        jsonMode: type !== 'summary'
       });
       
       if (type === 'summary') {
@@ -2552,32 +2354,17 @@ CRITICAL WRITING RULES:
     }
   });
 
-  // Podcast Generation via Groq AI (llama3-70b-8192) & Speech Audio Synthesis
+  // Podcast Generation via Google Gemini & Speech Audio Synthesis
   const handlePodcastGeneration = async (req: express.Request, res: express.Response) => {
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
 
     try {
-      // Step 1: Connect to Groq using server GROQ_API_KEY and generate script via llama3-70b-8192
+      // Generate script using Google Gemini
       let rawScript = '';
       try {
-        rawScript = await generateGroqPodcastScript(studyText);
-      } catch (groqErr: any) {
-        console.warn('Direct Groq llama3-70b-8192 call failed, attempting fallback AI caller:', groqErr?.message || groqErr);
-        const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
-Create a natural, highly engaging dialogue conversation (4 to 6 exchanges) between two podcast hosts:
-Host 1 (Alex): Student host asking insightful questions.
-Host 2 (Dr. Taylor): Professor host explaining core concepts.
-Format dialogue strictly line by line:
-Alex: [spoken text]
-Dr. Taylor: [spoken text]
-Strictly NO markdown formatting.`;
-
-        rawScript = await runAICall({
-          preferGroq: true,
-          systemInstruction,
-          temperature: 0.4,
-          messages: [{ role: 'user', content: `Study Material: "${studyText?.slice(0, 4000) || 'General Academic Revision'}"` }]
-        });
+        rawScript = await generateGeminiPodcastScript(studyText);
+      } catch (geminiErr: any) {
+        console.warn('Gemini podcast generation error:', geminiErr?.message || geminiErr);
       }
 
       if (!rawScript || typeof rawScript !== 'string') {
@@ -2605,8 +2392,6 @@ Strictly NO markdown formatting.`;
   };
 
   app.post('/api/ai/podcast', requireAuth, apiRateLimiter, handlePodcastGeneration);
-  app.post('/api/ai/podcast/groq', requireAuth, apiRateLimiter, handlePodcastGeneration);
-  app.post('/api/podcast/groq', requireAuth, apiRateLimiter, handlePodcastGeneration);
   app.post('/api/podcast/generate', requireAuth, apiRateLimiter, handlePodcastGeneration);
 
   // Message Validation Route
@@ -2962,8 +2747,7 @@ Strictly NO markdown formatting.`;
           firestoreDatabaseId: 'public (Postgres)'
         },
         aiEngines: {
-          groq: 'Online',
-          gemini: 'Online'
+          gemini: pickGeminiKey() ? 'Online' : 'Configured'
         },
         timestamp: new Date().toISOString()
       }
