@@ -104,6 +104,26 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Real Status Tags:** Added migration `supabase/migrations/20261107_user_files_status.sql` adding nullable `status TEXT DEFAULT 'ready'` to `user_files`. Rendered icon-free text tags (`Ready`, `Processing`) only if real status exists (no fake status indicators).
 - **Verification:** Responsive testing at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 5: Academic Studio Editor
+
+- **Top Control Bar:** Document title, saved state badge with checkmark (`Saved`), Undo / Redo controls with history tracking, and single primary action button `Export`.
+- **Three-Column Desktop Layout (1280px):**
+  - *Left Column (Outline):* Numbered section hierarchy with active section highlighted, completion checkmarks, and overall target word count progress.
+  - *Center Column (Canvas):* Active section header with section goal, spec hint line *"Draft the next paragraph yourself, or ask for a suggested draft of this section."*, and clean writing canvas with placeholder *"Start writing, or ask for a suggested draft."*.
+  - *Right Column (Brief, Actions & Sources):*
+    - *Brief card:* Summary formatted as `Report · 1,500 words · undergraduate · APA`.
+    - *Three distinct action buttons:* **Draft this section** (primary), **Revise selection**, and **Check citations**.
+    - *Sources list:* Attached references with citation chips `(Author, Year)` that insert directly into the active section at cursor position.
+- **Focused Mobile Mode (390px):**
+  - Full-width focused writing canvas.
+  - Docked bottom tabs: `Outline`, `Sources`, `Cite`, and `Versions`.
+  - Tools open as bottom sheets sliding up from the screen bottom with 44px touch targets.
+- **Quiet Upgrade Prompts:** Gated features (`Export` on free plans, `Versions` on non-studio plans) trigger a quiet upgrade card ("one card, one primary button") explaining the feature without clutter.
+- **Typography & Clean UI:** All `font-serif` headings converted to `font-sans`, flat blue/white/black theme tokens, 8px radius.
+- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
 
 
 
