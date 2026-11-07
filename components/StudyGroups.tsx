@@ -45,6 +45,11 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   // Join Group State
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
+  const [joinAttempts, setJoinAttempts] = useState<{ count: number; firstAttemptTime: number }>({ count: 0, firstAttemptTime: 0 });
+
+  // Gating & Removal Modals
+  const [showCircleUpgradePrompt, setShowCircleUpgradePrompt] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<{ id: string; name: string } | null>(null);
 
   // Tabs inside Active Group
   const [activeTab, setActiveTab] = useState<'ai' | 'materials' | 'discussions' | 'overview'>('ai');
@@ -181,10 +186,17 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
     }
   };
 
-  // Handle Join by Code or Direct
+  // Handle Join by Code with Rate Limiting & Distinct Errors
   const handleJoinByCode = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!joinCode.trim()) return;
+
+    const now = Date.now();
+    if (joinAttempts.count >= 5 && now - joinAttempts.firstAttemptTime < 60000) {
+      setJoinError('Too many attempts. Please wait a moment before trying another code.');
+      return;
+    }
+
     setJoinError('');
     setIsAiThinking(true);
 
@@ -193,13 +205,25 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
       const findRes = await DBService.findGroupByCode(code);
 
       if (!findRes || (!findRes.group && !findRes.error)) {
-        setJoinError('Invalid invitation code. No active study circle found matching this code.');
+        setJoinAttempts(prev => ({
+          count: prev.count + 1,
+          firstAttemptTime: prev.count === 0 ? now : prev.firstAttemptTime
+        }));
+        setJoinError("That code doesn't match any circle. Check the code and try again.");
         setIsAiThinking(false);
         return;
       }
 
       if (findRes.error) {
-        setJoinError(findRes.error);
+        setJoinAttempts(prev => ({
+          count: prev.count + 1,
+          firstAttemptTime: prev.count === 0 ? now : prev.firstAttemptTime
+        }));
+        if (findRes.error.toLowerCase().includes('revoked') || findRes.error.toLowerCase().includes('inactive')) {
+          setJoinError('This invite code has expired or has been replaced by the circle owner.');
+        } else {
+          setJoinError(findRes.error);
+        }
         setIsAiThinking(false);
         return;
       }
@@ -207,6 +231,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
       const groupFound = findRes.group!;
       const res = await DBService.joinGroup(groupFound.id, code, currentUserId, profile.name);
       if (res.success && res.group) {
+        setJoinAttempts({ count: 0, firstAttemptTime: 0 });
         setGroups(prev => {
           const exists = prev.some(g => g.id === res.group!.id);
           if (exists) {
@@ -219,7 +244,19 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         setJoinCode('');
         addNotification('message', 'Circle Joined', `You successfully joined "${res.group.name}"!`, 'groups');
       } else {
-        setJoinError(res.error || 'Failed to join circle.');
+        setJoinAttempts(prev => ({
+          count: prev.count + 1,
+          firstAttemptTime: prev.count === 0 ? now : prev.firstAttemptTime
+        }));
+        if (res.isAlreadyMember) {
+          setJoinError('You are already a member of this circle.');
+        } else if (res.error?.toLowerCase().includes('revoked')) {
+          setJoinError('This invite code has expired or has been replaced by the circle owner.');
+        } else if (res.error?.toLowerCase().includes('invalid')) {
+          setJoinError("That code doesn't match any circle. Check the code and try again.");
+        } else {
+          setJoinError(res.error || 'Failed to join circle.');
+        }
       }
     } catch (err: any) {
       setJoinError('Error joining circle. Please try again.');
@@ -466,21 +503,26 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
     }
   };
 
-  // Member Management
-  const handleRemoveMember = async (targetUserId: string) => {
-    if (!activeGroup) return;
-    if (confirm("Are you sure you want to remove this student from the group?")) {
-      const res = await DBService.removeGroupMember(activeGroup.id, targetUserId, currentUserId);
-      if (res.success) {
-        setGroups(prev => prev.map(g => {
-          if (g.id === activeGroup.id) {
-            const updatedMembers = (g.members || []).filter(m => (typeof m === 'string' ? m : m.userId) !== targetUserId);
-            return { ...g, members: updatedMembers, memberCount: updatedMembers.length };
-          }
-          return g;
-        }));
-        addNotification('message', 'Member Removed', 'User has been removed from the group.', 'groups');
-      }
+  // Member Management (Spec: Asks for confirmation and states shared-file access ends)
+  const handleRemoveMember = (targetUserId: string, targetUserName: string) => {
+    setMemberToRemove({ id: targetUserId, name: targetUserName });
+  };
+
+  const confirmRemoveMember = async () => {
+    if (!activeGroup || !memberToRemove) return;
+    const targetUserId = memberToRemove.id;
+    setMemberToRemove(null);
+
+    const res = await DBService.removeGroupMember(activeGroup.id, targetUserId, currentUserId);
+    if (res.success) {
+      setGroups(prev => prev.map(g => {
+        if (g.id === activeGroup.id) {
+          const updatedMembers = (g.members || []).filter(m => (typeof m === 'string' ? m : m.userId) !== targetUserId);
+          return { ...g, members: updatedMembers, memberCount: updatedMembers.length };
+        }
+        return g;
+      }));
+      addNotification('message', 'Member Removed', 'User has been removed from the circle.', 'groups');
     }
   };
 
@@ -549,300 +591,206 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
     }
   };
 
+  const isFreePlan = !profile.isPro && profile.tier !== 'scholar' && profile.tier !== 'sage';
+  const isOwner = activeGroup?.ownerId === currentUserId;
+  const currentMemberObj = (activeGroup?.members || []).find((m: any) =>
+    typeof m === 'object' && (m.userId === currentUserId || m.name === profile.name)
+  );
+  const currentUserRole = isOwner ? 'owner' : (typeof currentMemberObj === 'object' && currentMemberObj ? currentMemberObj.role : 'member');
+  const isOwnerOrMod = isOwner || currentUserRole === 'admin' || currentUserRole === 'moderator';
+
   return (
-    <div className="h-[calc(100vh-140px)] flex flex-col xl:flex-row gap-5 animate-in fade-in duration-300">
-      
-      {/* SIDEBAR: Group Navigation & Discovery */}
-      <div className="w-full xl:w-72 flex flex-col gap-3 shrink-0 h-auto xl:h-full">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
-          <div>
-            <h1 className="text-base font-bold text-slate-900 dark:text-white">Study Circles</h1>
-            <p className="text-xs text-slate-500">Collaborative Academic Groups</p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setShowJoinModal(true)}
-              title="Join via Code"
-              className="w-8 h-8 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors cursor-pointer"
-            >
-              <LinkIcon size={14} />
-            </button>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              title="Create New Circle"
-              className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 transition-colors shadow-xs cursor-pointer"
-            >
-              <Plus size={16} />
-            </button>
-          </div>
+    <div className="space-y-4 animate-in fade-in duration-300">
+      {/* Title & Top Bar per Spec */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
+        <div>
+          <h1 className="text-xl font-bold text-[#111827] dark:text-white">Private Circles</h1>
+          <p className="text-xs text-[#5B6472]">Study groups, members and shared files</p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (isFreePlan) {
+              setShowCircleUpgradePrompt(true);
+            } else {
+              setShowCreateModal(true);
+            }
+          }}
+          className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm"
+        >
+          <Plus size={16} />
+          <span>Create circle</span>
+        </button>
+      </div>
 
-        {/* Directory Switcher Tabs */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex-1 flex flex-col overflow-hidden min-h-[260px] xl:min-h-0">
-          <div className="p-1 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex">
+      <div className="h-[calc(100vh-210px)] flex flex-col lg:flex-row gap-5">
+        {/* LEFT CARD: My circles (Spec: Name and role, Join with code button) */}
+        <div className="w-full lg:w-80 shrink-0 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg p-3.5 space-y-3 flex flex-col h-auto lg:h-full shadow-xs">
+          <div className="flex items-center justify-between pb-2 border-b border-[#E5E7EB] dark:border-slate-800">
+            <h2 className="text-sm font-bold text-[#111827] dark:text-white">My circles ({myGroups.length})</h2>
             <button
-              onClick={() => setSidebarMode('my')}
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                sidebarMode === 'my' 
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs border border-slate-200/60 dark:border-slate-700' 
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
+              type="button"
+              onClick={() => {
+                setJoinCode('');
+                setJoinError('');
+                setShowJoinModal(true);
+              }}
+              className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer min-h-[44px] px-2 flex items-center"
             >
-              <Users size={13} /> My Circles ({myGroups.length})
-            </button>
-            <button
-              onClick={() => setSidebarMode('explore')}
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                sidebarMode === 'explore' 
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs border border-slate-200/60 dark:border-slate-700' 
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <Globe size={13} /> Discover
+              Join with code
             </button>
           </div>
 
-          {sidebarMode === 'explore' && (
-            <div className="p-2.5 border-b border-slate-100 dark:border-slate-800">
-              <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Filter circles..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-7 pr-2.5 py-1 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200 placeholder:text-slate-400"
-                />
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[280px] lg:max-h-none">
+            {myGroups.length === 0 ? (
+              <div className="p-6 text-center space-y-2">
+                <p className="text-xs font-semibold text-[#111827] dark:text-slate-200">No circles yet</p>
+                <p className="text-[11px] text-[#5B6472]">Enter an invite code to join a study circle.</p>
+                <button
+                  type="button"
+                  onClick={() => setShowJoinModal(true)}
+                  className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer"
+                >
+                  Join with code
+                </button>
               </div>
-            </div>
-          )}
-
-          <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
-            {sidebarMode === 'my' ? (
-              myGroups.length === 0 ? (
-                <div className="p-6 text-center space-y-2">
-                  <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg flex items-center justify-center mx-auto">
-                    <Users size={18} />
-                  </div>
-                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No circles joined yet</p>
-                  <p className="text-[11px] text-slate-500">Create a circle for your course or enter an invite code.</p>
-                  <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
-                  >
-                    + Form a Study Circle
-                  </button>
-                </div>
-              ) : (
-                myGroups.map(g => {
-                  const isActive = activeGroupId === g.id;
-                  const isPrivate = g.type === 'private';
-                  const memberCount = (g.members || []).length;
-
-                  return (
-                    <button
-                      key={g.id}
-                      onClick={() => setActiveGroupId(g.id)}
-                      className={`w-full p-3 rounded-lg text-left transition-colors border cursor-pointer ${
-                        isActive
-                          ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-900 text-blue-950 dark:text-blue-100 shadow-xs'
-                          : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200/70 dark:border-slate-800 text-slate-800 dark:text-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-semibold truncate">
-                          {g.name}
-                        </span>
-                        {isPrivate ? (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium flex items-center gap-1 bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            <Lock size={9} /> Private
-                          </span>
-                        ) : (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium flex items-center gap-1 bg-emerald-50 text-emerald-700">
-                            <Globe size={9} /> General
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-slate-500">
-                        <span className="truncate">{g.course || 'General Subject'}</span>
-                        <span className="shrink-0 font-medium">{memberCount} member{memberCount === 1 ? '' : 's'}</span>
-                      </div>
-                    </button>
-                  );
-                })
-              )
             ) : (
-              exploreGroups.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-400">
-                  No public general circles found.
-                </div>
-              ) : (
-                exploreGroups.map(g => (
-                  <div key={g.id} className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-900 dark:text-white">{g.name}</span>
-                      <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
-                        General
-                      </span>
+              myGroups.map(g => {
+                const isCircleOwner = g.ownerId === currentUserId;
+                const mObj = (g.members || []).find((m: any) => typeof m === 'object' && (m.userId === currentUserId || m.name === profile.name));
+                const mRole = typeof mObj === 'object' && mObj ? mObj.role : 'member';
+                const roleLabel = isCircleOwner ? 'Owner' : (mRole === 'moderator' || mRole === 'admin') ? 'Moderator' : 'Member';
+                const isActive = activeGroupId === g.id;
+
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setActiveGroupId(g.id)}
+                    className={`w-full text-left p-3 rounded-lg border min-h-[44px] flex items-center justify-between transition-colors cursor-pointer ${
+                      isActive
+                        ? 'bg-[#EFF6FF] border-[#2563EB] text-[#111827]'
+                        : 'border-[#E5E7EB] hover:bg-slate-50 text-[#111827]'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1 pr-2">
+                      <p className="font-semibold text-xs truncate text-[#111827] dark:text-white">{g.name}</p>
+                      <p className="text-[11px] text-[#5B6472]">{g.course}</p>
                     </div>
-                    <p className="text-[11px] text-slate-500 line-clamp-2">{g.description || `Group for ${g.course}`}</p>
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-[10px] text-slate-400 font-medium">{g.course}</span>
-                      <button
-                        onClick={() => handleJoinGeneralGroup(g)}
-                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold rounded-md transition-colors cursor-pointer"
-                      >
-                        Join
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
+                      roleLabel === 'Owner'
+                        ? 'bg-[#EFF6FF] text-[#2563EB]'
+                        : 'bg-slate-100 text-[#5B6472]'
+                    }`}>
+                      {roleLabel}
+                    </span>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
-      </div>
 
-      {/* MAIN WORKSPACE: Active Group Workspace */}
-      <div className="flex-1 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col overflow-hidden">
-        {!activeGroup ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
-            <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-xl flex items-center justify-center">
-              <Users size={24} />
+        {/* RIGHT COLUMN: Selected circle (Spec: Invite code box for owners/mods, tabs: Discussion, Resources, Members) */}
+        <div className="flex-1 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg flex flex-col overflow-hidden shadow-xs">
+          {!activeGroup ? (
+            <div className="m-auto text-center p-8 space-y-2">
+              <p className="text-xs font-semibold text-[#111827] dark:text-slate-300">No circle selected</p>
+              <p className="text-[11px] text-[#5B6472]">Select a study circle from the left or join a new one.</p>
             </div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Select a Study Circle</h2>
-            <p className="text-xs text-slate-500 max-w-sm">Choose a circle from your directory on the left or enter an invitation code to join a private group.</p>
-            <button
-              onClick={() => setShowJoinModal(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer shadow-xs"
-            >
-              Enter Invite Code
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Header */}
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                    {activeGroup.name}
-                  </h2>
-                  {activeGroup.type === 'private' ? (
-                    <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-900 px-2 py-0.5 rounded font-semibold">
-                      <Lock size={10} /> Private Circle
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold">
-                      <Globe size={10} /> General Group
-                    </span>
-                  )}
-                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded font-medium">
-                    {activeGroup.course}
-                  </span>
+          ) : (
+            <>
+              {/* Circle Header */}
+              <div className="p-4 border-b border-[#E5E7EB] dark:border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-base font-bold text-[#111827] dark:text-white">{activeGroup.name}</h2>
+                    <p className="text-xs text-[#5B6472]">{activeGroup.course} · {activeGroup.description || 'Collaborative study circle'}</p>
+                  </div>
+                  {/* Tabs: Discussion, Resources, Members */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('discussions')}
+                      className={`px-3 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer ${
+                        activeTab === 'discussions'
+                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                          : 'text-[#5B6472] hover:text-[#111827]'
+                      }`}
+                    >
+                      Discussion
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('materials')}
+                      className={`px-3 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer ${
+                        activeTab === 'materials'
+                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                          : 'text-[#5B6472] hover:text-[#111827]'
+                      }`}
+                    >
+                      Resources
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('overview')}
+                      className={`px-3 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer ${
+                        activeTab === 'overview'
+                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                          : 'text-[#5B6472] hover:text-[#111827]'
+                      }`}
+                    >
+                      Members ({(activeGroup.members || []).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('ai')}
+                      className={`px-2.5 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer ${
+                        activeTab === 'ai'
+                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                          : 'text-[#5B6472] hover:text-[#111827]'
+                      }`}
+                    >
+                      AI
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                  <span>{activeGroup.description || 'Collaborative Academic Circle'}</span>
-                  <span className="text-slate-300">•</span>
-                  {/* Automatic Invite Code display */}
-                  <span className="font-mono font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-xs inline-flex items-center gap-1.5">
-                    <span className="text-[10px] text-slate-400 font-sans font-medium uppercase">Invite:</span>
-                    <span>{activeGroup.inviteCode}</span>
-                    {activeGroup.inviteCodeActive === false ? (
-                      <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-sans font-semibold">Revoked</span>
-                    ) : (
-                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1 rounded font-sans font-semibold">Active</span>
-                    )}
-                  </span>
-
-                  <button
-                    onClick={copyInviteCodeOnly}
-                    title="Copy Invite Code"
-                    className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1 cursor-pointer bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 transition-colors"
-                  >
-                    {copiedCode ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-                    <span>{copiedCode ? 'Copied' : 'Copy'}</span>
-                  </button>
-
-                  <button
-                    onClick={shareInvite}
-                    title="Share Circle Invitation"
-                    className="text-xs text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1 cursor-pointer bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 transition-colors"
-                  >
-                    <Share2 size={12} />
-                    <span>Share</span>
-                  </button>
-
-                  {activeGroup.ownerId === currentUserId && (
-                    <>
-                      <button
-                        onClick={regenerateCode}
-                        title="Generate a new invite code"
-                        className="text-[11px] text-slate-500 hover:text-slate-800 font-medium flex items-center gap-1 cursor-pointer"
-                      >
-                        <RefreshCw size={11} /> Regen
-                      </button>
-                      <button
-                        onClick={revokeCodeToggle}
-                        title={activeGroup.inviteCodeActive === false ? 'Reactivate invite code' : 'Revoke invite code'}
-                        className={`text-[11px] font-semibold flex items-center gap-1 cursor-pointer ${
-                          activeGroup.inviteCodeActive === false ? 'text-emerald-600 hover:text-emerald-700' : 'text-rose-600 hover:text-rose-700'
-                        }`}
-                      >
-                        {activeGroup.inviteCodeActive === false ? 'Reactivate' : 'Revoke'}
-                      </button>
-                    </>
-                  )}
-                </div>
+                {/* Invite Code Box: Shown only to Owners and Moderators per Spec */}
+                {isOwnerOrMod && (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-[#E5E7EB] dark:border-slate-800 rounded-lg space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Invite code:</span>
+                        <span className="font-mono font-bold text-sm text-[#111827] dark:text-white px-2.5 py-1 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-700 rounded-md tracking-wider">
+                          {activeGroup.inviteCode || 'KQ-XXXX-XX'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={copyInviteCodeOnly}
+                          className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-[#E5E7EB] hover:bg-slate-50 text-xs font-semibold text-[#111827] dark:text-white rounded-lg flex items-center gap-1 cursor-pointer min-h-[44px]"
+                        >
+                          {copiedCode ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                          <span>{copiedCode ? 'Copied' : 'Copy'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={regenerateCode}
+                          className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-[#E5E7EB] hover:bg-slate-50 text-xs font-semibold text-[#111827] dark:text-white rounded-lg flex items-center gap-1 cursor-pointer min-h-[44px]"
+                        >
+                          <RefreshCw size={13} />
+                          <span>Regenerate</span>
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#5B6472]">
+                      Regenerating replaces the old code. Current members keep access.
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {/* Navigation Tabs */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg flex border border-slate-200/80 dark:border-slate-700 text-xs font-semibold">
-                  <button
-                    onClick={() => setActiveTab('ai')}
-                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
-                      activeTab === 'ai'
-                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Bot size={13} /> KorsIQ AI
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('materials')}
-                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
-                      activeTab === 'materials'
-                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Files size={13} /> Materials ({(activeGroup.sharedMaterials || []).length})
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('discussions')}
-                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
-                      activeTab === 'discussions'
-                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <MessageSquare size={13} /> Forum
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('overview')}
-                    className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
-                      activeTab === 'overview'
-                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Users size={13} /> Members
-                  </button>
-                </div>
-              </div>
-            </div>
 
             {/* TAB CONTENT */}
             <div className="flex-1 overflow-y-auto p-5 bg-slate-50/40 dark:bg-slate-950/40">
@@ -1144,140 +1092,47 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                 </div>
               )}
 
-              {/* 4. OVERVIEW / GROUP INFO TAB */}
+              {/* 4. OVERVIEW / MEMBERS TAB */}
               {activeTab === 'overview' && (
-                <div className="max-w-4xl mx-auto space-y-4">
-                  {/* Private Circle Invitation & Access Management Card */}
-                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-                      <div>
-                        <span className="text-[10px] uppercase font-semibold text-blue-600 dark:text-blue-400 tracking-wider block mb-0.5">
-                          Circle Invitation
-                        </span>
-                        <h3 className="text-base font-bold text-slate-900 dark:text-white">{activeGroup.name}</h3>
-                        <p className="text-xs text-slate-500">{activeGroup.description || 'Collaborative Academic Study Circle'}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {activeGroup.inviteCodeActive === false ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium rounded">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                            Code Revoked
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium rounded">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            Active Invitation Code
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-200 dark:border-slate-700 space-y-3">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        <div>
-                          <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">Invitation Code</span>
-                          <span className="text-xl font-mono font-bold text-slate-900 dark:text-white tracking-widest bg-white dark:bg-slate-900 px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 shadow-2xs inline-block">
-                            {activeGroup.inviteCode}
-                          </span>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={copyInviteCodeOnly}
-                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                          >
-                            {copiedCode ? <Check size={13} /> : <Copy size={13} />}
-                            <span>{copiedCode ? 'Code Copied' : 'Copy Code'}</span>
-                          </button>
-                          <button
-                            onClick={shareInvite}
-                            className="px-3.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Share2 size={13} />
-                            <span>Share</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {activeGroup.ownerId === currentUserId && (
-                        <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={regenerateCode}
-                              className="px-2.5 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 rounded text-xs font-medium flex items-center gap-1 cursor-pointer"
-                            >
-                              <RefreshCw size={11} />
-                              <span>Regenerate Code</span>
-                            </button>
-                            <button
-                              onClick={revokeCodeToggle}
-                              className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 cursor-pointer ${
-                                activeGroup.inviteCodeActive === false
-                                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                  : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                              }`}
-                            >
-                              <span>{activeGroup.inviteCodeActive === false ? 'Reactivate Code' : 'Revoke Code'}</span>
-                            </button>
-                          </div>
-                          <p className="text-[11px] text-slate-400">
-                            {activeGroup.inviteCodeActive === false
-                              ? 'This code is inactive. Students cannot join until reactivated.'
-                              : 'Regenerating will invalidate previous codes.'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                      <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800">
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Members</span>
-                        <span className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5 block">{(activeGroup.members || []).length} Students</span>
-                      </div>
-                      <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800">
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Admin</span>
-                        <span className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5 block truncate">
-                          {activeGroup.ownerId === currentUserId ? 'You (Admin)' : 'Circle Admin'}
-                        </span>
-                      </div>
-                      <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800">
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Visibility</span>
-                        <span className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5 block capitalize">{activeGroup.type} Circle</span>
-                      </div>
-                    </div>
-                  </div>
-
+                <div className="max-w-3xl mx-auto space-y-4">
                   {/* Members List */}
-                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Circle Members ({(activeGroup.members || []).length})</h3>
-                      {activeGroup.ownerId === currentUserId && (
-                        <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded font-semibold">
-                          Admin Controls
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#E5E7EB] dark:border-slate-800">
+                      <div>
+                        <h3 className="text-sm font-bold text-[#111827] dark:text-white">
+                          Members ({(activeGroup.members || []).length})
+                        </h3>
+                        <p className="text-xs text-[#5B6472]">Students and moderators in this study circle</p>
+                      </div>
+                      {isOwnerOrMod && (
+                        <span className="text-[10px] bg-[#EFF6FF] text-[#2563EB] px-2 py-0.5 rounded font-semibold uppercase tracking-wider">
+                          Moderator Access
                         </span>
                       )}
                     </div>
 
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    <div className="divide-y divide-[#E5E7EB] dark:divide-slate-800">
                       {(activeGroup.members || []).map((mem: any, i) => {
                         const mName = typeof mem === 'string' ? mem : mem.name;
-                        const mRole = typeof mem === 'string' ? (activeGroup.ownerId === currentUserId ? 'owner' : 'member') : (mem.role || 'member');
                         const mUid = typeof mem === 'string' ? mem : mem.userId;
+                        const isCircleOwner = activeGroup.ownerId === mUid;
+                        const mRole = isCircleOwner ? 'Owner' : (typeof mem === 'object' && mem.role === 'moderator' ? 'Moderator' : 'Member');
 
                         return (
-                          <div key={i} className="py-2.5 flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2.5">
+                          <div key={i} className="py-3 flex items-center justify-between text-xs min-h-[44px]">
+                            <div className="flex items-center gap-3">
                               <UserAvatar avatarIcon="graduation-cap" name={mName} size="xs" />
                               <div>
-                                <span className="font-semibold text-slate-900 dark:text-white block">{mName}</span>
-                                <span className="text-[10px] text-slate-400 capitalize">{mRole}</span>
+                                <span className="font-semibold text-[#111827] dark:text-white block">{mName}</span>
+                                <span className="text-[10px] text-[#5B6472]">{mRole}</span>
                               </div>
                             </div>
 
-                            {activeGroup.ownerId === currentUserId && mUid !== currentUserId && (
+                            {isOwnerOrMod && mUid !== currentUserId && !isCircleOwner && (
                               <button
-                                onClick={() => handleRemoveMember(mUid)}
-                                className="text-rose-600 hover:text-rose-700 text-xs font-semibold cursor-pointer"
+                                type="button"
+                                onClick={() => handleRemoveMember(mUid, mName)}
+                                className="text-rose-600 hover:text-rose-700 text-xs font-semibold cursor-pointer min-h-[44px] px-2 flex items-center"
                               >
                                 Remove
                               </button>
@@ -1293,6 +1148,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
             </div>
           </>
         )}
+      </div>
       </div>
 
       {/* CREATE GROUP MODAL */}
@@ -1415,7 +1271,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                 <input
                   type="text"
                   required
-                  placeholder="e.g. KOR-7X9P2Q"
+                  placeholder="e.g. KQ-7F3A-92"
                   value={joinCode}
                   onChange={e => {
                     let val = e.target.value;
@@ -1425,10 +1281,10 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                     setJoinCode(val.trim());
                     setJoinError('');
                   }}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-2.5 text-center text-sm font-mono font-bold tracking-widest outline-none focus:border-blue-600 text-slate-900 dark:text-white uppercase"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg px-4 py-2.5 text-center text-sm font-mono font-bold tracking-widest outline-none focus:border-[#2563EB] text-[#111827] dark:text-white uppercase"
                 />
-                <p className="text-[11px] text-slate-400 mt-1 text-center">
-                  Enter the unique code shared by your circle creator.
+                <p className="text-[11px] text-[#5B6472] mt-1 text-center">
+                  Enter the unique code shared by your circle owner or moderator.
                 </p>
                 {joinError && (
                   <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs font-medium mt-2">
@@ -1437,23 +1293,92 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                 )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowJoinModal(false)}
-                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium rounded-lg cursor-pointer"
+                  className="px-3 py-2 text-[#5B6472] hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium rounded-lg cursor-pointer min-h-[44px]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!joinCode.trim()}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer shadow-xs"
+                  className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer shadow-xs min-h-[44px]"
                 >
                   Join Circle
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MEMBER REMOVAL MODAL (SPEC: asks for confirmation and states shared-file access ends) */}
+      {memberToRemove && (
+        <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-xl text-left">
+            <div className="space-y-1.5">
+              <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                Remove member
+              </h3>
+              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+                Removing <strong className="text-[#111827] dark:text-white">{memberToRemove.name}</strong> will immediately revoke their access to shared circle files and discussions.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setMemberToRemove(null)}
+                className="px-3 py-2 text-xs font-semibold text-[#5B6472] hover:text-[#111827] rounded-lg min-h-[44px] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRemoveMember}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer"
+              >
+                Remove member
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PLUS UPGRADE PROMPT MODAL (SPEC: Free plan can join; Create circle shows short Plus prompt) */}
+      {showCircleUpgradePrompt && (
+        <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-xl text-left">
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-wider">
+                Plus Feature
+              </span>
+              <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                Create Private Circles
+              </h3>
+              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+                Creating private study circles is included in the Plus and Academic Studio plans. Free plans can join circles with an invite code.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCircleUpgradePrompt(false)}
+                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm min-h-[44px]"
+              >
+                See plans
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCircleUpgradePrompt(false)}
+                className="w-full py-2 text-[#5B6472] hover:text-[#111827] text-xs font-medium cursor-pointer min-h-[44px]"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

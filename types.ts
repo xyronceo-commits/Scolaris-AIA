@@ -131,7 +131,7 @@ export interface GroupMember {
   name: string;
   email?: string;
   avatarIcon?: string;
-  role: 'owner' | 'admin' | 'member';
+  role: 'owner' | 'admin' | 'moderator' | 'member';
   joinedAt: string | number;
 }
 

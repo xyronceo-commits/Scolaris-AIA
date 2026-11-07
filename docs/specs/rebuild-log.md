@@ -124,6 +124,27 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Typography & Clean UI:** All `font-serif` headings converted to `font-sans`, flat blue/white/black theme tokens, 8px radius.
 - **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 6: Private Circles
+
+- **Layout Structure:** Restyled `components/StudyGroups.tsx` to match design specs:
+  - Top header: Title "Private Circles", subtitle "Study groups, members and shared files", and single primary button `Create circle`.
+  - Left card *My circles*: List of circles showing Circle Name and student's role (`Owner` or `Member`), with a dedicated `Join with code` action button.
+  - Right workspace: The selected circle with tabs (`Discussion`, `Resources`, `Members`, and `KorsIQ AI` retained for complete feature coverage).
+- **Invite Code Privacy & Format:**
+  - Standardized invite code generator in `services/db.ts` to `KQ-XXXX-XX` format (e.g. `KQ-7F3A-92`).
+  - Invite code box with `Copy` and `Regenerate` controls and helper text *"Regenerating replaces the old code. Current members keep access."* is strictly displayed to circle owners and moderators only. Regular members do not see the invite code.
+- **Member Removal Confirmation:**
+  - Replaced browser `confirm()` with an accessible confirmation modal stating: *"Removing this member will immediately revoke their access to shared circle files and discussions."*
+- **Distinct Join Errors:**
+  - Rate limiting (max 5 attempts per minute) displaying *"Too many attempts. Please wait a moment before trying another code."*.
+  - Invalid code displaying *"That code doesn't match any circle. Check the code and try again."*.
+  - Expired / replaced code displaying *"This invite code has expired or has been replaced by the circle owner."*.
+  - Already a member displaying *"You are already a member of this circle."*.
+- **Plan Gating:** Free plans can join circles; clicking `Create circle` on a Free plan opens a quiet Plus upgrade prompt ("one card, one primary button").
+- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
 
 
 

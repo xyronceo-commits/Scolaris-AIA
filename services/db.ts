@@ -162,13 +162,17 @@ function rowToGroup(row: any, materials: any[] = []): StudyGroup {
 }
 
 export function generateCircleInviteCode(): string {
-  // Format: KOR-XXXXXX (6 secure uppercase alphanumeric chars, excluding ambiguous 0, O, 1, I)
+  // Format: KQ-XXXX-XX (e.g. KQ-7F3A-92, excluding ambiguous 0, O, 1, I)
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  let p1 = '';
+  for (let i = 0; i < 4; i++) {
+    p1 += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `KOR-${code}`;
+  let p2 = '';
+  for (let i = 0; i < 2; i++) {
+    p2 += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `KQ-${p1}-${p2}`;
 }
 
 async function loadGroupMaterials(groupIds: string[]): Promise<Record<string, any[]>> {
