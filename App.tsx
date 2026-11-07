@@ -38,6 +38,15 @@ const App: React.FC = () => {
   const [groups, setGroups] = useState<StudyGroup[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showNotifPermissionBanner, setShowNotifPermissionBanner] = useState<boolean>(() => {
+    try {
+      if (typeof window === 'undefined' || !('Notification' in window)) return false;
+      if (Notification.permission !== 'default') return false;
+      return !localStorage.getItem('korsiq_notif_prompt_dismissed');
+    } catch {
+      return false;
+    }
+  });
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -382,140 +391,130 @@ const App: React.FC = () => {
     }
   };
 
-  const addNotification = (type: AppNotification['type'], title: string, message: string, link?: AppState) => {
+  const addNotification = async (type: AppNotification['type'], title: string, message: string, link?: AppState) => {
     if (!profile) return;
     if (type === 'message' && !profile.notifications?.messages) return;
     if (type === 'session' && !profile.notifications?.sessions) return;
     if (type === 'content' && !profile.notifications?.aiContent) return;
 
-    const newNotification: AppNotification = {
-      id: Math.random().toString(36).substr(2, 9),
-      type,
-      title,
-      message,
-      timestamp: Date.now(),
-      read: false,
-      link
-    };
-    setNotifications(prev => [newNotification, ...prev]);
+    if (authUser) {
+      const persisted = await DBService.createNotification(authUser.uid, {
+        type,
+        title,
+        message,
+        read: false,
+        link
+      });
+      setNotifications(prev => [persisted, ...prev.filter(p => p.id !== persisted.id)]);
+    } else {
+      const fallbackNotif: AppNotification = {
+        id: Math.random().toString(36).substr(2, 9),
+        type,
+        title,
+        message,
+        timestamp: Date.now(),
+        read: false,
+        link
+      };
+      setNotifications(prev => [fallbackNotif, ...prev]);
+    }
   };
 
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [isClearingNotifications, setIsClearingNotifications] = useState(false);
   const notificationScrollRef = useRef<HTMLDivElement>(null);
 
-  // Default initial notifications if empty
+  // Load real persistent notifications from database
   useEffect(() => {
-    if (notifications.length === 0 && authUser) {
-      setNotifications([
-        {
-          id: 'notif-1',
-          type: 'content',
-          title: 'Welcome to KorsIQ',
-          message: 'Your AI Academic Studio is active. Explore your dashboard and generate study plans!',
-          timestamp: Date.now() - 1000 * 60 * 5,
-          read: false,
-          link: 'dashboard'
-        },
-        {
-          id: 'notif-2',
-          type: 'session',
-          title: 'Upcoming Study Session',
-          message: 'Revision session scheduled. Review flashcards & study notes for your courses.',
-          timestamp: Date.now() - 1000 * 60 * 25,
-          read: false,
-          link: 'schedule'
-        },
-        {
-          id: 'notif-3',
-          type: 'message',
-          title: 'AI Study Assistant Ready',
-          message: 'Ask KorsIQ anything about your course materials or generate an AI podcast.',
-          timestamp: Date.now() - 1000 * 60 * 90,
-          read: false,
-          link: 'hub'
-        },
-        {
-          id: 'notif-4',
-          type: 'content',
-          title: 'Study Circle Collaboration',
-          message: 'Connect with classmates in Study Circles to share notes and solve questions together.',
-          timestamp: Date.now() - 1000 * 60 * 240,
-          read: false,
-          link: 'groups'
+    if (!authUser) return;
+    const loadDbNotifications = async () => {
+      try {
+        const dbNotifs = await DBService.getNotifications(authUser.uid);
+        if (dbNotifs && dbNotifs.length > 0) {
+          setNotifications(dbNotifs);
+        } else {
+          // If brand new user with no notifications in DB, create initial welcome notif
+          const welcome = await DBService.createNotification(authUser.uid, {
+            type: 'content',
+            title: 'Welcome to KorsIQ',
+            message: 'Your AI Academic Studio is active. Explore your dashboard and generate study plans!',
+            read: false,
+            link: 'dashboard'
+          });
+          setNotifications([welcome]);
         }
-      ]);
-    }
+      } catch (err) {
+        console.warn('Failed to load database notifications:', err);
+      }
+    };
+    loadDbNotifications();
   }, [authUser]);
 
-  // Scroll-past auto-mark-as-read via IntersectionObserver
-  useEffect(() => {
-    if (!showNotifications || !notificationScrollRef.current) return;
+  // Mark single notification as read in DB and state
+  const handleMarkNotificationRead = async (notifId: string) => {
+    setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, read: true } : n));
+    if (authUser) {
+      await DBService.markNotificationAsRead(authUser.uid, notifId);
+    }
+  };
 
-    const scrollContainer = notificationScrollRef.current;
-    const timers: Record<string, NodeJS.Timeout> = {};
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          const id = entry.target.getAttribute('data-notification-id');
-          if (!id) return;
-
-          if (entry.isIntersecting) {
-            if (!timers[id]) {
-              timers[id] = setTimeout(() => {
-                setNotifications((prev) =>
-                  prev.map((n) => (n.id === id && !n.read ? { ...n, read: true } : n))
-                );
-              }, 350);
-            }
-          } else {
-            if (timers[id]) {
-              clearTimeout(timers[id]);
-              delete timers[id];
-            }
-          }
-        });
-      },
-      {
-        root: scrollContainer,
-        threshold: 0.6,
-      }
-    );
-
-    const items = scrollContainer.querySelectorAll('.notification-item');
-    items.forEach((item) => observer.observe(item));
-
-    return () => {
-      observer.disconnect();
-      Object.values(timers).forEach(clearTimeout);
-    };
-  }, [showNotifications, notifications]);
-
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    if (authUser) {
+      await DBService.markAllNotificationsAsRead(authUser.uid);
+    }
   };
 
   const handleMarkAllAsReadAnimated = () => {
     if (isMarkingAllRead) return;
     setIsMarkingAllRead(true);
+    markAllAsRead();
     setTimeout(() => {
-      markAllAsRead();
       setIsMarkingAllRead(false);
-    }, 500);
+    }, 400);
   };
 
-  const clearNotifications = () => {
+  const clearNotifications = async () => {
     setNotifications([]);
+    if (authUser) {
+      await DBService.clearAllNotifications(authUser.uid);
+    }
   };
 
   const handleClearAllAnimated = () => {
     if (isClearingNotifications) return;
     setIsClearingNotifications(true);
+    clearNotifications();
     setTimeout(() => {
-      clearNotifications();
       setIsClearingNotifications(false);
     }, 300);
+  };
+
+  const handleEnableBrowserNotifs = async () => {
+    try {
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted' && profile && authUser) {
+          const updated: UserProfile = {
+            ...profile,
+            notifications: { ...profile.notifications, browserPush: true }
+          };
+          setProfile(updated);
+          await DBService.saveProfile(authUser.uid, updated);
+          addNotification('content', 'Browser Notifications Enabled', 'You will now receive timely reminders for deadlines and study sessions.');
+        }
+      }
+    } catch (err) {
+      console.warn('Notification permission error:', err);
+    } finally {
+      setShowNotifPermissionBanner(false);
+      localStorage.setItem('korsiq_notif_prompt_dismissed', 'true');
+    }
+  };
+
+  const handleDismissNotifBanner = () => {
+    setShowNotifPermissionBanner(false);
+    localStorage.setItem('korsiq_notif_prompt_dismissed', 'true');
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -853,24 +852,27 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-[#F8FAFC] dark:bg-slate-950 font-sans text-[#111827] dark:text-slate-100 overflow-hidden relative">
-      {/* Mobile Top Header Bar per Spec (Logo, Bell, Initials Avatar) */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-slate-900 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between px-3 z-40">
+      {/* Mobile Top Header Bar per Spec (Logo, Bell, Theme, Initials Avatar) */}
+      <header className="md:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-slate-900 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between px-4 z-40">
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            aria-label="Open navigation menu"
-            className="p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-[#5B6472] dark:text-slate-300 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
-          >
-            <Menu size={20} />
-          </button>
           <KorsIQLogo variant="full" size={28} />
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            aria-label="Toggle color theme"
+            className="p-2 text-[#5B6472] dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer transition-colors"
+          >
+            {isDarkMode ? <Sun size={17} className="text-amber-500" /> : <Moon size={17} className="text-[#5B6472]" />}
+          </button>
+
+          {/* Notifications Trigger */}
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             aria-label="Notifications"
-            className={`p-2.5 rounded-lg transition-colors relative min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer ${
+            className={`p-2 rounded-lg transition-colors relative min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer ${
               showNotifications 
                 ? 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-400' 
                 : 'text-[#5B6472] dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -882,6 +884,7 @@ const App: React.FC = () => {
             )}
           </button>
 
+          {/* Avatar Profile Trigger */}
           <button
             onClick={() => setActiveTab('settings')}
             aria-label="Account Settings"
@@ -896,29 +899,10 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Sidebar Overlay for Mobile/Tablet */}
-      {isSidebarOpen && (
-        <div 
-          onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden fixed inset-0 bg-slate-900/30 backdrop-blur-[2px] z-40 transition-opacity"
-        />
-      )}
-
-      {/* Desktop Fixed Sidebar Drawer (Exactly 6 destinations) */}
-      <aside className={`
-        fixed inset-y-0 left-0 w-64 bg-white dark:bg-slate-900 z-50 flex flex-col border-r border-[#E5E7EB] dark:border-slate-800
-        transform transition-transform duration-200 ease-in-out lg:static lg:translate-x-0
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
+      {/* Desktop and Tablet Fixed Sidebar (Permanently displayed on md and above) */}
+      <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-slate-900 border-r border-[#E5E7EB] dark:border-slate-800 shrink-0 z-30">
         <div className="h-16 flex items-center justify-between px-5 border-b border-[#E5E7EB] dark:border-slate-800">
           <KorsIQLogo variant="full" size={32} showSubtitle />
-          <button 
-            onClick={() => setIsSidebarOpen(false)}
-            aria-label="Close sidebar"
-            className="lg:hidden p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-[#5B6472] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
-          >
-            <X size={18} />
-          </button>
         </div>
         
         {/* Navigation Items: Light blue bg with Primary blue text/icon when active */}
@@ -930,7 +914,6 @@ const App: React.FC = () => {
                 key={item.id}
                 onClick={() => {
                   setActiveTab(item.id as AppState);
-                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors min-h-[44px] cursor-pointer ${
                   isActive 
@@ -966,7 +949,6 @@ const App: React.FC = () => {
             <button 
               onClick={() => {
                 setActiveTab('settings');
-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
               }}
               className={`flex-1 flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors min-h-[44px] cursor-pointer ${
                 isNavActive('settings') 
@@ -996,7 +978,6 @@ const App: React.FC = () => {
                 window.history.pushState({}, '', '/admin');
                 setActiveTab('admin');
                 setShowAdminLoginForm(true);
-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
               }}
               title="Admin Portal"
               aria-label="Admin Portal"
@@ -1010,8 +991,8 @@ const App: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Desktop Top Header Bar */}
-        <header className="hidden lg:flex h-16 bg-white dark:bg-slate-900 border-b border-[#E5E7EB] dark:border-slate-800 items-center justify-between px-8 z-20 shrink-0">
+        {/* Desktop & Tablet Top Header Bar */}
+        <header className="hidden md:flex h-16 bg-white dark:bg-slate-900 border-b border-[#E5E7EB] dark:border-slate-800 items-center justify-between px-8 z-20 shrink-0">
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5B6472] font-medium">KorsIQ</span>
             <span className="text-[#E5E7EB] dark:text-slate-700">/</span>
@@ -1055,7 +1036,7 @@ const App: React.FC = () => {
         </header>
 
         {/* Scrollable Main Area */}
-        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-slate-950 text-[#111827] dark:text-slate-100 relative pt-14 lg:pt-0 pb-20 lg:pb-8">
+        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-slate-950 text-[#111827] dark:text-slate-100 relative pt-14 md:pt-0 pb-24 md:pb-8">
           {showNotifications && (
             <div className="absolute top-4 right-4 sm:right-8 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 shadow-xl rounded-lg z-50 overflow-hidden">
               <div className="p-4 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
@@ -1106,7 +1087,7 @@ const App: React.FC = () => {
                         onClick={() => {
                           if (n.link) setActiveTab(n.link);
                           setShowNotifications(false);
-                          setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, read: true } : notif));
+                          handleMarkNotificationRead(n.id);
                         }}
                         className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer flex items-start gap-3 ${
                           isUnread ? 'bg-[#EFF6FF]/50 dark:bg-blue-950/20' : ''
@@ -1146,11 +1127,43 @@ const App: React.FC = () => {
           )}
 
           <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
+            {/* Notification Permission Pre-Prompt Banner */}
+            {showNotifPermissionBanner && (
+              <div className="mb-6 p-4 bg-[#EFF6FF] dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-2 bg-[#2563EB] text-white rounded-lg shrink-0 mt-0.5">
+                    {ICONS.Bell}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-[#111827] dark:text-white">Enable study &amp; deadline reminders</p>
+                    <p className="text-[#5B6472] dark:text-slate-300 mt-0.5 leading-relaxed">
+                      KorsIQ can send browser reminders before assignments are due, when revisions start, and when exam dates approach.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                  <button
+                    onClick={handleDismissNotifBanner}
+                    className="px-3 py-1.5 text-[#5B6472] dark:text-slate-400 hover:text-[#111827] dark:hover:text-white font-medium min-h-[44px] cursor-pointer"
+                  >
+                    Not now
+                  </button>
+                  <button
+                    onClick={handleEnableBrowserNotifs}
+                    className="px-3.5 py-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold rounded-lg shadow-sm min-h-[44px] cursor-pointer"
+                  >
+                    Enable alerts
+                  </button>
+                </div>
+              </div>
+            )}
+
             {renderContent()}
           </div>
 
           {profile && profile.onboarded && (
             <ScolarisChatWidget 
+              profile={profile}
               courses={courses}
               activeCourseId={selectedCourseId}
               activeHub={hubs[selectedCourseId || (courses[0]?.id || '')] || null}
@@ -1158,8 +1171,8 @@ const App: React.FC = () => {
           )}
         </main>
 
-        {/* Mobile Pinned Bottom Navigation Bar (Exactly 5 destinations per Spec) */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-[#E5E7EB] dark:border-slate-800 grid grid-cols-5 z-40 px-1">
+        {/* Mobile Pinned Bottom Navigation Bar (Visible ONLY on mobile devices) */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-[#E5E7EB] dark:border-slate-800 grid grid-cols-5 z-40 px-1">
           {mobileNavItems.map((item) => {
             const isActive = isNavActive(item.id);
             return (

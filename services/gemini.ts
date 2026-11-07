@@ -444,12 +444,12 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     }
   },
 
-  async scolarisChat(messages: any[], courseContext?: string, fileContent?: string) {
+  async scolarisChat(messages: any[], courseContext?: string, fileContent?: string, academicProfile?: any) {
     try {
       return await safeFetchJson('/api/scolaris/chat', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify({ messages, courseContext, fileContent })
+        body: JSON.stringify({ messages, courseContext, fileContent, academicProfile })
       }, 'KorsIQ chatbot request failed');
     } catch (err: any) {
       console.warn("KorsIQ chat warning:", err?.message || err);
