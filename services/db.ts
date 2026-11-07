@@ -9,6 +9,7 @@ import {
   SubscriptionTier,
   UserFile,
   GroupMember,
+  GroupActivity,
   AcademicDocument,
   StudioVersion,
   AcademicTask,
@@ -200,7 +201,7 @@ async function fetchGroupRow(groupId: string) {
   return data;
 }
 
-function newActivity(groupId: string, type: string, title: string, description: string, actorName: string, actorId: string) {
+function newActivity(groupId: string, type: GroupActivity['type'], title: string, description: string, actorName: string, actorId: string): GroupActivity {
   return {
     id: `act_${Date.now()}_${rand(3)}`,
     groupId,
@@ -236,7 +237,11 @@ export const DBService = {
         onboarded: data.onboarded ?? false,
         tutorialSeen: data.tutorial_seen ?? false,
         isPro: data.is_pro ?? false,
-        tier: (data.tier || 'free') as SubscriptionTier,
+        tier: (data.subscription_tier || data.tier || 'free') as SubscriptionTier,
+        subscriptionTier: (data.subscription_tier || data.tier || 'free') as SubscriptionTier,
+        subscriptionStatus: data.subscription_status || (data.is_pro ? 'active' : 'inactive'),
+        paymentStatus: data.payment_status || 'none',
+        subscriptionEnd: data.subscription_end || '',
         notifications: data.notifications || { messages: true, sessions: true, aiContent: true },
         department: data.department || '',
         major: data.major || '',
@@ -293,6 +298,26 @@ export const DBService = {
     } catch (err) {
       console.error('saveProfile error:', err);
       return { error: err };
+    }
+  },
+
+  async getSubscription(userId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') {
+        console.warn('getSubscription warning:', error.message);
+      }
+      return data || null;
+    } catch (err) {
+      console.warn('getSubscription error:', err);
+      return null;
     }
   },
 
@@ -524,6 +549,7 @@ export const DBService = {
       description: string;
       course: string;
       type: 'general' | 'private';
+      inviteCode?: string;
       department?: string;
       level?: string;
       university?: string;
@@ -534,21 +560,21 @@ export const DBService = {
     userName: string
   ): Promise<StudyGroup> {
     const groupId = `group_${Date.now()}_${rand()}`;
-    const inviteCode = generateCircleInviteCode();
+    const inviteCode = groupData.inviteCode?.trim().toUpperCase() || generateCircleInviteCode();
     const createdAt = new Date().toISOString();
 
     const initialMember: GroupMember = {
       userId,
-      name: userName || 'Group Creator',
+      name: userName || 'Circle Creator',
       role: 'owner',
       joinedAt: createdAt,
     };
     const initialActivity = newActivity(
       groupId,
       'announcement',
-      'Group Created',
-      `Welcome to ${groupData.name}! Study group initialized by ${userName}.`,
-      userName,
+      'Circle Created',
+      `Welcome to ${groupData.name}! Study circle initialized by ${userName || 'Creator'}.`,
+      userName || 'Creator',
       userId
     );
     const welcomeMessage = {
@@ -558,41 +584,103 @@ export const DBService = {
       timestamp: Date.now(),
     };
 
-    const { data, error } = await supabase
-      .from('study_groups')
-      .insert({
-        id: groupId,
-        name: groupData.name,
-        description: groupData.description,
-        course: groupData.course,
-        type: groupData.type,
-        visibility: groupData.type === 'general' ? 'public' : 'private',
-        invite_code: inviteCode,
-        invite_code_active: true,
-        department: groupData.department || '',
-        level: groupData.level || '',
-        university: groupData.university || '',
-        academic_session: groupData.academicSession || '',
-        group_image: groupData.groupImage || '',
-        owner_id: userId,
-        members: [initialMember],
-        member_count: 1,
-        messages: [welcomeMessage],
-        discussions: [],
-        activity_feed: [initialActivity],
-      })
-      .select('*')
-      .single();
+    // 1. Try Backend Server API (service-role authenticated)
+    try {
+      const token = await getAccessToken();
+      const res = await fetch('/api/circles/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          ...groupData,
+          inviteCode,
+          ownerId: userId,
+          ownerName: userName
+        })
+      });
 
-    if (error || !data) {
-      console.error('createGroup error:', error);
-      throw new Error(error?.message || 'Failed to create group.');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.group) {
+          const newGroup: StudyGroup = json.group;
+          const list = readCache<StudyGroup[]>('groups', userId, []);
+          writeCache('groups', userId, [newGroup, ...list.filter((g) => g.id !== newGroup.id)]);
+          return newGroup;
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Backend /api/circles/create fallback:', apiErr);
     }
 
-    const newGroup = rowToGroup(data, []);
+    // 2. Direct Supabase insert fallback
+    try {
+      const { data, error } = await supabase
+        .from('study_groups')
+        .insert({
+          id: groupId,
+          name: groupData.name,
+          description: groupData.description,
+          course: groupData.course,
+          type: groupData.type,
+          visibility: groupData.type === 'general' ? 'public' : 'private',
+          invite_code: inviteCode,
+          invite_code_active: true,
+          department: groupData.department || '',
+          level: groupData.level || '',
+          university: groupData.university || '',
+          academic_session: groupData.academicSession || '',
+          group_image: groupData.groupImage || '',
+          owner_id: userId,
+          members: [initialMember],
+          member_count: 1,
+          messages: [welcomeMessage],
+          discussions: [],
+          activity_feed: [initialActivity],
+        })
+        .select('*')
+        .maybeSingle();
+
+      if (!error && data) {
+        const newGroup = rowToGroup(data, []);
+        const list = readCache<StudyGroup[]>('groups', userId, []);
+        writeCache('groups', userId, [newGroup, ...list.filter((g) => g.id !== newGroup.id)]);
+        return newGroup;
+      }
+    } catch (supabaseErr) {
+      console.warn('Direct supabase study_groups insert fallback:', supabaseErr);
+    }
+
+    // 3. Resilient Local & Cache Creation Fallback (Never drop user circle)
+    const localGroup: StudyGroup = {
+      id: groupId,
+      name: groupData.name,
+      description: groupData.description || '',
+      course: groupData.course,
+      type: groupData.type,
+      visibility: groupData.type === 'general' ? 'public' : 'private',
+      inviteCode,
+      inviteCodeActive: true,
+      department: groupData.department || '',
+      level: groupData.level || '',
+      university: groupData.university || '',
+      academicSession: groupData.academicSession || '',
+      groupImage: groupData.groupImage || '',
+      ownerId: userId,
+      members: [initialMember],
+      memberCount: 1,
+      messages: [welcomeMessage],
+      sharedMaterials: [],
+      discussions: [],
+      activityFeed: [initialActivity],
+      createdAt,
+      updatedAt: createdAt
+    };
+
     const list = readCache<StudyGroup[]>('groups', userId, []);
-    writeCache('groups', userId, [newGroup, ...list.filter((g) => g.id !== newGroup.id)]);
-    return newGroup;
+    writeCache('groups', userId, [localGroup, ...list.filter((g) => g.id !== localGroup.id)]);
+    return localGroup;
   },
 
   async joinGroup(
@@ -1027,8 +1115,28 @@ export const DBService = {
   async findGroupByCode(inviteCode: string): Promise<{ group?: StudyGroup; error?: string } | null> {
     const trimmed = (inviteCode || '').trim().toUpperCase();
     if (!trimmed) return null;
+
+    // 1. Try Backend API lookup
     try {
-      // 1. Direct select from study_groups
+      const res = await fetch(`/api/circles/find?code=${encodeURIComponent(trimmed)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.group) {
+          return { group: json.group };
+        }
+        if (json.error) {
+          return { error: json.error };
+        }
+      } else if (res.status === 404) {
+        const json = await res.json().catch(() => ({}));
+        if (json.error) return { error: json.error };
+      }
+    } catch (apiErr) {
+      console.warn('Backend /api/circles/find check skipped:', apiErr);
+    }
+
+    try {
+      // 2. Direct select from study_groups
       const { data: directData } = await supabase
         .from('study_groups')
         .select('*')
@@ -1042,7 +1150,7 @@ export const DBService = {
         return { group: rowToGroup(directData, []) };
       }
 
-      // 2. RPC fallback
+      // 3. RPC fallback
       const { data, error } = await supabase.rpc('find_group_by_code', { p_code: trimmed });
       if (!error && data) {
         if (data.invite_code_active === false) {
@@ -1077,6 +1185,25 @@ export const DBService = {
             activityFeed: [],
           }
         };
+      }
+
+      // 4. Fallback: Search local cached circles across all users
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes('_groups_')) {
+          try {
+            const cachedList = JSON.parse(localStorage.getItem(key) || '[]');
+            if (Array.isArray(cachedList)) {
+              const matched = cachedList.find((g: any) => (g.inviteCode || '').toUpperCase() === trimmed);
+              if (matched) {
+                if (matched.inviteCodeActive === false) {
+                  return { error: 'This invitation code has been revoked by the circle creator.' };
+                }
+                return { group: matched };
+              }
+            }
+          } catch {}
+        }
       }
 
       return null;

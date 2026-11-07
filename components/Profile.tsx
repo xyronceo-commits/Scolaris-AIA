@@ -17,6 +17,8 @@ import {
   Crown,
   Bell
 } from 'lucide-react';
+import UniversitySelector from './UniversitySelector';
+import SubscriptionCheckoutModal from './SubscriptionCheckoutModal';
 
 interface ProfileProps {
   profile: UserProfile;
@@ -31,6 +33,8 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
   const [editedProfile, setEditedProfile] = useState(profile);
   const [showPlansModal, setShowPlansModal] = useState(false);
   const [showAvailableSoon, setShowAvailableSoon] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [checkoutPlan, setCheckoutPlan] = useState<'plus' | 'studio'>('plus');
   const [userFiles, setUserFiles] = useState<UserFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
 
@@ -288,13 +292,13 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   <h2 className="text-base font-bold text-[#111827] dark:text-white">{profile.name}</h2>
                 )}
                 {isEditing ? (
-                  <input 
-                    type="text"
-                    value={editedProfile.university}
-                    onChange={e => setEditedProfile({...editedProfile, university: e.target.value})}
-                    className="w-full text-xs text-[#5B6472] border-b border-[#E5E7EB] focus:outline-none bg-transparent mt-1 pb-0.5"
-                    placeholder="Institution name"
-                  />
+                  <div className="pt-1 w-full max-w-sm">
+                    <UniversitySelector
+                      value={editedProfile.university}
+                      onChange={(u) => setEditedProfile({...editedProfile, university: u})}
+                      placeholder="Select or search institution..."
+                    />
+                  </div>
                 ) : (
                   <p className="text-[#5B6472] font-medium text-xs">{profile.university || 'University Student'}</p>
                 )}
@@ -631,11 +635,12 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   type="button"
                   onClick={() => {
                     setShowPlansModal(false);
-                    setShowAvailableSoon(true);
+                    setCheckoutPlan('plus');
+                    setShowCheckoutModal(true);
                   }}
-                  className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                  className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  Choose Plus
+                  {profile.tier === 'plus' ? 'Current Plan' : 'Upgrade to Plus'}
                 </button>
               </div>
 
@@ -677,17 +682,30 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   type="button"
                   onClick={() => {
                     setShowPlansModal(false);
-                    setShowAvailableSoon(true);
+                    setCheckoutPlan('studio');
+                    setShowCheckoutModal(true);
                   }}
-                  className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                  className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  Choose Academic Studio
+                  {profile.tier === 'studio' ? 'Current Plan' : 'Upgrade to Academic Studio'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Subscription Checkout Modal */}
+      <SubscriptionCheckoutModal
+        isOpen={showCheckoutModal}
+        onClose={() => setShowCheckoutModal(false)}
+        initialPlan={checkoutPlan}
+        currentProfile={profile}
+        onSubscriptionUpdated={(upd) => {
+          if (setProfile) setProfile(upd);
+          setEditedProfile(upd);
+        }}
+      />
 
       {/* Available Soon Modal per Open Decision 3 */}
       {showAvailableSoon && (
