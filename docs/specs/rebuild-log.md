@@ -78,4 +78,18 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Data Integrity & Rules:** Only CGPA (from calculated records) and course count are shown as metrics, both from real data. No vanity metrics or invented placeholders. AI credits completely excluded from dashboard.
 - **Verification:** Responsive testing across 390px, 768px, and 1280px. `npm run lint` and `npm run build` passed.
 
+---
+
+## Phase 3: Study Planner and CGPA
+
+- **Unified Planner Container:** `components/StudyPlannerView.tsx` incorporates Courses, CGPA, Timetable, and Revision tabs on desktop (Courses, CGPA, Timetable on mobile).
+- **Three Distinct Metric Cards:**
+  1. *Current CGPA:* Separated card showing current standing based purely on deterministic semester course records.
+  2. *Target CGPA:* Separated card strictly defaulting to 0.00 until set by the user, with inline editing and scale indicator.
+  3. *Projected:* Separated card showing projected graduation CGPA with subtext "Based on your target and remaining units".
+- **Deterministic Math & Named AI Action:** Calculation logic preserved untouched. AI interactions replaced with a clean, named **"Explain my CGPA"** button (no decorative AI motifs, chat bubbles, or gradients).
+- **Typography & Layout:** Replaced all `font-serif` headings with clean `font-sans`, 8px corner radius, and responsive cards layout (mobile: Current and Target side-by-side, Projected below).
+- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
+
 
