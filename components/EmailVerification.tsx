@@ -229,32 +229,26 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
   const isComplete = digits.every((d) => d.length === 1);
 
   return (
-    <div className="min-h-screen bg-slate-50/50 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-hidden font-sans text-slate-900">
-      {/* Background Ambience */}
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-100/30 blur-[120px] rounded-full" />
-        <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-indigo-100/30 blur-[120px] rounded-full" />
-      </div>
-
-      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full relative z-10">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-hidden font-sans text-slate-900">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full relative z-10">
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3.5 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 hover:scale-105 transition-transform duration-300">
-            <KorsIQLogo variant="icon" size={44} onDark />
+          <div className="inline-flex items-center justify-center p-3 bg-slate-900 text-white rounded-xl shadow-xs mb-3">
+            <KorsIQLogo variant="icon" size={40} onDark />
           </div>
-          <h1 className="text-2xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">Verify Your Email</h1>
-          <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">6-Digit Security Token</p>
+          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight mb-1">Verify Your Email</h1>
+          <p className="text-slate-400 font-semibold text-xs">6-Digit Security Token</p>
         </div>
 
-        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-xl shadow-slate-200/30 p-6 md:p-8 text-center space-y-6">
-          <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto ring-8 ring-indigo-50/50">
-            <Mail size={28} />
+        <div className="bg-white rounded-xl border border-slate-200 shadow-md p-6 sm:p-8 text-center space-y-5">
+          <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto ring-4 ring-blue-50">
+            <Mail size={24} />
           </div>
 
-          <div className="space-y-1.5">
-            <h2 className="text-lg font-serif font-bold text-slate-900">Enter Verification Code</h2>
-            <p className="text-xs text-slate-600 font-medium leading-relaxed">
+          <div className="space-y-1">
+            <h2 className="text-base font-serif font-bold text-slate-900">Enter Verification Code</h2>
+            <p className="text-xs text-slate-500 font-normal leading-relaxed">
               We sent a 6-digit confirmation code to{' '}
-              <span className="font-bold text-slate-900 break-all">{email}</span>. Enter it below to activate your KorsIQ account.
+              <span className="font-semibold text-slate-900 break-all">{email}</span>. Enter it below to activate your KorsIQ account.
             </p>
           </div>
 
@@ -262,10 +256,10 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5 text-left"
+              className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5 text-left"
             >
               <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
-              <p className="text-xs font-semibold text-rose-700 leading-snug">{error}</p>
+              <p className="text-xs font-medium text-rose-700 leading-snug">{error}</p>
             </motion.div>
           )}
 
@@ -273,16 +267,16 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="p-3.5 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-start gap-2.5 text-left"
+              className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2.5 text-left"
             >
               <Check size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-              <p className="text-xs font-semibold text-emerald-800 leading-snug">{message}</p>
+              <p className="text-xs font-medium text-emerald-800 leading-snug">{message}</p>
             </motion.div>
           )}
 
-          <form onSubmit={handleManualSubmit} className="space-y-5 pt-1">
+          <form onSubmit={handleManualSubmit} className="space-y-4 pt-1">
             {/* 6 Separate Digit Input Boxes */}
-            <div className="flex items-center justify-center gap-2 sm:gap-3">
+            <div className="flex items-center justify-center gap-2 sm:gap-2.5">
               {digits.map((digit, idx) => (
                 <input
                   key={idx}
@@ -299,10 +293,10 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
                   onKeyDown={(e) => handleKeyDown(idx, e)}
                   onPaste={handlePaste}
                   aria-label={`Digit ${idx + 1}`}
-                  className={`w-11 h-14 sm:w-12 sm:h-14 text-center text-xl sm:text-2xl font-bold font-mono rounded-xl border outline-none transition-all duration-200 ${
+                  className={`w-10 h-12 sm:w-11 sm:h-12 text-center text-xl font-bold font-mono rounded-lg border outline-none transition-all ${
                     digit
-                      ? 'border-indigo-600 bg-indigo-50/30 text-indigo-950 ring-2 ring-indigo-600/10'
-                      : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10'
+                      ? 'border-blue-600 bg-blue-50/20 text-slate-900 ring-2 ring-blue-100'
+                      : 'border-slate-200 bg-white text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
                   }`}
                 />
               ))}
@@ -311,11 +305,11 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
             <button
               type="submit"
               disabled={isVerifying || !isComplete}
-              className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              className="w-full h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-semibold text-xs transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
             >
               {isVerifying ? (
                 <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   <span>Verifying Token...</span>
                 </div>
               ) : (
@@ -330,13 +324,13 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
               type="button"
               onClick={handleResend}
               disabled={isResending || cooldown > 0}
-              className="w-full h-11 bg-slate-50 hover:bg-slate-100 disabled:opacity-60 border border-slate-200 text-slate-700 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              className="w-full h-10 bg-slate-50 hover:bg-slate-100 disabled:opacity-60 border border-slate-200 text-slate-700 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
             >
               {isResending ? (
                 <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  <RefreshCw size={12} className={cooldown === 0 ? 'text-indigo-600' : ''} />
+                  <RefreshCw size={12} className={cooldown === 0 ? 'text-blue-600' : ''} />
                   <span>{cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend 6-Digit Code'}</span>
                 </>
               )}
@@ -347,7 +341,7 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
             <button
               type="button"
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-700 uppercase tracking-widest transition-colors py-1 cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors py-1 cursor-pointer"
             >
               <ArrowLeft size={12} />
               <span>Use a different email or sign in</span>

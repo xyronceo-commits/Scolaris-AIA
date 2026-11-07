@@ -222,75 +222,73 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const tooltipBorder = isDarkMode ? '#334155' : '#e2e8f0';
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-20">
+    <div className="space-y-6 animate-in fade-in duration-300 pb-16">
       {/* Header Banner */}
-      <div className={`p-6 sm:p-8 rounded-[2.5rem] border transition-all duration-300 relative overflow-hidden ${
+      <div className={`p-6 rounded-xl border transition-colors ${
         isDarkMode 
-          ? 'bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border-indigo-900/40 text-slate-100 shadow-xl' 
-          : 'bg-gradient-to-br from-blue-600 via-indigo-700 to-slate-900 text-white border-blue-500/20 shadow-lg'
+          ? 'bg-slate-900 border-slate-800 text-slate-100 shadow-2xs' 
+          : 'bg-white border-slate-200 text-slate-900 shadow-2xs'
       }`}>
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-white/10 backdrop-blur-md border border-white/15 text-blue-200">
-              <Sparkles size={14} className="text-yellow-300 animate-pulse" />
-              Semester Academic Intelligence
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+              <Sparkles size={12} className="text-blue-600" />
+              Academic Performance Analytics
             </div>
-            <h1 className="text-2xl sm:text-3xl font-serif font-bold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight">
               Study Analytics & Mastery Tracker
             </h1>
-            <p className="text-xs sm:text-sm text-blue-100/80 max-w-xl font-medium leading-relaxed">
-              Real-time correlation between study hours invested and syllabus completion progress across your enrolled modules.
+            <p className="text-xs text-slate-500 max-w-xl">
+              Track correlation between study hours invested, syllabus progression, and mastery benchmarks across enrolled courses.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Global Theme Toggle Button */}
             <button
               onClick={onToggleTheme}
-              className={`px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 transition-all shadow-md cursor-pointer active:scale-95 border ${
+              className={`h-9 px-3 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-colors border ${
                 isDarkMode 
-                  ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30' 
-                  : 'bg-white/15 hover:bg-white/25 text-white border-white/20'
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' 
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
               }`}
-              title="Toggle High-Contrast Study Dark Mode"
+              title="Toggle Theme"
             >
               {isDarkMode ? (
                 <>
-                  <Sun size={16} className="text-amber-400" />
+                  <Sun size={14} className="text-amber-400" />
                   <span>Light Mode</span>
                 </>
               ) : (
                 <>
-                  <Moon size={16} className="text-indigo-200" />
-                  <span>Study Dark Mode</span>
+                  <Moon size={14} className="text-slate-600" />
+                  <span>Dark Mode</span>
                 </>
               )}
             </button>
 
             {/* Timeframe selector */}
-            <div className="flex bg-slate-950/40 p-1 rounded-2xl border border-white/10">
+            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
               <button
                 onClick={() => setTimeframe('semester')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timeframe === 'semester' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  timeframe === 'semester' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Semester
               </button>
               <button
                 onClick={() => setTimeframe('month')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timeframe === 'month' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  timeframe === 'month' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Month
               </button>
               <button
                 onClick={() => setTimeframe('biweekly')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  timeframe === 'biweekly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  timeframe === 'biweekly' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 2 Weeks
@@ -302,82 +300,82 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
       {/* Top Key Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className={`p-5 rounded-3xl border transition-all ${
-          isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+        <div className={`p-4 rounded-xl border transition-all ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
         }`}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Study Hours</span>
-            <div className="p-2.5 bg-blue-500/10 text-blue-500 rounded-2xl">
-              <Clock size={18} />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Study Hours</span>
+            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+              <Clock size={16} />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-serif font-bold">{totalStudyHours}h</span>
-            <span className="text-xs font-bold text-emerald-500 flex items-center">
+            <span className="text-2xl font-bold">{totalStudyHours}h</span>
+            <span className="text-xs font-medium text-emerald-600 flex items-center">
               <TrendingUp size={12} className="mr-0.5" /> +12.4%
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 font-medium mt-1">Logged across {courses.length} courses</p>
+          <p className="text-xs text-slate-500 mt-1">Logged across {courses.length} courses</p>
         </div>
 
-        <div className={`p-5 rounded-3xl border transition-all ${
-          isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+        <div className={`p-4 rounded-xl border transition-all ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
         }`}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Avg Completion Progress</span>
-            <div className="p-2.5 bg-emerald-500/10 text-emerald-500 rounded-2xl">
-              <Target size={18} />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Avg Progress</span>
+            <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+              <Target size={16} />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-serif font-bold">{avgCompletionProgress}%</span>
-            <span className="text-xs font-bold text-emerald-500 flex items-center">
+            <span className="text-2xl font-bold">{avgCompletionProgress}%</span>
+            <span className="text-xs font-medium text-emerald-600 flex items-center">
               <CheckCircle2 size={12} className="mr-0.5" /> On Track
             </span>
           </div>
-          <div className="w-full bg-slate-200/50 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${avgCompletionProgress}%` }} />
+          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden border border-slate-200/50">
+            <div className="bg-emerald-500 h-full rounded-full transition-all duration-300" style={{ width: `${avgCompletionProgress}%` }} />
           </div>
         </div>
 
-        <div className={`p-5 rounded-3xl border transition-all ${
-          isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+        <div className={`p-4 rounded-xl border transition-all ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
         }`}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Top Performing Module</span>
-            <div className="p-2.5 bg-indigo-500/10 text-indigo-500 rounded-2xl">
-              <Award size={18} />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Top Module</span>
+            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+              <Award size={16} />
             </div>
           </div>
           <div>
-            <span className="text-xl font-bold truncate block">{topPerformingCourse?.code || 'None'}</span>
-            <span className="text-xs text-slate-400 truncate block">{topPerformingCourse?.title || 'Enroll courses to view'}</span>
+            <span className="text-lg font-bold truncate block">{topPerformingCourse?.code || 'None'}</span>
+            <span className="text-xs text-slate-500 truncate block">{topPerformingCourse?.title || 'Enroll courses to view'}</span>
           </div>
-          <p className="text-[11px] text-indigo-400 font-bold mt-2">
-            {topPerformingCourse ? `${topPerformingCourse.progress}% Progress • ${topPerformingCourse.studyHours}h Studied` : 'No data yet'}
+          <p className="text-xs text-blue-600 font-medium mt-1">
+            {topPerformingCourse ? `${topPerformingCourse.progress}% Progress • ${topPerformingCourse.studyHours}h` : 'No data yet'}
           </p>
         </div>
 
-        <div className={`p-5 rounded-3xl border transition-all ${
-          isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+        <div className={`p-4 rounded-xl border transition-all ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
         }`}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Target Efficiency Index</span>
-            <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-2xl">
-              <Zap size={18} />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Efficiency Index</span>
+            <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+              <Zap size={16} />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-serif font-bold">94.2</span>
-            <span className="text-xs font-bold text-amber-500">Optimum</span>
+            <span className="text-2xl font-bold">94.2</span>
+            <span className="text-xs font-medium text-amber-600">Optimum</span>
           </div>
-          <p className="text-[11px] text-slate-400 font-medium mt-1">High retention retention-to-time ratio</p>
+          <p className="text-xs text-slate-500 mt-1">Retention-to-time ratio</p>
         </div>
       </div>
 
       {/* Primary Recharts Visualization: Study Hours vs. Completion Progress */}
-      <div className={`p-6 sm:p-8 rounded-[2.5rem] border transition-all ${
-        isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+      <div className={`p-6 rounded-xl border transition-all ${
+        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
       }`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
@@ -410,9 +408,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {filteredChartData.length === 0 ? (
-          <div className="h-72 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center">
-            <BookOpen size={36} className="text-slate-400 mb-3" />
-            <h3 className="text-base font-bold">No courses enrolled</h3>
+          <div className="h-72 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
+            <BookOpen size={32} className="text-slate-400 mb-2" />
+            <h3 className="text-sm font-semibold">No courses enrolled</h3>
             <p className="text-xs text-slate-400 max-w-sm mt-1">Add your enrolled courses in the Courses section to generate study analytics graphs.</p>
           </div>
         ) : (
@@ -493,20 +491,20 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* Secondary Grid: Semester Trend & Study Mode Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Semester Study Hours Trend (AreaChart) */}
-        <div className={`lg:col-span-2 p-6 sm:p-8 rounded-[2.5rem] border transition-all ${
-          isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+        <div className={`lg:col-span-2 p-6 rounded-xl border transition-all ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
         }`}>
           <div className="flex items-center justify-between mb-6">
             <div>
               <div className="flex items-center gap-2">
-                <Calendar size={18} className="text-indigo-500" />
-                <h3 className="text-base font-serif font-bold">Semester Progress & Hours Curve</h3>
+                <Calendar size={16} className="text-blue-600" />
+                <h3 className="text-sm font-semibold">Semester Progress & Hours Curve</h3>
               </div>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
+              <p className="text-xs text-slate-400 font-normal mt-0.5">
                 Weekly study volume progression vs. benchmark target over the semester timeline.
               </p>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-3 py-1 rounded-full border border-indigo-100 dark:border-indigo-900/50">
+            <span className="text-[10px] font-semibold uppercase tracking-wider bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 px-2.5 py-0.5 rounded-md border border-blue-100 dark:border-blue-900/50">
               {semesterTrendData.length} Weeks
             </span>
           </div>
@@ -516,8 +514,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               <AreaChart data={semesterTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
@@ -527,9 +525,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   contentStyle={{ 
                     backgroundColor: tooltipBg, 
                     borderColor: tooltipBorder, 
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     fontSize: '11px',
-                    fontWeight: 'bold',
+                    fontWeight: 'medium',
                     color: isDarkMode ? '#f8fafc' : '#0f172a'
                   }} 
                 />
@@ -537,8 +535,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   type="monotone" 
                   dataKey="actualHours" 
                   name="Actual Hours" 
-                  stroke="#6366f1" 
-                  strokeWidth={2.5} 
+                  stroke="#3b82f6" 
+                  strokeWidth={2} 
                   fillOpacity={1} 
                   fill="url(#colorHours)" 
                 />
@@ -557,12 +555,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* Mode Distribution (PieChart) */}
-        <div className={`p-6 sm:p-8 rounded-[2.5rem] border transition-all ${
-          isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+        <div className={`p-6 rounded-xl border transition-all ${
+          isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
         }`}>
           <div className="mb-4">
-            <h3 className="text-base font-serif font-bold">Study Mode Allocation</h3>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">Breakdown of study techniques applied.</p>
+            <h3 className="text-sm font-semibold">Study Mode Allocation</h3>
+            <p className="text-xs text-slate-400 font-normal mt-0.5">Breakdown of study techniques applied.</p>
           </div>
 
           <div className="h-52 w-full relative flex items-center justify-center">
@@ -585,9 +583,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   contentStyle={{ 
                     backgroundColor: tooltipBg, 
                     borderColor: tooltipBorder, 
-                    borderRadius: '12px',
+                    borderRadius: '8px',
                     fontSize: '11px',
-                    fontWeight: 'bold',
+                    fontWeight: 'medium',
                     color: isDarkMode ? '#f8fafc' : '#0f172a'
                   }}
                   formatter={(value: any, name: any) => [`${value} Hours`, name]}
@@ -596,21 +594,21 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             </ResponsiveContainer>
 
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold font-serif">{totalStudyHours}h</span>
-              <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Total</span>
+              <span className="text-xl font-bold font-mono">{totalStudyHours}h</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Total</span>
             </div>
           </div>
 
           <div className="space-y-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
             {studyModeData.map((item) => (
-              <div key={item.name} className="flex items-center justify-between text-xs font-bold">
+              <div key={item.name} className="flex items-center justify-between text-xs font-medium">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                   <span className="text-slate-600 dark:text-slate-300">{item.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-slate-400">{item.value}h</span>
-                  <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
                     {item.percentage}%
                   </span>
                 </div>
@@ -621,16 +619,16 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {/* Course Level Progress Management & Live Logger */}
-      <div className={`p-6 sm:p-8 rounded-[2.5rem] border transition-all ${
-        isDarkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-white border-slate-100 shadow-sm'
+      <div className={`p-6 rounded-xl border transition-all ${
+        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 shadow-2xs'
       }`}>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-center gap-2">
-              <Sliders size={20} className="text-emerald-500" />
-              <h2 className="text-lg font-serif font-bold">Course Mastery & Hours Logger</h2>
+              <Sliders size={18} className="text-blue-600" />
+              <h2 className="text-sm font-semibold">Course Mastery & Hours Logger</h2>
             </div>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">
+            <p className="text-xs text-slate-400 font-normal mt-0.5">
               Log study sessions or adjust completion progress sliders to update your visual analytics in real time.
             </p>
           </div>
@@ -640,10 +638,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           {courseAnalyticsData.map((item) => (
             <div 
               key={item.id} 
-              className={`p-5 rounded-3xl border transition-all ${
+              className={`p-4 rounded-xl border transition-all ${
                 isDarkMode 
-                  ? 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700' 
-                  : 'bg-slate-50/70 border-slate-200/60 hover:border-slate-300'
+                  ? 'bg-slate-950/60 border-slate-800 hover:border-slate-700' 
+                  : 'bg-slate-50 border-slate-200 hover:border-slate-300'
               }`}
             >
               <div className="flex items-start justify-between gap-3 mb-3">

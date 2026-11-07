@@ -262,10 +262,10 @@ export const GeminiService = {
       console.warn("Study materials fallback active:", err);
       if (type === 'summary') {
         let summary = `# Strategic Academic Summary\n\n`;
-        summary += `## 📌 Core Takeaways\n`;
+        summary += `## Core Takeaways\n`;
         summary += `- **Active Recall**: Engage continuously with self-testing and practice questions.\n`;
         summary += `- **Concept Mapping**: Review key formulas, terminology, and logical structures.\n\n`;
-        summary += `## 🔍 Key Modules\n`;
+        summary += `## Key Modules\n`;
         const sentences = (content || '').split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 15);
         if (sentences.length > 0) {
           const limit = Math.min(sentences.length, 6);
@@ -394,9 +394,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         body: JSON.stringify({ messages, groupName, groupDesc })
       }, 'Group chat failed');
       return data.text;
-    } catch (err) {
-      console.warn("Group chat fallback active:", err);
-      return `[KorsIQ Tutor] Let's break down this topic together! Ask any question regarding ${groupName || 'this module'} and we can analyze it step by step.`;
+    } catch (err: any) {
+      console.warn("Group chat warning:", err?.message || err);
+      return `[KorsIQ Tutor] I encountered an issue connecting to the AI service (${err?.message || 'Connection error'}). Please verify GEMINI_API_KEY in your hosting environment variables.`;
     }
   },
 
@@ -451,9 +451,9 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         headers: await getHeaders(),
         body: JSON.stringify({ messages, courseContext, fileContent })
       }, 'KorsIQ chatbot request failed');
-    } catch (err) {
-      console.warn("KorsIQ chat fallback active:", err);
-      return { text: "I am ready to help! What key concept or question from your coursework would you like us to break down next?" };
+    } catch (err: any) {
+      console.warn("KorsIQ chat warning:", err?.message || err);
+      return { text: `[KorsIQ Assistant] I encountered an issue: ${err?.message || 'Connection error'}. Please verify your AI API key is set in hosting environment variables.` };
     }
   },
 

@@ -376,40 +376,34 @@ export const Auth: React.FC<AuthProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/50 flex flex-col items-center justify-center py-8 px-4 sm:px-6 md:p-8 relative overflow-y-auto font-sans text-slate-900">
-      {/* Background Ornaments */}
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-100/30 blur-[120px] rounded-full" />
-        <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-indigo-100/30 blur-[120px] rounded-full" />
-      </div>
-
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center py-8 px-4 sm:px-6 relative overflow-y-auto font-sans text-slate-900">
       <motion.div 
         layout="position"
-        initial={{ opacity: 0, y: 15 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md w-full relative z-10 my-auto"
       >
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3.5 bg-slate-900 text-white rounded-2xl shadow-xl shadow-slate-900/10 mb-4 hover:scale-105 transition-transform duration-300">
+          <div className="inline-flex items-center justify-center p-3 bg-slate-900 text-white rounded-xl shadow-xs mb-3">
             {mode === 'forgot_password' || mode === 'reset_password' ? (
-              <KeyRound size={36} className="text-indigo-400" />
+              <KeyRound size={32} className="text-blue-400" />
             ) : (
-              <KorsIQLogo variant="icon" size={48} onDark />
+              <KorsIQLogo variant="icon" size={42} onDark />
             )}
           </div>
-          <h1 className="text-2xl font-serif font-bold text-slate-950 tracking-tight italic mb-1">
+          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight mb-1">
             {mode === 'signin' 
               ? 'Welcome Back' 
               : mode === 'signup' 
-              ? 'Create Scholarly Space'
+              ? 'Create Your Account'
               : mode === 'forgot_password'
               ? 'Forgot Password'
               : 'Reset Password'}
           </h1>
-          <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em]">
+          <p className="text-slate-400 font-semibold text-xs">
             {mode === 'forgot_password' || mode === 'reset_password' 
               ? 'Account Recovery' 
-              : 'Global Academic Network'}
+              : 'Global Academic Workspace'}
           </p>
         </div>
 
@@ -418,25 +412,25 @@ export const Auth: React.FC<AuthProps> = ({
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-4 p-4 bg-amber-50 border border-amber-200/80 rounded-2xl flex items-center gap-3 shadow-sm"
+            className="mb-4 p-3.5 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2.5 shadow-xs"
           >
-            <ShieldAlert size={20} className="text-amber-600 shrink-0" />
-            <p className="text-xs font-semibold text-amber-900 leading-tight">
+            <ShieldAlert size={18} className="text-amber-600 shrink-0" />
+            <p className="text-xs font-medium text-amber-900 leading-tight">
               {sessionExpiredMsg}
             </p>
           </motion.div>
         )}
 
-        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-xl shadow-slate-200/30 p-6 md:p-8 transition-all duration-300">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-md p-6 sm:p-8 transition-all">
           
           {/* Header Controls: Tabs for signin/signup OR back link for password recovery */}
           {mode === 'signin' || mode === 'signup' ? (
-            <div className="flex p-1 bg-slate-100/80 rounded-2xl mb-6 relative">
+            <div className="flex p-1 bg-slate-100 rounded-lg mb-6 relative">
               <div className="absolute inset-1 grid grid-cols-2 pointer-events-none">
                 <motion.div
                   layout
                   transition={{ type: "spring", stiffness: 350, damping: 28 }}
-                  className="bg-white rounded-xl shadow-sm h-full w-full"
+                  className="bg-white rounded-md shadow-xs h-full w-full"
                   style={{
                     gridColumnStart: mode === 'signin' ? 1 : 2
                   }}
@@ -446,8 +440,8 @@ export const Auth: React.FC<AuthProps> = ({
               <button
                 type="button"
                 onClick={() => { setMode('signin'); setError(null); setSuccessMessage(null); }}
-                className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 cursor-pointer ${
-                  mode === 'signin' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'
+                className={`relative z-10 flex-1 py-2 rounded-md font-semibold text-xs text-center transition-colors duration-200 cursor-pointer ${
+                  mode === 'signin' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 Sign In
@@ -455,8 +449,8 @@ export const Auth: React.FC<AuthProps> = ({
               <button
                 type="button"
                 onClick={() => { setMode('signup'); setError(null); setSuccessMessage(null); }}
-                className={`relative z-10 flex-1 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider text-center transition-colors duration-200 cursor-pointer ${
-                  mode === 'signup' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-700'
+                className={`relative z-10 flex-1 py-2 rounded-md font-semibold text-xs text-center transition-colors duration-200 cursor-pointer ${
+                  mode === 'signup' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 Create Account
@@ -476,7 +470,7 @@ export const Auth: React.FC<AuthProps> = ({
                 <ArrowLeft size={14} />
                 <span>Back to Sign In</span>
               </button>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md">
                 {mode === 'forgot_password' ? 'Step 1 of 2' : 'Step 2 of 2'}
               </span>
             </div>
@@ -491,10 +485,10 @@ export const Auth: React.FC<AuthProps> = ({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="p-3.5 bg-emerald-50 border border-emerald-200/80 rounded-2xl flex items-start gap-2.5 text-left mb-2"
+                  className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2.5 text-left mb-2"
                 >
                   <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-                  <p className="text-xs font-semibold text-emerald-800 leading-snug">
+                  <p className="text-xs font-medium text-emerald-800 leading-snug">
                     {successMessage}
                   </p>
                 </motion.div>
@@ -508,10 +502,10 @@ export const Auth: React.FC<AuthProps> = ({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5 text-left"
+                  className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5 text-left"
                 >
                   <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
-                  <p className="text-xs font-semibold text-rose-700 leading-snug">
+                  <p className="text-xs font-medium text-rose-700 leading-snug">
                     {error}
                   </p>
                 </motion.div>
@@ -529,7 +523,7 @@ export const Auth: React.FC<AuthProps> = ({
                       animate={{ opacity: 1, height: 'auto' }}
                       className="space-y-1"
                     >
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
                         Full Name
                       </label>
                       <div className="relative">
@@ -538,7 +532,7 @@ export const Auth: React.FC<AuthProps> = ({
                           required
                           value={fullName}
                           onChange={(e) => setFullName(e.target.value)}
-                          className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl px-4 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                          className="w-full h-11 bg-white border border-slate-200 rounded-lg px-3.5 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                           placeholder="e.g. Alex Morgan"
                         />
                       </div>
@@ -547,7 +541,7 @@ export const Auth: React.FC<AuthProps> = ({
 
                   {/* Email Address */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
                       Email Address
                     </label>
                     <input 
@@ -555,19 +549,19 @@ export const Auth: React.FC<AuthProps> = ({
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl px-4 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                      className="w-full h-11 bg-white border border-slate-200 rounded-lg px-3.5 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                       placeholder="name@university.edu"
                     />
                   </div>
 
                   {/* Password */}
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between ml-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <div className="flex items-center justify-between ml-0.5">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                         Password
                       </label>
                       {mode === 'signup' ? (
-                        <span className="text-[9px] text-slate-400 font-medium">
+                        <span className="text-[10px] text-slate-400">
                           Min. 8 chars (letters &amp; numbers)
                         </span>
                       ) : (
@@ -579,7 +573,7 @@ export const Auth: React.FC<AuthProps> = ({
                             setError(null);
                             setSuccessMessage(null);
                           }}
-                          className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer hover:underline"
+                          className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 transition-colors cursor-pointer hover:underline"
                         >
                           Forgot password?
                         </button>
@@ -591,17 +585,17 @@ export const Auth: React.FC<AuthProps> = ({
                         required
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                        className="w-full h-11 bg-white border border-slate-200 rounded-lg pl-3.5 pr-10 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                         placeholder="••••••••"
                       />
                       <button
                         type="button"
                         tabIndex={-1}
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
                         title={showPassword ? "Hide password" : "Show password"}
                       >
-                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
                   </div>
@@ -613,7 +607,7 @@ export const Auth: React.FC<AuthProps> = ({
                       animate={{ opacity: 1, height: 'auto' }}
                       className="space-y-1"
                     >
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
                         Confirm Password
                       </label>
                       <div className="relative">
@@ -622,17 +616,17 @@ export const Auth: React.FC<AuthProps> = ({
                           required={mode === 'signup'}
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                          className="w-full h-11 bg-white border border-slate-200 rounded-lg pl-3.5 pr-10 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                           placeholder="••••••••"
                         />
                         <button
                           type="button"
                           tabIndex={-1}
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
                           title={showConfirmPassword ? "Hide password" : "Show password"}
                         >
-                          {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          {showConfirmPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                         </button>
                       </div>
                     </motion.div>
@@ -652,18 +646,18 @@ export const Auth: React.FC<AuthProps> = ({
                           onChange={(e) => setAgreeTerms(e.target.checked)}
                           className="sr-only"
                         />
-                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center mt-0.5 shrink-0 transition-colors ${
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center mt-0.5 shrink-0 transition-colors ${
                           agreeTerms 
-                            ? 'bg-indigo-600 border-indigo-600 text-white' 
-                            : 'border-slate-300 bg-slate-50 group-hover:border-slate-400'
+                            ? 'bg-blue-600 border-blue-600 text-white' 
+                            : 'border-slate-300 bg-white group-hover:border-slate-400'
                         }`}>
                           {agreeTerms && <CheckCircle2 size={12} className="text-white" />}
                         </div>
-                        <span className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                        <span className="text-[11px] text-slate-500 font-normal leading-relaxed">
                           I agree to the{' '}
-                          <span className="text-indigo-600 font-bold hover:underline">Terms of Service</span>
+                          <span className="text-blue-600 font-semibold hover:underline">Terms of Service</span>
                           {' '}and{' '}
-                          <span className="text-indigo-600 font-bold hover:underline">Privacy Policy</span>.
+                          <span className="text-blue-600 font-semibold hover:underline">Privacy Policy</span>.
                         </span>
                       </label>
                     </motion.div>
@@ -673,17 +667,17 @@ export const Auth: React.FC<AuthProps> = ({
                 <button 
                   type="submit"
                   disabled={isLoading}
-                  className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg font-semibold text-xs transition-all shadow-xs flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {isLoading ? (
                     <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       <span>{mode === 'signin' ? 'Signing In...' : 'Registering Account...'}</span>
                     </div>
                   ) : (
                     <>
                       <span>{mode === 'signin' ? 'Sign In to Workspace' : 'Create Scholarly Account'}</span>
-                      <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                      <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
                     </>
                   )}
                 </button>
@@ -694,7 +688,7 @@ export const Auth: React.FC<AuthProps> = ({
             {mode === 'forgot_password' && (
               <form onSubmit={handleForgotPasswordRequest} className="space-y-4" noValidate>
                 <div className="space-y-1.5 text-left">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
                     Registered Email Address
                   </label>
                   <div className="relative">
@@ -703,12 +697,12 @@ export const Auth: React.FC<AuthProps> = ({
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-10 pr-4 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                      className="w-full h-11 bg-white border border-slate-200 rounded-lg pl-9 pr-3.5 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                       placeholder="name@university.edu"
                     />
-                    <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   </div>
-                  <p className="text-[11px] text-slate-500 font-normal ml-1 pt-0.5 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 font-normal ml-0.5 pt-0.5 leading-relaxed">
                     Enter the email associated with your account. We will send a 6-digit recovery code to reset your password.
                   </p>
                 </div>
@@ -716,17 +710,17 @@ export const Auth: React.FC<AuthProps> = ({
                 <button 
                   type="submit"
                   disabled={isLoading}
-                  className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg font-semibold text-xs transition-all shadow-xs flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {isLoading ? (
                     <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       <span>Sending Recovery Code...</span>
                     </div>
                   ) : (
                     <>
                       <span>Send Recovery Code</span>
-                      <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                      <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
                     </>
                   )}
                 </button>
@@ -740,7 +734,7 @@ export const Auth: React.FC<AuthProps> = ({
                       setError(null);
                       setSuccessMessage(null);
                     }}
-                    className="text-[11px] text-indigo-600 hover:text-indigo-700 font-semibold cursor-pointer hover:underline"
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer hover:underline"
                   >
                     Already have a 6-digit code? Enter code here →
                   </button>
@@ -753,9 +747,9 @@ export const Auth: React.FC<AuthProps> = ({
               <form onSubmit={handleResetPasswordSubmit} className="space-y-4" noValidate>
                 <div className="space-y-3.5 text-left">
                   {/* Target Account Display */}
-                  <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex items-center justify-between text-xs">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between text-xs">
                     <div className="truncate">
-                      <span className="text-slate-400 font-medium">Resetting: </span>
+                      <span className="text-slate-500 font-normal">Resetting: </span>
                       <span className="font-semibold text-slate-800 truncate">
                         {resetEmail || email || 'Registered account'}
                       </span>
@@ -768,7 +762,7 @@ export const Auth: React.FC<AuthProps> = ({
                           setError(null); 
                           setSuccessMessage(null); 
                         }}
-                        className="text-indigo-600 hover:text-indigo-700 font-bold text-[10px] uppercase tracking-wider shrink-0 ml-2 cursor-pointer"
+                        className="text-blue-600 hover:text-blue-800 font-semibold text-[10px] uppercase tracking-wider shrink-0 ml-2 cursor-pointer"
                       >
                         Change
                       </button>
@@ -778,15 +772,15 @@ export const Auth: React.FC<AuthProps> = ({
                   {/* 6-Digit OTP Recovery Code Input (if not a direct recovery link session) */}
                   {!isDirectRecovery && (
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between ml-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      <div className="flex items-center justify-between ml-0.5">
+                        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                           6-Digit Recovery Code
                         </label>
                         <button
                           type="button"
                           disabled={cooldown > 0 || isResending}
                           onClick={handleResendRecoveryCode}
-                          className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:text-slate-400 cursor-pointer disabled:cursor-not-allowed inline-flex items-center gap-1"
+                          className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:text-slate-400 cursor-pointer disabled:cursor-not-allowed inline-flex items-center gap-1"
                         >
                           {isResending ? (
                             <span>Resending...</span>
@@ -807,7 +801,7 @@ export const Auth: React.FC<AuthProps> = ({
                           maxLength={6}
                           value={otpCode}
                           onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
-                          className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl px-4 text-center text-lg font-mono tracking-[0.3em] font-bold outline-none text-slate-800 placeholder-slate-300 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                          className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 text-center text-lg font-mono tracking-[0.3em] font-bold outline-none text-slate-900 placeholder-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                           placeholder="000000"
                           autoComplete="one-time-code"
                         />
@@ -817,11 +811,11 @@ export const Auth: React.FC<AuthProps> = ({
 
                   {/* New Password */}
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between ml-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <div className="flex items-center justify-between ml-0.5">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                         New Password
                       </label>
-                      <span className="text-[9px] text-slate-400 font-medium">
+                      <span className="text-[10px] text-slate-400">
                         Min. 8 chars (letters &amp; numbers)
                       </span>
                     </div>
@@ -831,24 +825,24 @@ export const Auth: React.FC<AuthProps> = ({
                         required
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                        className="w-full h-11 bg-white border border-slate-200 rounded-lg pl-3.5 pr-10 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                         placeholder="••••••••"
                       />
                       <button
                         type="button"
                         tabIndex={-1}
                         onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
                         title={showNewPassword ? "Hide password" : "Show password"}
                       >
-                        {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        {showNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
                   </div>
 
                   {/* Confirm New Password */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
                       Confirm New Password
                     </label>
                     <div className="relative">
@@ -857,17 +851,17 @@ export const Auth: React.FC<AuthProps> = ({
                         required
                         value={confirmNewPassword}
                         onChange={(e) => setConfirmNewPassword(e.target.value)}
-                        className="w-full h-12 bg-slate-50 border border-slate-200/85 rounded-xl pl-4 pr-11 text-sm font-medium outline-none text-slate-700 transition-all duration-200 placeholder-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10"
+                        className="w-full h-11 bg-white border border-slate-200 rounded-lg pl-3.5 pr-10 text-xs font-normal text-slate-900 outline-none transition-all placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
                         placeholder="••••••••"
                       />
                       <button
                         type="button"
                         tabIndex={-1}
                         onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer"
                         title={showConfirmNewPassword ? "Hide password" : "Show password"}
                       >
-                        {showConfirmNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        {showConfirmNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
                   </div>
@@ -876,17 +870,17 @@ export const Auth: React.FC<AuthProps> = ({
                 <button 
                   type="submit"
                   disabled={isLoading}
-                  className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all duration-200 shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg font-semibold text-xs transition-all shadow-xs flex items-center justify-center gap-2 group mt-4 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {isLoading ? (
                     <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       <span>Updating Password...</span>
                     </div>
                   ) : (
                     <>
                       <span>Save New Password &amp; Sign In</span>
-                      <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                      <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
                     </>
                   )}
                 </button>
@@ -908,13 +902,13 @@ export const Auth: React.FC<AuthProps> = ({
               setError(null);
               setSuccessMessage(null);
             }}
-            className="text-[10px] font-bold text-slate-500 hover:text-slate-900 uppercase tracking-widest transition-all bg-white/50 hover:bg-white px-5 py-2 rounded-full border border-slate-200/80 shadow-sm active:scale-95 cursor-pointer"
+            className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition-all bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 shadow-2xs cursor-pointer"
           >
             {mode === 'signin' 
-              ? "Not a member? Create an account" 
+              ? "Don't have an account? Sign up" 
               : mode === 'signup'
-              ? "Already registered? Sign In"
-              : "Remember your password? Sign In"}
+              ? "Already registered? Sign in"
+              : "Remember your password? Sign in"}
           </button>
         </div>
       </motion.div>

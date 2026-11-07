@@ -1,11 +1,22 @@
-
-import React from 'react';
-import { UserProfile, Course, StudySession } from '../types';
-import { ICONS, DAYS, DIFFICULTY_COLORS } from '../constants';
+import React, { useState, useEffect } from 'react';
+import { UserProfile, Course, StudySession, AcademicDocument } from '../types';
+import { DAYS } from '../constants';
 import { UserAvatar } from './UserAvatar';
-import { RecentFiles } from './RecentFiles';
 import { getCurrentUserId } from '../lib/supabase';
-import { Globe, ArrowRight } from 'lucide-react';
+import { DBService } from '../services/db';
+import {
+  FileText,
+  Calendar,
+  BookOpen,
+  Calculator,
+  Users,
+  Clock,
+  ArrowRight,
+  Plus,
+  BrainCircuit,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
 
 interface DashboardProps {
   profile: UserProfile;
@@ -15,32 +26,53 @@ interface DashboardProps {
   onNavigate?: (tab: any) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ profile, courses, schedule, onOpenHub, onNavigate }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  profile,
+  courses,
+  schedule,
+  onOpenHub,
+  onNavigate
+}) => {
+  const userId = getCurrentUserId() || '';
   const today = DAYS[new Date().getDay() - 1] || 'Monday';
-  const todaysTasks = schedule.filter(s => s.day === today);
-  
-  const getCourse = (id: string) => courses.find(c => c.id === id);
+  const todaysTasks = schedule.filter((s) => s.day === today);
 
-  // Retrieve the last accessed Course
-  const lastAccessedCourseId = localStorage.getItem('scolaris_last_accessed_course_id');
-  const lastAccessedCourse = courses.find(c => c.id === lastAccessedCourseId) || courses[0];
+  const getCourse = (id: string) => courses.find((c) => c.id === id);
 
-  // Retrieve the next upcoming scheduled session from today
+  // Load real academic documents from DB
+  const [recentDocs, setRecentDocs] = useState<AcademicDocument[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    const fetchDocs = async () => {
+      setIsLoadingDocs(true);
+      try {
+        const docs = await DBService.getAcademicDocuments(userId);
+        setRecentDocs(docs.slice(0, 4));
+      } catch (err) {
+        console.warn('Failed to load recent documents:', err);
+      } finally {
+        setIsLoadingDocs(false);
+      }
+    };
+    fetchDocs();
+  }, [userId]);
+
+  // Next upcoming session calculation
   const getNextSession = () => {
     if (schedule.length === 0) return null;
-    
     const targetDaysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const currentDayOfWeek = new Date().getDay(); // 0 is Sunday, 1 is Monday ... 6 is Saturday
-    const currentDayIdx = currentDayOfWeek === 0 ? 6 : currentDayOfWeek - 1; // map 0 (Sun) -> 6, 1 (Mon) -> 0
-    
+    const currentDayOfWeek = new Date().getDay();
+    const currentDayIdx = currentDayOfWeek === 0 ? 6 : currentDayOfWeek - 1;
     const dayToNum = (day: string) => targetDaysOrder.indexOf(day);
-    
+
     const sorted = [...schedule].sort((a, b) => {
       const distA = (dayToNum(a.day) - currentDayIdx + 7) % 7;
       const distB = (dayToNum(b.day) - currentDayIdx + 7) % 7;
       return distA - distB;
     });
-    
+
     return sorted[0];
   };
 
@@ -48,241 +80,318 @@ const Dashboard: React.FC<DashboardProps> = ({ profile, courses, schedule, onOpe
   const nextSessionCourse = nextSession ? getCourse(nextSession.courseId) : null;
 
   return (
-    <div className="space-y-12 animate-in fade-in duration-700 pb-20">
-      {/* Header Section */}
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight">
-            Hey, {profile.name.split(' ')[0]}!
-          </h1>
-          <p className="text-slate-500 font-medium text-sm italic">Ready to crush today's goals?</p>
+    <div className="space-y-6 font-sans text-gray-900 pb-16 animate-in fade-in duration-300">
+      {/* 1. Header: Welcome & Academic Metadata */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight">
+              Welcome, {profile.name}
+            </h1>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+              {profile.tier === 'scholar' || profile.tier === 'sage' || profile.isPro ? 'Scholar Tier' : 'Student'}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 font-normal">
+            {profile.university || 'University Student'}
+            {profile.department ? ` • ${profile.department}` : ''}
+            {profile.level ? ` • ${profile.level}` : ''}
+          </p>
         </div>
-        <button 
-          onClick={() => onNavigate?.('profile')}
-          className="cursor-pointer hover:scale-105 transition-transform"
-          title="Go to Profile"
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onNavigate?.('studio')}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Plus size={14} />
+            <span>New Academic Paper</span>
+          </button>
+          <button
+            onClick={() => onNavigate?.('profile')}
+            className="p-1 hover:ring-2 hover:ring-gray-200 rounded-full transition-all cursor-pointer"
+            title="Profile & Settings"
+          >
+            <UserAvatar
+              avatarIcon={profile.avatarIcon || 'graduation-cap'}
+              name={profile.name}
+              size="md"
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Key Metrics Bar (Real Data Only) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-1">
+          <p className="text-xs font-medium text-gray-500">Enrolled Courses</p>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900">{courses.length}</span>
+            <BookOpen size={16} className="text-gray-400" />
+          </div>
+          <p className="text-[11px] text-gray-500">
+            {courses.reduce((sum, c) => sum + (c.units || 0), 0)} total credit units
+          </p>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-1">
+          <p className="text-xs font-medium text-gray-500">Target CGPA</p>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-blue-600">
+              {profile.targetCGPA ? Number(profile.targetCGPA).toFixed(2) : '0.00'}
+            </span>
+            <Calculator size={16} className="text-gray-400" />
+          </div>
+          <p className="text-[11px] text-gray-500">Academic goal target</p>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-1">
+          <p className="text-xs font-medium text-gray-500">Today's Study Schedule</p>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900">{todaysTasks.length}</span>
+            <Calendar size={16} className="text-gray-400" />
+          </div>
+          <p className="text-[11px] text-gray-500">
+            {todaysTasks.length > 0 ? `${today} revision sessions` : 'No sessions today'}
+          </p>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-1">
+          <p className="text-xs font-medium text-gray-500">Academic Studio Papers</p>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900">{recentDocs.length}</span>
+            <FileText size={16} className="text-gray-400" />
+          </div>
+          <p className="text-[11px] text-gray-500">Active drafts in workspace</p>
+        </div>
+      </div>
+
+      {/* 3. Quick Action Navigation */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <button
+          onClick={() => onNavigate?.('studio')}
+          className="p-3 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl text-left transition-colors cursor-pointer flex items-center justify-between group"
         >
-          <UserAvatar 
-            avatarIcon={profile.avatarIcon || 'graduation-cap'} 
-            name={profile.name} 
-            size="lg" 
-            showStatus 
-            isOnline 
-          />
+          <div>
+            <p className="text-xs font-semibold text-gray-900 group-hover:text-blue-600">Academic Studio</p>
+            <p className="text-[11px] text-gray-500">Draft papers &amp; theses</p>
+          </div>
+          <ArrowRight size={14} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
+        </button>
+
+        <button
+          onClick={() => onNavigate?.('hub')}
+          className="p-3 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl text-left transition-colors cursor-pointer flex items-center justify-between group"
+        >
+          <div>
+            <p className="text-xs font-semibold text-gray-900 group-hover:text-blue-600">Study Assistant</p>
+            <p className="text-[11px] text-gray-500">Course AI tutor &amp; quiz</p>
+          </div>
+          <ArrowRight size={14} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
+        </button>
+
+        <button
+          onClick={() => onNavigate?.('calculator')}
+          className="p-3 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl text-left transition-colors cursor-pointer flex items-center justify-between group"
+        >
+          <div>
+            <p className="text-xs font-semibold text-gray-900 group-hover:text-blue-600">CGPA Tracker</p>
+            <p className="text-[11px] text-gray-500">Grade &amp; target planning</p>
+          </div>
+          <ArrowRight size={14} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
+        </button>
+
+        <button
+          onClick={() => onNavigate?.('groups')}
+          className="p-3 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl text-left transition-colors cursor-pointer flex items-center justify-between group"
+        >
+          <div>
+            <p className="text-xs font-semibold text-gray-900 group-hover:text-blue-600">Study Circles</p>
+            <p className="text-[11px] text-gray-500">Peer groups &amp; invites</p>
+          </div>
+          <ArrowRight size={14} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
         </button>
       </div>
 
-      {/* Quick Actions Panel */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-serif font-bold text-slate-900 tracking-tight">Quick Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Card 1: Last Accessed Study Hub */}
-          {lastAccessedCourse ? (
-            <div 
-              onClick={() => onOpenHub(lastAccessedCourse.id)}
-              className="bg-gradient-to-br from-indigo-50/40 via-blue-50/20 to-slate-50/20 border border-slate-100 hover:border-indigo-200/60 p-6 rounded-[2rem] shadow-sm hover:shadow-md hover:scale-[1.01] transition-all cursor-pointer flex items-center justify-between group h-36"
+      {/* 4. Two-Column Workspace (Upcoming Timetable & Recent Studio Documents) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Column A: Timetable & Focus Tasks */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
+              Today's Timetable ({today})
+            </h2>
+            <button
+              onClick={() => onNavigate?.('schedule')}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
             >
-              <div className="space-y-3 max-w-[80%]">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px]">📚</span>
-                  <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest">Last Accessed Hub</span>
-                </div>
-                <div className="space-y-0.5">
-                  <h4 className="text-lg font-serif font-bold text-slate-800 tracking-tight leading-snug group-hover:text-indigo-900 transition-colors uppercase">
-                    {lastAccessedCourse.code}
-                  </h4>
-                  <p className="text-slate-500 font-medium text-xs italic truncate">
-                    {lastAccessedCourse.title}
-                  </p>
-                </div>
-              </div>
-              <div className="w-10 h-10 bg-white border border-slate-50 rounded-full flex items-center justify-center text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all shadow-sm">
-                <ArrowRight size={18} />
-              </div>
-            </div>
-          ) : (
-            <div 
-              onClick={() => onNavigate && onNavigate('courses')}
-              className="bg-gradient-to-br from-slate-50 via-slate-50/50 to-white border border-dashed border-slate-200 p-6 rounded-[2rem] shadow-sm hover:border-indigo-200/60 cursor-pointer flex items-center justify-between group h-36"
-            >
-              <div className="space-y-2 max-w-[80%]">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Study Hub</span>
-                <h4 className="text-base font-serif font-bold text-slate-700 leading-snug">
-                  Setup Your First Course
-                </h4>
-                <p className="text-slate-400 font-medium text-[11px] italic">
-                  Create a module to initialize your active learning hub.
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-white border border-slate-100 rounded-full flex items-center justify-center text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all shadow-sm">
-                <ArrowRight size={18} />
-              </div>
-            </div>
-          )}
+              View Full Schedule →
+            </button>
+          </div>
 
-          {/* Card 2: Next Scheduled Session */}
-          {nextSession && nextSessionCourse ? (
-            <div 
-              onClick={() => onOpenHub(nextSession.courseId)}
-              className="bg-gradient-to-br from-emerald-50/40 via-teal-50/20 to-slate-50/20 border border-slate-100 hover:border-emerald-200/60 p-6 rounded-[2rem] shadow-sm hover:shadow-md hover:scale-[1.01] transition-all cursor-pointer flex items-center justify-between group h-36"
-            >
-              <div className="space-y-3 max-w-[80%]">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px]">⏱️</span>
-                  <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">Next Scheduled Session</span>
-                </div>
-                <div className="space-y-0.5">
-                  <h4 className="text-lg font-serif font-bold text-slate-805 tracking-tight leading-snug group-hover:text-emerald-900 transition-colors">
-                    {nextSession.day} • {nextSession.mode}
-                  </h4>
-                  <p className="text-slate-500 font-medium text-xs italic truncate">
-                    {nextSessionCourse.code} — {nextSession.duration} min focus
-                  </p>
-                </div>
-              </div>
-              <div className="w-10 h-10 bg-white border border-slate-50 rounded-full flex items-center justify-center text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all shadow-sm">
-                <ArrowRight size={18} />
-              </div>
-            </div>
-          ) : (
-            <div 
-              onClick={() => onNavigate && onNavigate('schedule')}
-              className="bg-gradient-to-br from-slate-50 via-slate-50/50 to-white border border-dashed border-slate-200 p-6 rounded-[2rem] shadow-sm hover:border-emerald-200/60 cursor-pointer flex items-center justify-between group h-36"
-            >
-              <div className="space-y-2 max-w-[80%]">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Upcoming Session</span>
-                <h4 className="text-base font-serif font-bold text-slate-705 leading-snug">
-                  Create Study Schedule
-                </h4>
-                <p className="text-slate-400 font-medium text-[11px] italic">
-                  Establish a routine to build consistent study habits.
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-white border border-slate-100 rounded-full flex items-center justify-center text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all shadow-sm">
-                <ArrowRight size={18} />
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Stats Cards - Matches Screenshot 1 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between h-36 hover:shadow-md transition-shadow">
-           <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">Daily Focus</span>
-           <div className="flex items-baseline gap-1.5">
-              <span className="text-3xl font-bold text-slate-900 tracking-tight">{todaysTasks.length}</span>
-              <span className="text-slate-500 font-medium text-sm italic">sessions</span>
-           </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between h-36 hover:shadow-md transition-shadow relative overflow-hidden group">
-           <div className="flex justify-between items-start">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">Study Hubs</span>
-              <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                 {ICONS.StudyHub}
-              </div>
-           </div>
-           <span className="text-3xl font-bold text-slate-900">{courses.length}</span>
-        </div>
-
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between h-36 hover:shadow-md transition-shadow">
-           <div className="flex justify-between items-start">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">Semester</span>
-              <div className="w-9 h-9 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-                 {ICONS.Calendar}
-              </div>
-           </div>
-           <span className="text-3xl font-bold text-slate-900">100%</span>
-        </div>
-      </div>
-
-      {/* Today's Focus */}
-      <section className="space-y-4 pt-2">
-         <h2 className="text-xl font-serif font-bold text-slate-900 tracking-tight">Today's Focus</h2>
-         {todaysTasks.length > 0 ? (
-           <div className="space-y-3">
+          {todaysTasks.length > 0 ? (
+            <div className="space-y-2.5">
               {todaysTasks.map((task, idx) => {
                 const course = getCourse(task.courseId);
                 return (
-                  <div key={idx} className="bg-white p-4 md:p-6 rounded-[1.5rem] border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4 transition-all group hover:border-blue-100 shadow-sm">
-                     <div className="flex flex-col md:flex-row items-center gap-4">
-                        <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 border border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-                           {ICONS.Courses}
-                        </div>
-                        <div className="space-y-0.5 text-center md:text-left">
-                           <h4 className="text-lg font-serif font-bold text-slate-900 tracking-tight">{course?.code} — {course?.title}</h4>
-                           <div className="flex items-center justify-center md:justify-start gap-2">
-                              <span className="px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-[8px] font-bold uppercase tracking-widest">{task.mode}</span>
-                              <span className="flex items-center gap-1 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                                 {ICONS.Clock} {task.duration} min
-                              </span>
-                           </div>
-                        </div>
-                     </div>
-                     <button 
-                       onClick={() => onOpenHub(task.courseId)}
-                       className="text-blue-600 hover:translate-x-1 transition-transform"
-                     >
-                       <ArrowRight size={20} />
-                     </button>
+                  <div
+                    key={idx}
+                    className="p-3 bg-gray-50 border border-gray-200 rounded-lg flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-900">{course?.code || 'ACAD'}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-semibold">
+                          {task.mode}
+                        </span>
+                      </div>
+                      <p className="text-gray-500 truncate">{course?.title || task.courseId}</p>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <p className="font-semibold text-gray-900 flex items-center gap-1 justify-end">
+                          <Clock size={12} className="text-gray-400" />
+                          <span>{task.duration} min</span>
+                        </p>
+                        {task.startTime && <p className="text-[10px] text-gray-400">{task.startTime}</p>}
+                      </div>
+                      <button
+                        onClick={() => onOpenHub(task.courseId)}
+                        className="p-1.5 bg-white border border-gray-200 hover:bg-gray-100 rounded text-blue-600 cursor-pointer"
+                        title="Open Study Hub"
+                      >
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
-           </div>
-         ) : (
-           <div className="bg-white p-12 rounded-[2rem] border border-dashed border-slate-200 text-center flex flex-col items-center">
-              <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-300 mb-4 border border-slate-100">
-                 {ICONS.CheckCircle}
-              </div>
-              <p className="text-slate-500 font-medium text-sm italic opacity-60">No focus sessions scheduled for today. Take it easy!</p>
-           </div>
-         )}
-      </section>
+            </div>
+          ) : (
+            <div className="p-8 text-center border border-dashed border-gray-200 rounded-lg space-y-2">
+              <Calendar size={24} className="mx-auto text-gray-400" />
+              <p className="text-xs font-semibold text-gray-700">No study sessions scheduled for {today}</p>
+              <p className="text-[11px] text-gray-500">
+                Keep consistent study habits by setting regular focus blocks on your timetable.
+              </p>
+              <button
+                onClick={() => onNavigate?.('schedule')}
+                className="mt-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg cursor-pointer"
+              >
+                + Add Session
+              </button>
+            </div>
+          )}
+        </div>
 
-      {/* Recent Hubs - Matches Screenshot 1 */}
-      <section className="space-y-4 pt-2">
-         <div className="flex items-center justify-between">
-            <h2 className="text-xl font-serif font-bold text-slate-900 tracking-tight">Recent Hubs</h2>
-            <button className="text-slate-400 hover:text-slate-900 transition-colors">
-               <ArrowRight size={18} />
+        {/* Column B: Recent Academic Studio Documents */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
+              Recent Academic Documents
+            </h2>
+            <button
+              onClick={() => onNavigate?.('studio')}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+            >
+              Open Studio →
             </button>
-         </div>
-         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {courses.slice(0, 3).map((course) => (
-               <div 
-                 key={course.id} 
-                 onClick={() => onOpenHub(course.id)}
-                 className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm hover:border-blue-100 transition-all cursor-pointer space-y-4 group"
-               >
-                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center border border-blue-100 group-hover:scale-110 transition-transform text-sm">
-                     {ICONS.StudyHub}
-                  </div>
-                  <div className="space-y-0.5">
-                     <h4 className="font-serif font-bold text-slate-900 text-base tracking-tight uppercase leading-none">{course.code}</h4>
-                     <p className="text-slate-500 font-medium text-[10px] italic truncate">{course.title}</p>
-                  </div>
-                  <div className="flex gap-2">
-                     <span className={`px-2 py-0.5 rounded-full border text-[7px] font-bold uppercase tracking-widest ${DIFFICULTY_COLORS[course.difficulty || 'Medium']}`}>
-                        {course.difficulty}
-                     </span>
-                     <span className="px-2 py-0.5 bg-slate-50 border border-slate-100 text-slate-400 rounded-full text-[7px] font-bold uppercase tracking-widest">
-                        {course.units} units
-                     </span>
-                  </div>
-               </div>
-            ))}
-         </div>
-      </section>
+          </div>
 
-      {/* User Isolated Storage Recent Files */}
-      <section className="pt-2">
-        <RecentFiles 
-          userId={getCurrentUserId() || ''} 
-          courses={courses} 
-          onOpenHub={onOpenHub} 
-        />
-      </section>
+          {isLoadingDocs ? (
+            <div className="p-8 text-center text-xs text-gray-400">Loading documents...</div>
+          ) : recentDocs.length > 0 ? (
+            <div className="space-y-2.5">
+              {recentDocs.map((doc) => {
+                const pct = Math.min(100, Math.round(((doc.currentWordCount || 0) / (doc.targetWordCount || 1)) * 100));
+                return (
+                  <div
+                    key={doc.id}
+                    onClick={() => onNavigate?.('studio')}
+                    className="p-3 bg-gray-50 border border-gray-200 hover:border-blue-300 rounded-lg flex items-center justify-between gap-3 text-xs transition-colors cursor-pointer group"
+                  >
+                    <div className="space-y-0.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-900 group-hover:text-blue-600 truncate">
+                          {doc.title}
+                        </span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded shrink-0">
+                          {doc.docType.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                        <span>{doc.currentWordCount.toLocaleString()} / {doc.targetWordCount.toLocaleString()} words</span>
+                        <span>{pct}% complete</span>
+                      </div>
+                    </div>
+                    <ArrowRight size={14} className="text-gray-400 group-hover:text-blue-600 shrink-0" />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-8 text-center border border-dashed border-gray-200 rounded-lg space-y-2">
+              <FileText size={24} className="mx-auto text-gray-400" />
+              <p className="text-xs font-semibold text-gray-700">No academic papers created yet</p>
+              <p className="text-[11px] text-gray-500">
+                Plan and write structured assignments, term papers, research proposals, or final-year projects.
+              </p>
+              <button
+                onClick={() => onNavigate?.('studio')}
+                className="mt-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
+              >
+                + Create First Paper
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 5. Enrolled Courses List */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
+            Enrolled Academic Courses ({courses.length})
+          </h2>
+          <button
+            onClick={() => onNavigate?.('courses')}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+          >
+            Manage Courses →
+          </button>
+        </div>
+
+        {courses.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {courses.map((course) => (
+              <div
+                key={course.id}
+                onClick={() => onOpenHub(course.id)}
+                className="p-3.5 bg-gray-50 border border-gray-200 hover:border-blue-400 rounded-lg space-y-2 transition-colors cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-900 group-hover:text-blue-600">
+                    {course.code}
+                  </span>
+                  <span className="text-[10px] font-semibold text-gray-500 px-1.5 py-0.5 rounded bg-white border border-gray-200">
+                    {course.units} units
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 truncate font-medium">{course.title}</p>
+                <div className="flex items-center justify-between pt-1 text-[11px] text-gray-400">
+                  <span className="capitalize">{course.difficulty || 'Medium'} difficulty</span>
+                  <span className="text-blue-600 font-semibold group-hover:translate-x-0.5 transition-transform">Open Hub →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-6 text-center text-xs text-gray-500">
+            No courses enrolled. Click "Manage Courses" to set up your semester curriculum.
+          </div>
+        )}
+      </div>
     </div>
   );
 };

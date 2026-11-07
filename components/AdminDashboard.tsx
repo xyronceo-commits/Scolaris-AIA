@@ -61,7 +61,7 @@ interface SystemStatusData {
   nodeVersion: string;
   memoryUsageMB: { rss: number; heapUsed: number; heapTotal: number };
   database: { status: string; projectId: string; firestoreDatabaseId: string };
-  aiEngines: { groq: string; gemini: string };
+  aiEngines: { gemini: string };
   timestamp: string;
 }
 
@@ -487,12 +487,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                   <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1">
-                    <span className="text-xs font-bold text-slate-300">Groq LLM Engine (Llama 3.3 70B)</span>
-                    <p className="text-[11px] text-slate-400">Primary instant text generation and quiz synthesizer</p>
+                    <span className="text-xs font-bold text-slate-300">Google Gemini 2.0 Flash</span>
+                    <p className="text-[11px] text-slate-400">Primary multimodal AI engine for tutoring, outlines &amp; active recall</p>
                   </div>
                   <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1">
-                    <span className="text-xs font-bold text-slate-300">Google Gemini Engine (Flash 2.5)</span>
-                    <p className="text-[11px] text-slate-400">Multimodal document parsing & OCR synthesis</p>
+                    <span className="text-xs font-bold text-slate-300">Google Gemini 1.5 Flash</span>
+                    <p className="text-[11px] text-slate-400">Secondary fallback engine for high-throughput resilience</p>
                   </div>
                 </div>
               </div>

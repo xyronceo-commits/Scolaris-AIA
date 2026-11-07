@@ -15,28 +15,28 @@ const FlashcardItem: React.FC<{ card: Flashcard; index: number }> = ({ card, ind
   return (
     <div 
       onClick={() => setFlipped(!flipped)} 
-      className="h-72 [perspective:2000px] cursor-pointer group" 
+      className="h-64 [perspective:1500px] cursor-pointer group" 
     >
-      <div className={`relative h-full w-full rounded-[2.5rem] bg-white transition-all duration-500 [transform-style:preserve-3d] border ${flipped ? '[transform:rotateY(180deg)] border-blue-200 ring-4 ring-blue-500/5 shadow-md' : 'border-slate-100 hover:border-blue-100 shadow-sm'}`}>
+      <div className={`relative h-full w-full rounded-xl bg-white transition-all duration-300 [transform-style:preserve-3d] border ${flipped ? '[transform:rotateY(180deg)] border-blue-300 ring-2 ring-blue-500/10 shadow-xs' : 'border-slate-200 hover:border-slate-300 shadow-2xs'}`}>
         
         {/* Front */}
-        <div className="absolute inset-0 flex flex-col justify-between p-8 [backface-visibility:hidden]">
-          <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+        <div className="absolute inset-0 flex flex-col justify-between p-6 [backface-visibility:hidden]">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
             <span>Card {index + 1}</span>
           </div>
-          <p className="text-center font-bold text-sm sm:text-base text-slate-800 leading-snug">{card.front}</p>
-          <div className="text-center text-[9px] font-bold text-blue-600 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Click to reveal answer</div>
+          <p className="text-center font-medium text-sm text-slate-900 leading-snug">{card.front}</p>
+          <div className="text-center text-[11px] font-medium text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">Click to reveal answer</div>
         </div>
 
         {/* Back */}
-        <div className="absolute inset-0 h-full w-full rounded-[2.5rem] bg-gradient-to-tr from-blue-700 to-indigo-800 p-8 text-center text-white [transform:rotateY(180deg)] [backface-visibility:hidden] flex flex-col justify-between shadow-lg">
-          <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-300 animate-pulse" />
-            <span>Core Answer</span>
+        <div className="absolute inset-0 h-full w-full rounded-xl bg-slate-900 p-6 text-center text-white [transform:rotateY(180deg)] [backface-visibility:hidden] flex flex-col justify-between shadow-xs">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+            <span>Explanation</span>
           </div>
-          <p className="text-center font-medium text-sm sm:text-base leading-relaxed">{card.back}</p>
-          <div className="text-center text-[9px] font-bold text-blue-100 uppercase tracking-widest opacity-80">Click to flip front</div>
+          <p className="text-center font-normal text-xs sm:text-sm text-slate-200 leading-relaxed overflow-y-auto">{card.back}</p>
+          <div className="text-center text-[11px] font-medium text-slate-400">Click to flip front</div>
         </div>
 
       </div>
@@ -324,15 +324,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
     addNotification('content', 'Processing File', `Reading and extracting text from ${file.name}...`, 'hub');
 
     try {
-      const base64 = await fileToBase64(file);
-      const res = await GeminiService.extractFileText(file.name, file.type, base64);
-      
+      const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
       let content = '';
-      if (res.success && res.extractedText) {
-        content = res.extractedText;
+
+      if (isPlainTextFile) {
+        content = await file.text();
       } else {
-        const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
-        if (!isPlainTextFile) {
+        const base64 = await fileToBase64(file);
+        const res = await GeminiService.extractFileText(file.name, file.type, base64);
+        if (res.success && res.extractedText) {
+          content = res.extractedText;
+        } else {
           if (res.isScannedPdf) {
             throw new Error(res.error || "This PDF contains scanned images without selectable text. Please use the Document Scanner tool to parse scanned notes and worksheets.");
           }
@@ -340,11 +342,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         }
       }
 
-      if (content || file.type.startsWith('text/')) {
-        if (!content) {
-          content = await file.text();
-        }
-
+      if (content && content.trim().length > 0) {
         setFileContent(content);
         const name = file.name;
 
@@ -360,21 +358,25 @@ const StudyHub: React.FC<StudyHubProps> = ({
               activeCourse?.code,
               activeCourse?.title
             );
-          } catch (stErr) {
-            console.warn('Isolated storage save warning:', stErr);
+            addNotification('content', 'Storage Confirmed', `${name} safely preserved in cloud storage.`, 'hub');
+          } catch (stErr: any) {
+            console.warn('Storage save warning:', stErr);
+            addNotification('content', 'Storage Notice', `Document parsed for study session, but could not be persisted to cloud storage: ${stErr?.message || 'Storage unavailable'}.`, 'hub');
           }
         }
         
-        // Summarize uploaded file
-        addNotification('content', 'Summarizing Document', `Summarizing core takeaways from ${name}...`, 'hub');
+        // Analyze uploaded file with Gemini
+        addNotification('content', 'Analyzing Document', `Generating academic summary for ${name}...`, 'hub');
         let summaryText = '';
         try {
           const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
           if (sumRes) {
             summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
+            addNotification('content', 'Analysis Complete', `Summary and core takeaways synthesized for ${name}.`, 'hub');
           }
-        } catch (sumErr) {
+        } catch (sumErr: any) {
           console.warn('Summary generation warning:', sumErr);
+          addNotification('content', 'Analysis Notice', `Document loaded. Analysis synthesis notice: ${sumErr?.message || 'Summary unavailable'}.`, 'hub');
         }
 
         const updatedHub = { 
@@ -594,7 +596,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:items-start">
         {/* Sidebar Tools - Fixed Positionish on Large screens */}
         <div className="lg:col-span-4 xl:col-span-3 space-y-4">
-          <div className="bg-white p-6 rounded-[2rem] space-y-4 relative overflow-hidden group border border-slate-100 shadow-sm">
+          <div className="bg-white p-5 rounded-xl space-y-4 relative overflow-hidden group border border-slate-200 shadow-2xs">
             <div className="absolute inset-0 bg-blue-50/50 opacity-0 group-hover:opacity-100 transition-all duration-700"></div>
             <div className="flex items-center justify-between relative z-10">
               <h3 className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
@@ -632,13 +634,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
             if (courseRecentFiles.length === 0) return null;
 
             return (
-              <div className="bg-white p-5 rounded-[2rem] space-y-3 border border-slate-100 shadow-sm animate-in fade-in">
-                <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                  <span className="flex items-center gap-1.5 font-sans">
-                    <FileText size={12} className="text-indigo-600" />
+              <div className="bg-white p-4 rounded-xl space-y-3 border border-slate-200 shadow-2xs animate-in fade-in">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+                  <span className="flex items-center gap-1.5">
+                    <FileText size={13} className="text-blue-600" />
                     Recently Uploaded
                   </span>
-                  <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[8px] font-mono font-bold">
+                  <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-medium border border-blue-100">
                     Quick Load
                   </span>
                 </div>
@@ -647,13 +649,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     <button
                       key={file.id}
                       onClick={() => handleSelectRecentFile(file)}
-                      className="w-full text-left p-2.5 bg-slate-50/80 hover:bg-indigo-50/70 rounded-xl border border-slate-100 hover:border-indigo-200 transition-all text-xs font-semibold text-slate-700 flex items-center justify-between gap-2 group cursor-pointer"
+                      className="w-full text-left p-2.5 bg-slate-50 hover:bg-blue-50/50 rounded-lg border border-slate-200 hover:border-blue-300 transition-all text-xs font-medium text-slate-700 flex items-center justify-between gap-2 group cursor-pointer"
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <FileText size={13} className="text-indigo-600 shrink-0" />
-                        <span className="truncate font-sans text-[11px] font-bold text-slate-800">{file.fileName}</span>
+                        <FileText size={13} className="text-blue-600 shrink-0" />
+                        <span className="truncate text-xs font-semibold text-slate-800">{file.fileName}</span>
                       </div>
-                      <ArrowUpRight size={12} className="text-slate-300 group-hover:text-indigo-600 shrink-0 transition-colors" />
+                      <ArrowUpRight size={13} className="text-slate-400 group-hover:text-blue-600 shrink-0 transition-colors" />
                     </button>
                   ))}
                 </div>
@@ -662,7 +664,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     const el = document.getElementById('recent-files-section');
                     if (el) el.scrollIntoView({ behavior: 'smooth' });
                   }}
-                  className="w-full py-1 text-center text-[9px] font-bold uppercase tracking-wider text-indigo-600 hover:text-indigo-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full py-1 text-center text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <span>Full Document Library Below</span>
                   <span>↓</span>
@@ -672,24 +674,24 @@ const StudyHub: React.FC<StudyHubProps> = ({
           })()}
 
           {/* Tools Grid - Adaptive */}
-          <div className="grid grid-cols-2 lg:grid-cols-1 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
             {tools.map(tool => (
               <button
                 key={tool.id}
                 onClick={() => setActiveTool(tool.id as any)}
-                className={`flex flex-col lg:flex-row lg:items-center justify-between p-6 lg:p-7 rounded-[2rem] transition-all duration-300 border group relative overflow-hidden ${
+                className={`flex flex-col lg:flex-row lg:items-center justify-between p-3.5 lg:p-4 rounded-xl transition-all border group relative overflow-hidden ${
                   activeTool === tool.id 
-                    ? 'bg-blue-700 border-blue-600 text-white shadow-lg' 
-                    : 'bg-white text-slate-400 hover:text-slate-900 border-slate-100 hover:border-slate-200 hover:bg-slate-50'
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-xs' 
+                    : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
-                <div className="flex flex-col lg:flex-row lg:items-center gap-4 relative z-10">
-                  <div className={`w-10 h-10 lg:w-8 lg:h-8 shrink-0 flex items-center justify-center rounded-xl ${activeTool === tool.id ? 'bg-white/20' : 'bg-slate-50'} transition-all`}>
-                    <span className={`transition-all ${activeTool === tool.id ? 'scale-110 text-white' : 'group-hover:scale-110 text-slate-400'}`}>{tool.icon}</span>
+                <div className="flex flex-col lg:flex-row lg:items-center gap-3 relative z-10">
+                  <div className={`w-8 h-8 shrink-0 flex items-center justify-center rounded-lg ${activeTool === tool.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'} transition-all`}>
+                    <span className="transition-all">{tool.icon}</span>
                   </div>
                   <div className="text-left">
-                    <div className="font-bold text-xs tracking-tight">{tool.label}</div>
-                    <div className={`text-[10px] font-medium uppercase tracking-widest mt-0.5 ${activeTool === tool.id ? 'text-blue-100' : 'text-slate-400'}`}>{tool.desc}</div>
+                    <div className="font-semibold text-xs">{tool.label}</div>
+                    <div className={`text-[11px] font-normal mt-0.5 ${activeTool === tool.id ? 'text-blue-100' : 'text-slate-400'}`}>{tool.desc}</div>
                   </div>
                 </div>
               </button>
@@ -698,31 +700,31 @@ const StudyHub: React.FC<StudyHubProps> = ({
         </div>
 
         {/* Main Workbench Display */}
-        <div className="lg:col-span-8 xl:col-span-9 min-h-[500px] bg-white rounded-[2.5rem] p-6 sm:p-10 md:p-12 relative overflow-hidden border border-black/5 shadow-sm transition-all duration-500">
+        <div className="lg:col-span-8 xl:col-span-9 min-h-[500px] bg-white rounded-xl p-6 sm:p-8 relative border border-slate-200 shadow-2xs transition-all duration-300">
           {loading && (
-            <div className="absolute inset-0 bg-white/95 backdrop-blur-3xl z-50 flex flex-col items-center justify-center text-center p-8 animate-in fade-in duration-500">
-               <div className="relative w-32 h-32 mb-10">
-                 <div className="absolute inset-0 border-4 border-blue-50 rounded-full"></div>
-                 <div className="absolute inset-0 border-4 border-blue-700 border-t-transparent rounded-full animate-spin"></div>
-                 <div className="absolute inset-4 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+            <div className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-200 rounded-xl">
+               <div className="relative w-16 h-16 mb-6">
+                 <div className="absolute inset-0 border-2 border-slate-100 rounded-full"></div>
+                 <div className="absolute inset-0 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                 <div className="absolute inset-2 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
                    {ICONS.Sparkles}
                  </div>
                </div>
-              <h2 className="text-3xl sm:text-4xl font-serif font-bold mb-4 tracking-tight text-slate-900">AI Analysis</h2>
-              <p className="text-slate-500 max-w-sm text-base md:text-lg font-medium">Synthesizing materials into structured study guides...</p>
+              <h2 className="text-base font-semibold mb-1 text-slate-900">Synthesizing Course Materials</h2>
+              <p className="text-slate-500 max-w-sm text-xs">Transforming your syllabus into structured summaries, cards, and quizzes...</p>
             </div>
           )}
 
           {!isSessionFileActive ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in zoom-in duration-700 min-h-[400px]">
-              <div className="p-12 bg-blue-50/60 rounded-[3rem] mb-8 text-blue-500 border border-blue-100 shadow-xs">
-                <Sparkles size={56} className="relative z-10" />
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in fade-in duration-300 min-h-[380px]">
+              <div className="p-4 bg-blue-50 rounded-xl mb-4 text-blue-600 border border-blue-100 shadow-2xs">
+                <Sparkles size={28} />
               </div>
-              <h3 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 mb-3 tracking-tight">
+              <h3 className="text-base font-semibold text-slate-900 mb-1">
                 Upload or Select Study Material
               </h3>
-              <p className="max-w-md text-slate-500 leading-relaxed text-sm sm:text-base font-medium">
-                Upload a document above or click any saved file in <span className="font-bold text-indigo-600">Recent Courses &amp; Files</span> below to view or generate summaries, flashcards, quizzes, and podcasts.
+              <p className="max-w-md text-slate-500 leading-relaxed text-xs">
+                Upload a document above or choose any file from <span className="font-semibold text-blue-600">Recent Courses &amp; Files</span> below to generate summaries, flashcards, quizzes, and podcasts.
               </p>
             </div>
           ) : (
@@ -748,7 +750,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('summary')} 
-                    className="px-12 py-6 bg-slate-900 text-white rounded-[2rem] font-bold shadow-md hover:bg-black transition-all uppercase tracking-widest text-sm"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
                   >
                     Generate Summary
                   </button>
@@ -760,35 +762,35 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="space-y-8 animate-in fade-in duration-300">
                 
                 {/* Section Header */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-6 gap-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-5 gap-3">
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
-                        <ScanText size={16} />
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="p-1 rounded-md bg-blue-50 text-blue-600 border border-blue-100">
+                        <ScanText size={14} />
                       </span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Vision AI Engine</span>
+                      <span className="text-xs font-semibold text-blue-700">Vision OCR Engine</span>
                     </div>
-                    <h3 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900">Document &amp; Handwritten Notes Scanner</h3>
-                    <p className="text-xs text-slate-500 font-medium">
-                      Upload photos of handwritten notebook pages, lecture slides, or PDF materials to convert them into structured study notes, flashcards &amp; quizzes.
+                    <h3 className="text-base font-bold text-slate-900">Notes &amp; Document Scanner</h3>
+                    <p className="text-xs text-slate-500 font-normal">
+                      Scan handwritten lecture notes, slides, or diagrams to generate study guides, flashcards &amp; quizzes.
                     </p>
                   </div>
 
                   {scannedDocResult && (
                     <button
                       onClick={applyScannedDocToHub}
-                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg shadow-2xs transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer"
                     >
-                      <CheckCircle2 size={16} />
+                      <CheckCircle2 size={14} />
                       <span>Apply to {currentCourse?.code || 'Course'} Study Hub</span>
                     </button>
                   )}
                 </div>
 
                 {/* Scanner Upload / Dropzone */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                  <div className="md:col-span-5 space-y-4">
-                    <div className="bg-slate-50/70 border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-3xl p-6 text-center transition-all relative group cursor-pointer">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+                  <div className="md:col-span-5 space-y-3">
+                    <div className="bg-slate-50 border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl p-5 text-center transition-colors relative group cursor-pointer">
                       <input
                         ref={scannerFileInputRef}
                         type="file"
@@ -800,68 +802,68 @@ const StudyHub: React.FC<StudyHubProps> = ({
                         }}
                       />
 
-                      <div className="w-14 h-14 bg-indigo-100/80 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
-                        <Camera size={26} />
+                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mx-auto mb-2 border border-blue-100">
+                        <Camera size={20} />
                       </div>
 
-                      <h4 className="font-serif font-bold text-slate-900 text-sm">Upload Handwritten Notes or PDF</h4>
-                      <p className="text-xs text-slate-500 mt-1">
+                      <h4 className="font-semibold text-slate-900 text-xs">Upload Notes or PDF</h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
                         JPEG, PNG, WEBP, or PDF
                       </p>
 
-                      <button className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow-xs inline-flex items-center gap-1.5 pointer-events-none">
-                        <Upload size={14} />
-                        <span>Select File / Take Photo</span>
+                      <button className="mt-3 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium shadow-2xs inline-flex items-center gap-1.5 pointer-events-none">
+                        <Upload size={13} />
+                        <span>Select File / Capture</span>
                       </button>
                     </div>
 
                     {/* Live Image Preview if uploaded */}
                     {scannedDocPreview ? (
-                      <div className="p-3 bg-white border border-slate-150 rounded-2xl space-y-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Scanned Input Preview</span>
-                        <div className="max-h-48 rounded-xl overflow-hidden bg-slate-900 flex items-center justify-center">
-                          <img src={scannedDocPreview} alt="Scanned Preview" className="max-h-48 object-contain" />
+                      <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-1.5">
+                        <span className="text-xs font-semibold text-slate-500">Document Preview</span>
+                        <div className="max-h-40 rounded-lg overflow-hidden bg-slate-900 flex items-center justify-center">
+                          <img src={scannedDocPreview} alt="Scanned Preview" className="max-h-40 object-contain" />
                         </div>
                       </div>
                     ) : null}
                   </div>
 
                   {/* Scanned Results Display */}
-                  <div className="md:col-span-7 space-y-4">
+                  <div className="md:col-span-7 space-y-3">
                     {isScanningDoc ? (
-                      <div className="h-64 border border-indigo-100 bg-indigo-50/30 rounded-3xl p-8 flex flex-col items-center justify-center text-center animate-pulse space-y-3">
-                        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
-                        <h4 className="font-serif font-bold text-indigo-950 text-base">Vision AI Scanning &amp; Parsing Notes...</h4>
-                        <p className="text-xs text-indigo-700/80 max-w-xs">
-                          Transcribing handwriting, formulas, diagrams, and structuring study concepts...
+                      <div className="h-56 border border-slate-200 bg-slate-50 rounded-xl p-6 flex flex-col items-center justify-center text-center space-y-2">
+                        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+                        <h4 className="font-semibold text-slate-900 text-sm">Vision AI Scanning Notes...</h4>
+                        <p className="text-xs text-slate-500 max-w-xs">
+                          Transcribing handwriting, formulas, diagrams, and structuring key concepts...
                         </p>
                       </div>
                     ) : scannedDocResult ? (
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         
                         {/* Result Sub-tabs */}
-                        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl">
+                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
                           <button
                             onClick={() => setScannerSubTab('summary')}
-                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'summary' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${scannerSubTab === 'summary' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'}`}
                           >
                             Structured Notes
                           </button>
                           <button
                             onClick={() => setScannerSubTab('transcription')}
-                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'transcription' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${scannerSubTab === 'transcription' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'}`}
                           >
                             Verbatim OCR
                           </button>
                           <button
                             onClick={() => setScannerSubTab('flashcards')}
-                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'flashcards' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${scannerSubTab === 'flashcards' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'}`}
                           >
                             Cards ({scannedDocResult.flashcards?.length || 0})
                           </button>
                           <button
                             onClick={() => setScannerSubTab('quiz')}
-                            className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer ${scannerSubTab === 'quiz' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${scannerSubTab === 'quiz' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'}`}
                           >
                             Quiz ({scannedDocResult.quiz?.length || 0})
                           </button>
@@ -888,7 +890,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                             {(scannedDocResult.flashcards || []).map((fc: any, fIdx: number) => (
                               <div key={fIdx} className="p-3 bg-white border border-slate-150 rounded-xl space-y-1 text-xs">
-                                <span className="font-bold text-indigo-600 uppercase text-[9px] block">Front</span>
+                                <span className="font-semibold text-blue-600 text-[10px] block">Front</span>
                                 <p className="font-bold text-slate-800">{fc.front}</p>
                                 <span className="font-bold text-slate-400 uppercase text-[9px] block pt-1">Back / Answer</span>
                                 <p className="text-slate-600">{fc.back}</p>
@@ -1004,35 +1006,35 @@ const StudyHub: React.FC<StudyHubProps> = ({
                       <div className="flex flex-col items-center">
                         <div 
                           onClick={() => setIsCardFlipped(!isCardFlipped)}
-                          className="w-full h-96 [perspective:2000px] cursor-pointer selection:bg-transparent"
+                          className="w-full h-80 [perspective:1500px] cursor-pointer selection:bg-transparent"
                         >
-                          <div className={`relative h-full w-full rounded-[3rem] shadow-md transition-all duration-500 [transform-style:preserve-3d] ${isCardFlipped ? '[transform:rotateY(180deg)] ring-4 ring-blue-500/10' : 'ring-1 ring-slate-100'}`}>
+                          <div className={`relative h-full w-full rounded-xl shadow-xs transition-all duration-300 [transform-style:preserve-3d] ${isCardFlipped ? '[transform:rotateY(180deg)] ring-2 ring-blue-500/20' : 'border border-slate-200'}`}>
                             
                             {/* Front View */}
-                            <div className="absolute inset-0 flex flex-col justify-between p-12 bg-white rounded-[3rem] [backface-visibility:hidden]">
+                            <div className="absolute inset-0 flex flex-col justify-between p-8 bg-white rounded-xl [backface-visibility:hidden]">
                               <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Question & Concept</span>
+                                <span className="w-2 h-2 rounded-full bg-blue-600" />
+                                <span className="text-xs font-semibold text-slate-400">Concept Prompt</span>
                               </div>
-                              <p className="text-center font-bold text-lg sm:text-xl lg:text-2xl text-slate-900 leading-snug tracking-tight">
+                              <p className="text-center font-semibold text-base sm:text-lg text-slate-900 leading-snug">
                                 {card?.front}
                               </p>
                               <div className="text-center">
-                                <span className="px-5 py-2.5 bg-blue-50 hover:bg-blue-100/70 transition-colors rounded-full text-[10px] font-bold text-blue-700 uppercase tracking-widest border border-blue-100/50">Click to reveal answer</span>
+                                <span className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors rounded-lg text-xs font-medium text-blue-700 border border-blue-100">Click to reveal answer</span>
                               </div>
                             </div>
 
                             {/* Back View */}
-                            <div className="absolute inset-0 h-full w-full rounded-[3rem] bg-gradient-to-tr from-blue-700 to-indigo-800 p-12 text-center text-white [transform:rotateY(180deg)] [backface-visibility:hidden] flex flex-col justify-between shadow-xl">
+                            <div className="absolute inset-0 h-full w-full rounded-xl bg-slate-900 p-8 text-center text-white [transform:rotateY(180deg)] [backface-visibility:hidden] flex flex-col justify-between shadow-xs">
                               <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-blue-300" />
-                                <span className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">Core Explanation</span>
+                                <span className="w-2 h-2 rounded-full bg-blue-400" />
+                                <span className="text-xs font-semibold text-blue-300">Explanation & Insights</span>
                               </div>
-                              <p className="text-center font-medium text-base sm:text-lg leading-relaxed max-h-[180px] overflow-y-auto pr-1">
+                              <p className="text-center font-normal text-sm leading-relaxed max-h-[160px] overflow-y-auto pr-1 text-slate-200">
                                 {card?.back}
                               </p>
                               <div className="text-center">
-                                <span className="px-5 py-2.5 bg-white/10 rounded-full text-[10px] font-bold text-blue-100 hover:bg-white/20 transition-all uppercase tracking-widest">Click to flip front</span>
+                                <span className="px-3 py-1 bg-white/10 rounded-lg text-xs font-medium text-slate-300 hover:bg-white/20 transition-all">Click to flip front</span>
                               </div>
                             </div>
 
@@ -1133,50 +1135,50 @@ const StudyHub: React.FC<StudyHubProps> = ({
                       return (
                         <div 
                           key={i} 
-                          className={`p-8 rounded-[2.5rem] border transition-all duration-300 space-y-6 animate-in fade-in slide-in-from-bottom-4 ${
+                          className={`p-6 rounded-xl border transition-all duration-200 space-y-4 animate-in fade-in ${
                             hasAnswered 
                               ? selectedOption === q.answer 
-                                ? 'bg-emerald-50/20 border-emerald-100/60 shadow-sm' 
-                                : 'bg-rose-50/10 border-rose-100/60 shadow-sm'
-                              : 'bg-slate-50/50 border-slate-100 hover:border-slate-200'
+                                ? 'bg-emerald-50/30 border-emerald-200 shadow-2xs' 
+                                : 'bg-rose-50/20 border-rose-200 shadow-2xs'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
                           }`}
                           style={{ animationDelay: `${i * 100}ms` }}
                         >
                           <div className="flex justify-between items-start gap-4">
-                            <span className="px-4 py-1.5 bg-slate-100 rounded-xl text-[10px] font-bold text-slate-500 leading-none">
+                            <span className="px-2.5 py-1 bg-slate-100 rounded-md text-xs font-semibold text-slate-600">
                               Question {i + 1}
                             </span>
                             {hasAnswered && (
                               selectedOption === q.answer ? (
-                                <span className="px-4 py-1.5 bg-emerald-50 border border-emerald-100 rounded-xl text-[10px] font-black uppercase text-emerald-700 tracking-wider">Correct</span>
+                                <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-md text-xs font-semibold text-emerald-700">Correct</span>
                               ) : (
-                                <span className="px-4 py-1.5 bg-rose-50 border border-rose-100 rounded-xl text-[10px] font-black uppercase text-rose-700 tracking-wider">Incorrect</span>
+                                <span className="px-2.5 py-1 bg-rose-50 border border-rose-200 rounded-md text-xs font-semibold text-rose-700">Incorrect</span>
                               )
                             )}
                           </div>
 
-                          <p className="text-lg font-serif font-bold text-slate-900 leading-snug">
+                          <p className="text-sm font-semibold text-slate-900 leading-snug">
                             {q.question}
                           </p>
 
-                          <div className="grid grid-cols-1 gap-3.5">
+                          <div className="grid grid-cols-1 gap-2">
                             {q.options.map((opt, optIdx) => {
                               const isSelected = selectedOption === opt;
                               const isCorrect = opt === q.answer;
 
-                              let optionStyle = "bg-white border-slate-100 hover:border-blue-200 text-slate-700 hover:bg-slate-50 hover:pl-6";
-                              let icon = <div className="w-5 h-5 rounded-full border border-slate-200 shrink-0 flex items-center justify-center text-[10px] font-bold text-slate-400 group-hover:border-blue-300" />;
+                              let optionStyle = "bg-white border-slate-200 hover:border-slate-300 text-slate-700 hover:bg-slate-50";
+                              let icon = <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0 flex items-center justify-center text-[10px] text-slate-400" />;
 
                               if (hasAnswered) {
                                 if (isCorrect) {
-                                  optionStyle = "bg-emerald-500 text-white border-emerald-500 shadow-md transform scale-[1.01]";
+                                  optionStyle = "bg-emerald-600 text-white border-emerald-600 shadow-2xs";
                                   icon = <Check className="w-4 h-4 text-white shrink-0" />;
                                 } else if (isSelected) {
-                                  optionStyle = "bg-rose-500 text-white border-rose-500 shadow-md transform scale-[1.01]";
+                                  optionStyle = "bg-rose-600 text-white border-rose-600 shadow-2xs";
                                   icon = <X className="w-4 h-4 text-white shrink-0" />;
                                 } else {
-                                  optionStyle = "bg-slate-50/30 text-slate-350 border-slate-100/60 opacity-60 pointer-events-none";
-                                  icon = <div className="w-5 h-5 rounded-full border border-slate-100 shrink-0" />;
+                                  optionStyle = "bg-slate-50 text-slate-400 border-slate-100 opacity-60 pointer-events-none";
+                                  icon = <div className="w-4 h-4 rounded-full border border-slate-200 shrink-0" />;
                                 }
                               }
 
@@ -1187,7 +1189,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                                   onClick={() => {
                                     setSelectedAnswers(prev => ({ ...prev, [i]: opt }));
                                   }}
-                                  className={`w-full flex items-center justify-between p-5 rounded-2xl border transition-all duration-300 text-left font-bold text-xs select-none group ${optionStyle}`}
+                                  className={`w-full flex items-center justify-between p-3.5 rounded-lg border transition-colors text-left text-xs font-medium select-none ${optionStyle}`}
                                 >
                                   <span className="leading-relaxed">{opt}</span>
                                   {icon}
@@ -1197,13 +1199,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           </div>
 
                           {hasAnswered && (
-                            <div className="py-5 px-6 bg-slate-50 border border-slate-150 rounded-2xl space-y-2.5 animate-in slide-in-from-top-3 duration-300">
-                              <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest animate-pulse">
+                            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5 animate-in slide-in-from-top-2">
+                              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
                                 <HelpCircle size={14} className="text-slate-400" />
-                                <span>Concept Explanation</span>
+                                <span>Explanation</span>
                               </div>
-                              <p className="text-xs font-semibold text-slate-600 leading-relaxed italic">
-                                {q.explanation || "This answer represents the accurate factual representation derived from your provided content."}
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                {q.explanation || "This answer is derived directly from your course materials."}
                               </p>
                             </div>
                           )}
@@ -1214,32 +1216,31 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                   {/* Overall report card banner if the quiz is finished */}
                   {quizFinished && (
-                    <div className="bg-slate-900 border border-slate-800 p-10 sm:p-12 rounded-[3rem] text-white shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-500">
-                      <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 blur-[130px] rounded-full pointer-events-none" />
-                      <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                        <div className="space-y-4 text-center md:text-left">
-                          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[9px] font-black uppercase text-emerald-400 tracking-wider">
-                            Report Card Generated
+                    <div className="bg-slate-900 border border-slate-800 p-8 rounded-xl text-white shadow-sm relative overflow-hidden animate-in fade-in duration-200">
+                      <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
+                        <div className="space-y-2 text-center md:text-left">
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-xs font-semibold text-emerald-400">
+                            Assessment Complete
                           </div>
-                          <h4 className="text-3xl font-serif font-black tracking-tight text-white">
-                            {percentage >= 70 ? "Assessment Approved!" : "Assessment Complete"}
+                          <h4 className="text-xl font-bold tracking-tight text-white">
+                            {percentage >= 70 ? "Assessment Passed" : "Assessment Complete"}
                           </h4>
-                          <p className="text-slate-400 text-sm max-w-sm font-medium leading-relaxed">
+                          <p className="text-slate-400 text-xs max-w-sm leading-relaxed">
                             {percentage === 100 
-                              ? "Perfect score! You have completely synthesized this study block with supreme cognitive memory. 🎓⚡" 
+                              ? "Perfect score! You have synthesized this study block completely." 
                               : percentage >= 70
-                                ? "Excellent academic prowess! You have achieved deep understanding of these study guide structures. 🌟"
-                                : "A vital benchmark in your learning! Review the dynamic study cards or concepts below to boost retention."}
+                                ? "Excellent performance! Strong grasp of the key concepts."
+                                : "Good benchmark. Review the study cards to reinforce missed topics."}
                           </p>
                         </div>
 
-                        <div className="flex flex-col items-center gap-4 shrink-0 bg-white/5 border border-white/5 p-8 rounded-3xl min-w-[200px] w-full md:w-auto">
-                          <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center justify-center mb-1 shadow-glow animate-pulse">
-                            {percentage >= 70 ? <Trophy size={28} /> : <Award size={28} />}
+                        <div className="flex flex-col items-center gap-2 shrink-0 bg-white/5 border border-white/10 p-5 rounded-xl min-w-[160px] w-full md:w-auto">
+                          <div className="w-10 h-10 bg-emerald-500/20 text-emerald-400 rounded-lg flex items-center justify-center">
+                            {percentage >= 70 ? <Trophy size={20} /> : <Award size={20} />}
                           </div>
                           <div className="text-center">
-                            <span className="text-4xl font-black text-white tracking-tighter">{correctCount} <span className="text-slate-500 text-2xl font-normal">/ {totalQuestions}</span></span>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Score: {percentage}%</p>
+                            <span className="text-2xl font-bold text-white tracking-tight">{correctCount} <span className="text-slate-400 text-base font-normal">/ {totalQuestions}</span></span>
+                            <p className="text-xs text-slate-400 mt-0.5">Score: {percentage}%</p>
                           </div>
                         </div>
                       </div>
@@ -1294,14 +1295,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
 
                   {!isTestActive && !isTestSubmitted ? (
-                    <div className="bg-slate-50 border border-slate-100 p-12 rounded-[3rem] text-center space-y-6 max-w-2xl mx-auto shadow-sm">
-                      <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-                        <Award size={32} />
+                    <div className="bg-slate-50 border border-slate-200 p-8 rounded-xl text-center space-y-4 max-w-lg mx-auto shadow-2xs">
+                      <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center mx-auto border border-blue-100">
+                        <Award size={24} />
                       </div>
-                      <div className="space-y-2">
-                        <h4 className="text-xl font-bold text-slate-800 font-sans">Ready to Start mock exam?</h4>
-                        <p className="text-xs text-slate-500 leading-relaxed font-semibold max-w-md mx-auto">
-                          You will have 5 minutes to complete {totalQuestions} generated questions. Score and correction details will only be presented upon submission.
+                      <div className="space-y-1">
+                        <h4 className="text-base font-semibold text-slate-900">Start Mock Exam</h4>
+                        <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                          You will have 5 minutes to complete {totalQuestions} questions. Score and detailed corrections are presented upon submission.
                         </p>
                       </div>
                       <button
@@ -1310,13 +1311,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           setTestTimeRemaining(300);
                           setIsTestActive(true);
                         }}
-                        className="px-8 py-4 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold uppercase text-[10px] tracking-widest hover:scale-105 transition-all shadow-md cursor-pointer"
+                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs cursor-pointer"
                       >
                         Start 5-Minute Exam
                       </button>
                     </div>
                   ) : (
-                    <div className="space-y-10">
+                    <div className="space-y-6">
                       {activeHub.tests.map((q, i) => {
                         const selectedOption = selectedTestAnswers[i];
                         const isChosen = (opt: string) => selectedOption === opt;
@@ -1324,14 +1325,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
                         return (
                           <div 
                             key={i} 
-                            className={`p-8 rounded-[2.5rem] border transition-all duration-300 space-y-6 ${
+                            className={`p-6 rounded-xl border transition-all duration-200 space-y-4 ${
                               isTestSubmitted
                                 ? selectedOption === q.answer
-                                  ? 'bg-emerald-50/20 border-emerald-100/60'
-                                  : 'bg-rose-50/10 border-rose-100/60'
+                                  ? 'bg-emerald-50/20 border-emerald-200'
+                                  : 'bg-rose-50/10 border-rose-200'
                                 : selectedOption !== undefined
-                                  ? 'bg-blue-50/10 border-blue-150'
-                                  : 'bg-slate-50/50 border-slate-100 hover:border-slate-200'
+                                  ? 'bg-blue-50/20 border-blue-200'
+                                  : 'bg-white border-slate-200 hover:border-slate-300'
                             }`}
                           >
                             <div className="flex justify-between items-start gap-4">
@@ -1414,7 +1415,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                               setIsTestSubmitted(true);
                               addNotification('content', 'Mock Exam Submitted', `Completed with ${Math.round((Object.keys(selectedTestAnswers).length / totalQuestions) * 100)}% completeness`, 'hub');
                             }}
-                            className="px-10 py-5 bg-blue-700 hover:bg-blue-800 text-white rounded-2xl font-bold uppercase text-[11px] tracking-widest hover:scale-105 transition-all shadow-md cursor-pointer"
+                            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
                           >
                             Submit Practice Test
                           </button>
@@ -1422,38 +1423,37 @@ const StudyHub: React.FC<StudyHubProps> = ({
                       )}
 
                       {isTestSubmitted && (
-                        <div className="bg-slate-900 border border-slate-800 p-10 sm:p-12 rounded-[3rem] text-white shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-500">
-                          <div className="absolute top-5 right-5 w-80 h-80 bg-emerald-500/10 blur-[130px] rounded-full pointer-events-none" />
-                          <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                            <div className="space-y-4 text-center md:text-left">
-                              <span className="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[9px] font-black uppercase text-emerald-400 tracking-wider">
+                        <div className="bg-slate-900 border border-slate-800 p-8 rounded-xl text-white shadow-sm relative overflow-hidden animate-in fade-in duration-200">
+                          <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
+                            <div className="space-y-2 text-center md:text-left">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-xs font-semibold text-emerald-400">
                                 Exam Results Finalized
                               </span>
-                              <h4 className="text-3xl font-serif font-black tracking-tight text-white">
-                                {percentage >= 70 ? "Practice Test Passed!" : "Simulation Completed"}
+                              <h4 className="text-xl font-bold tracking-tight text-white">
+                                {percentage >= 70 ? "Practice Test Passed" : "Simulation Completed"}
                               </h4>
-                              <p className="text-slate-400 text-sm max-w-sm font-medium leading-relaxed">
+                              <p className="text-slate-400 text-xs max-w-sm leading-relaxed">
                                 {percentage === 100 
-                                  ? "Astonishing achievement! This study segment has been fully mastered with flawless grade accuracy."
+                                  ? "Astonishing achievement! Flawless accuracy on all questions."
                                   : percentage >= 70
-                                    ? "Exceptional results! You are well-prepared for real-world examination standards."
-                                    : "Keep polishing! Real mock tests identify target conceptual leaks before they hit your grade."}
+                                    ? "Exceptional results! Well prepared for real examination conditions."
+                                    : "Keep polishing! Review missed questions to reinforce conceptual clarity."}
                               </p>
                             </div>
 
-                            <div className="flex flex-col items-center gap-4 shrink-0 bg-white/5 border border-white/5 p-8 rounded-3xl min-w-[200px] w-full md:w-auto">
-                              <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center justify-center mb-1">
-                                {percentage >= 70 ? <Trophy size={28} /> : <Award size={28} />}
+                            <div className="flex flex-col items-center gap-2 shrink-0 bg-white/5 border border-white/10 p-5 rounded-xl min-w-[160px] w-full md:w-auto">
+                              <div className="w-10 h-10 bg-emerald-500/20 text-emerald-400 rounded-lg flex items-center justify-center">
+                                {percentage >= 70 ? <Trophy size={20} /> : <Award size={20} />}
                               </div>
                               <div className="text-center">
-                                <span className="text-4xl font-black text-white tracking-tighter">{correctCount} <span className="text-slate-500 text-2xl font-normal">/ {totalQuestions}</span></span>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Score: {percentage}%</p>
+                                <span className="text-2xl font-bold text-white tracking-tight">{correctCount} <span className="text-slate-400 text-base font-normal">/ {totalQuestions}</span></span>
+                                <p className="text-xs text-slate-400 mt-0.5">Score: {percentage}%</p>
                               </div>
                             </div>
                           </div>
                           
-                          <div className="pt-8 border-t border-white/5 mt-8 flex flex-col sm:flex-row justify-between items-center gap-4 relative z-10">
-                            <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 leading-none font-sans">KorsIQ Simulated Exam Division</p>
+                          <div className="pt-6 border-t border-white/10 mt-6 flex flex-col sm:flex-row justify-between items-center gap-4 relative z-10">
+                            <p className="text-xs text-slate-500 font-medium">KorsIQ Exam Simulation</p>
                             <button 
                               onClick={() => {
                                 setSelectedTestAnswers({});
@@ -1480,7 +1480,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('test')} 
-                    className="px-12 py-6 bg-slate-900 text-white rounded-[2rem] font-bold shadow-md hover:bg-black transition-all uppercase tracking-widest text-sm cursor-pointer"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs cursor-pointer"
                   >
                     Generate Practice Test
                   </button>
@@ -1494,7 +1494,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('quiz')} 
-                    className="px-12 py-6 bg-slate-900 text-white rounded-[2rem] font-bold shadow-md hover:bg-black transition-all uppercase tracking-widest text-sm"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
                   >
                     Generate Quiz
                   </button>
@@ -1508,7 +1508,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('flashcards')} 
-                    className="px-12 py-6 bg-slate-900 text-white rounded-[2rem] font-bold shadow-md hover:bg-black transition-all uppercase tracking-widest text-sm"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
                   >
                     Generate Cards
                   </button>
@@ -1519,22 +1519,22 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="space-y-10 animate-in fade-in duration-500">
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-6 border-b border-slate-100 pb-8">
                   <div>
-                    <h3 className="text-3xl font-serif font-bold tracking-tight text-slate-900">Course Library</h3>
-                    <p className="text-xs text-slate-500 font-medium font-sans">Securely archive syllabus, textbook chapters, and collective lecture notes.</p>
+                    <h3 className="text-base font-bold text-slate-900">Course Document Library</h3>
+                    <p className="text-xs text-slate-500 font-normal">Archive syllabus, textbook chapters, and collective lecture notes.</p>
                   </div>
-                  <div className="p-3 bg-indigo-50 border border-indigo-150 rounded-2xl text-[9px] font-mono tracking-wide text-indigo-700 font-black uppercase flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                    Supabase Storage Active
+                  <div className="p-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 font-medium flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                    Supabase Storage Connected
                   </div>
                 </div>
 
                 {/* Secure File Uploader Area */}
                 <div 
                   onClick={() => libraryFileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-[2rem] p-10 text-center transition-all cursor-pointer relative group/libfile ${
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer relative group/libfile ${
                     isUploadingLibrary 
-                      ? 'border-indigo-300 bg-indigo-50/20 pointer-events-none' 
-                      : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50/50'
+                      ? 'border-blue-300 bg-blue-50/20 pointer-events-none' 
+                      : 'border-slate-200 hover:border-blue-400 hover:bg-slate-50'
                   }`}
                 >
                   <input 
@@ -1546,27 +1546,24 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   />
                   
                   {isUploadingLibrary ? (
-                    <div className="space-y-4">
-                      <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-2 mx-auto shadow-sm">
-                        <Loader2 className="w-8 h-8 animate-spin" />
+                    <div className="space-y-2">
+                      <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600 mb-1 mx-auto border border-blue-100">
+                        <Loader2 className="w-5 h-5 animate-spin" />
                       </div>
-                      <h4 className="font-bold text-sm text-slate-800 font-sans">Transmitting to Supabase...</h4>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest leading-none font-semibold">Encrypting and uploading file to S3 storage bucket</p>
+                      <h4 className="font-semibold text-xs text-slate-800">Uploading to Storage...</h4>
+                      <p className="text-xs text-slate-500">Encrypting and uploading file to storage bucket</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-blue-600 mb-4 mx-auto group-hover/libfile:scale-110 transition-transform duration-500 border border-slate-100 shadow-sm">
-                        <Upload size={24} className="group-hover/libfile:-translate-y-1 transition-transform" />
+                    <div className="space-y-1.5">
+                      <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-blue-600 mb-2 mx-auto border border-slate-200 shadow-2xs">
+                        <Upload size={18} />
                       </div>
-                      <h4 className="font-bold text-sm text-slate-800 font-sans">
+                      <h4 className="font-semibold text-xs text-slate-800">
                         Upload Document to Course Library
                       </h4>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-                        Click or drag PDF, TXT, or DOCX syllabus & Notes here
+                      <p className="text-xs text-slate-500">
+                        Click or drag PDF, TXT, or DOCX documents here
                       </p>
-                      <div className="text-[9px] text-slate-400 inline-block font-medium">
-                        Stored in secure encrypted Supabase S3 bucket (Region: eu-north-1)
-                      </div>
                     </div>
                   )}
                 </div>
@@ -1582,17 +1579,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                     return (
                       <>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                          <div className="space-y-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                          <div className="space-y-0.5">
                             <div className="flex items-center gap-2">
-                              <h4 className="text-xs font-bold uppercase tracking-widest text-slate-700">
+                              <h4 className="text-xs font-semibold text-slate-700">
                                 {libraryFilter === 'recent' ? 'Recently Uploaded Documents' : 'All Course Materials'}
                               </h4>
-                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 font-bold rounded-full text-[10px]">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded text-[11px] border border-blue-100">
                                 {displayedFiles.length} {displayedFiles.length === 1 ? 'file' : 'files'}
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-500 font-medium">
+                            <p className="text-xs text-slate-500">
                               {libraryFilter === 'recent'
                                 ? 'Filtered to display recently uploaded course files in the main view.'
                                 : 'Displaying complete archived course documents.'}
@@ -1600,23 +1597,23 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           </div>
 
                           {/* Filter Toggle */}
-                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+                          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200/60 shrink-0">
                             <button
                               onClick={() => setLibraryFilter('recent')}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                                 libraryFilter === 'recent'
-                                  ? 'bg-white text-indigo-600 shadow-xs'
-                                  : 'text-slate-500 hover:text-slate-900'
+                                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                                  : 'text-slate-600 hover:text-slate-900'
                               }`}
                             >
                               Recently Uploaded
                             </button>
                             <button
                               onClick={() => setLibraryFilter('all')}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                                 libraryFilter === 'all'
-                                  ? 'bg-white text-indigo-600 shadow-xs'
-                                  : 'text-slate-500 hover:text-slate-900'
+                                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                                  : 'text-slate-600 hover:text-slate-900'
                               }`}
                             >
                               All Documents ({allFiles.length})
@@ -1625,12 +1622,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
                         </div>
 
                         {/* Informative Callout Banner */}
-                        <div className="p-4 bg-indigo-50/80 border border-indigo-100/90 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-950 font-medium">
-                          <div className="flex items-center gap-2.5">
-                            <Sparkles size={16} className="text-indigo-600 shrink-0" />
+                        <div className="p-3.5 bg-blue-50/50 border border-blue-100 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-blue-900">
+                          <div className="flex items-center gap-2">
+                            <Sparkles size={14} className="text-blue-600 shrink-0" />
                             <span>
                               {libraryFilter === 'recent'
-                                ? 'Only recently uploaded documents appear in this main view. Access your searchable full document library across all courses below.'
+                                ? 'Only recently uploaded documents appear in this view. Use the document library below to search across all courses.'
                                 : 'Full course list active. You can also search your entire multi-course file archive in the dedicated section below.'}
                             </span>
                           </div>
@@ -1639,7 +1636,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                               const el = document.getElementById('recent-files-section');
                               if (el) el.scrollIntoView({ behavior: 'smooth' });
                             }}
-                            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-xs flex items-center gap-1.5"
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md text-xs transition-colors cursor-pointer shrink-0 shadow-2xs flex items-center gap-1.5"
                           >
                             <span>Full Document Library</span>
                             <ArrowUpRight size={12} />
@@ -1647,56 +1644,54 @@ const StudyHub: React.FC<StudyHubProps> = ({
                         </div>
 
                         {displayedFiles.length === 0 ? (
-                          <div className="text-center p-12 bg-slate-50/50 rounded-[2rem] border border-slate-100">
-                            <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center mx-auto mb-4">
+                          <div className="text-center p-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                            <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-lg flex items-center justify-center mx-auto mb-2">
                               <Folder size={18} />
                             </div>
-                            <h5 className="font-bold text-slate-700 text-xs uppercase tracking-wider mb-1">No Recent Files</h5>
-                            <p className="text-[11px] text-slate-500 font-medium max-w-sm mx-auto">
+                            <h5 className="font-semibold text-slate-700 text-xs mb-0.5">No Recent Files</h5>
+                            <p className="text-xs text-slate-500 max-w-sm mx-auto">
                               No materials uploaded recently for this course. Upload a new document above or switch to 'All Documents'.
                             </p>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {displayedFiles.map((file) => {
                               const isPdf = file.fileName.toLowerCase().endsWith('.pdf') || file.fileType?.includes('pdf');
                               const isDocx = file.fileName.toLowerCase().endsWith('.docx') || file.fileType?.includes('document');
                               const fileColorClass = isPdf 
-                                ? 'bg-rose-50 text-rose-600 border-rose-100' 
+                                ? 'bg-rose-50 text-rose-600 border-rose-200' 
                                 : isDocx 
-                                  ? 'bg-blue-50 text-blue-600 border-blue-100' 
-                                  : 'bg-indigo-50 text-indigo-600 border-indigo-100';
+                                  ? 'bg-blue-50 text-blue-600 border-blue-200' 
+                                  : 'bg-slate-100 text-slate-600 border-slate-200';
 
                               return (
                                 <div 
                                   key={file.id} 
-                                  className="bg-white border border-slate-100 hover:border-slate-200 rounded-[2rem] p-6 flex flex-col justify-between h-44 group transition-all shadow-sm"
+                                  className="bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-4 flex flex-col justify-between h-36 group transition-all shadow-2xs"
                                 >
-                                  <div className="flex items-start gap-4">
-                                    <div className={`w-12 h-12 shrink-0 ${fileColorClass} rounded-2xl flex items-center justify-center border group-hover:scale-105 transition-transform`}>
-                                      <File size={22} />
+                                  <div className="flex items-start gap-3">
+                                    <div className={`w-9 h-9 shrink-0 ${fileColorClass} rounded-lg flex items-center justify-center border`}>
+                                      <File size={18} />
                                     </div>
-                                    <div className="space-y-1 flex-1 min-w-0">
+                                    <div className="space-y-0.5 flex-1 min-w-0">
                                       <h5 
-                                        className="text-[13px] font-bold text-slate-800 leading-snug truncate uppercase font-serif italic"
+                                        className="text-xs font-semibold text-slate-800 leading-snug truncate"
                                         title={file.fileName}
                                       >
                                         {file.fileName}
                                       </h5>
-                                      <div className="flex items-center gap-2 flex-wrap text-[9px] font-mono font-bold uppercase tracking-wide">
-                                        <span className="text-slate-400 font-sans font-medium">{file.fileSize || 'N/A'}</span>
-                                        <span className="text-slate-300">•</span>
-                                        <span className="text-slate-400 font-sans font-medium">
-                                          {new Date(file.timestamp).toLocaleDateString()}
-                                        </span>
+                                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                                        <span>{file.fileSize || 'N/A'}</span>
+                                        <span>•</span>
+                                        <span>{new Date(file.timestamp).toLocaleDateString()}</span>
                                       </div>
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center justify-between pt-4 border-t border-slate-50/80">
+                                  <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                                     <button 
                                       onClick={() => handleDeleteLibraryFile(file.id)}
-                                      className="p-2 bg-slate-50 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
                                       title="Delete from Library"
                                     >
                                       <Trash2 size={13} />
@@ -1704,9 +1699,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                                     <button 
                                       onClick={() => handleAccessLibraryFile(file)}
-                                      className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white hover:bg-indigo-600 rounded-xl text-[9px] font-mono uppercase tracking-widest font-black transition-all cursor-pointer shadow-sm active:scale-95"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white hover:bg-slate-800 rounded-md text-xs font-medium transition-colors cursor-pointer shadow-2xs"
                                     >
-                                      <Download size={11} /> Access File
+                                      <Download size={12} /> Access File
                                     </button>
                                   </div>
                                 </div>

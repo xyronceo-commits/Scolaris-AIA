@@ -768,44 +768,44 @@ const App: React.FC = () => {
     { id: 'pomodoro', label: 'Study Timer', icon: ICONS.Pomodoro },
   ];
 
+  const currentNavTitle = navItems.find(item => item.id === activeTab)?.label || 'Workspace';
+
   return (
-    <div className="flex h-screen bg-slate-50/10 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden relative transition-colors duration-300">
+    <div className="flex h-screen bg-[#F8FAFC] dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden relative">
       {/* Mobile Top Header Bar */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between px-4 z-40 shadow-sm transition-colors duration-300">
-        <div className="flex items-center gap-3">
+      <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-40">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => setIsSidebarOpen(true)}
-            className="p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors active:scale-95"
+            aria-label="Open navigation menu"
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors"
           >
-            <Menu size={20} />
+            <Menu size={18} />
           </button>
-          
-          <div className="flex items-center gap-2">
-            <KorsIQLogo variant="full" size={34} />
-          </div>
+          <KorsIQLogo variant="full" size={28} />
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Mobile Dark Mode Toggle */}
+        <div className="flex items-center gap-1.5">
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
-            title="Toggle Theme Mode"
+            className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Toggle theme"
           >
-            {isDarkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-indigo-600" />}
+            {isDarkMode ? <Sun size={17} className="text-amber-500" /> : <Moon size={17} className="text-slate-600" />}
           </button>
 
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className={`p-2 rounded-lg transition-all duration-200 relative ${
+            aria-label="Notifications"
+            className={`p-2 rounded-lg transition-colors relative ${
               showNotifications 
-                ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400' 
-                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                ? 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400' 
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             {ICONS.Bell}
             {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white dark:border-slate-900" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full" />
             )}
           </button>
         </div>
@@ -815,253 +815,282 @@ const App: React.FC = () => {
       {isSidebarOpen && (
         <div 
           onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-40 transition-opacity duration-300"
+          className="lg:hidden fixed inset-0 bg-slate-900/30 backdrop-blur-[2px] z-40 transition-opacity"
         />
       )}
 
       {/* Sidebar Drawer */}
       <aside className={`
-        fixed inset-y-0 left-0 w-60 bg-white dark:bg-slate-900 z-50 flex flex-col border-r border-slate-100 dark:border-slate-800/80
-        transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0
+        fixed inset-y-0 left-0 w-64 bg-white dark:bg-slate-900 z-50 flex flex-col border-r border-slate-200 dark:border-slate-800
+        transform transition-transform duration-200 ease-in-out lg:static lg:translate-x-0
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        <div className="h-20 flex items-center justify-between px-6 border-b border-slate-50 dark:border-slate-800 lg:border-none">
-          <div className="flex items-center gap-3">
-            <KorsIQLogo variant="full" size={40} showSubtitle />
-          </div>
-          
+        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-200 dark:border-slate-800">
+          <KorsIQLogo variant="full" size={32} showSubtitle />
           <button 
             onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-400 transition-colors"
+            aria-label="Close sidebar"
+            className="lg:hidden p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 transition-colors"
           >
             <X size={18} />
           </button>
         </div>
         
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto custom-scrollbar-mini">
-          <button
-            onClick={() => {
-              setShowNotifications(!showNotifications);
-              if (window.innerWidth < 1024) setIsSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative ${
-              showNotifications 
-                ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400' 
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-            }`}
-          >
-            <div className={`transition-all duration-200 ${showNotifications ? 'scale-110 text-blue-600 dark:text-blue-400' : 'group-hover:scale-110'}`}>
-              {ICONS.Bell}
-              {unreadCount > 0 && (
-                <span className="absolute top-2.5 left-6 w-2 h-2 bg-rose-500 rounded-full border-2 border-white dark:border-slate-900" />
-              )}
-            </div>
-            <span className={`text-sm font-medium ${showNotifications ? 'font-bold' : ''}`}>
-              Notifications
-            </span>
-            {unreadCount > 0 && (
-              <span className="ml-auto bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-                {unreadCount}
-              </span>
-            )}
-          </button>
-          
-          <div className="h-px bg-slate-50 dark:bg-slate-800/60 my-2 mx-2" />
-
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setActiveTab(item.id as AppState);
-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
-              }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group ${
-                activeTab === item.id 
-                  ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400' 
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-              }`}
-            >
-              <div className={`transition-all duration-200 ${activeTab === item.id ? 'scale-110 text-blue-600 dark:text-blue-400' : 'group-hover:scale-110'}`}>
-                {item.icon}
-              </div>
-              <span className={`text-sm font-medium ${activeTab === item.id ? 'font-bold' : ''}`}>
-                {item.label}
-              </span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-4 space-y-2">
-           {/* Global Theme Mode Button in Sidebar */}
-           <button
-             onClick={toggleTheme}
-             className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
-           >
-             <span className="flex items-center gap-2">
-               {isDarkMode ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-indigo-600" />}
-               <span>{isDarkMode ? 'Light Mode' : 'Study Dark Mode'}</span>
-             </span>
-             <span className="text-[10px] uppercase font-mono tracking-widest text-slate-400">
-               {isDarkMode ? 'DARK' : 'LIGHT'}
-             </span>
-           </button>
-
-           <div className="pt-2 border-t border-slate-50 dark:border-slate-800/60 flex items-center justify-between">
-              <button 
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {navItems.map((item) => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
                 onClick={() => {
-                  setActiveTab('profile');
+                  setActiveTab(item.id as AppState);
                   if (window.innerWidth < 1024) setIsSidebarOpen(false);
                 }}
-                className={`flex-1 flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all duration-200 ${
-                  activeTab === 'profile' 
-                    ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 font-bold border border-blue-100 dark:border-blue-900/60 shadow-xs' 
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  isActive 
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold' 
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/60'
                 }`}
               >
-                <UserAvatar 
-                  avatarIcon={profile?.avatarIcon || 'graduation-cap'} 
-                  name={profile?.name || 'Profile'}
-                  size="xs"
-                  showStatus
-                  isOnline={dbConnected ?? true}
-                />
-                <span className="text-xs font-bold truncate">
-                  {profile?.name ? profile.name.split(' ')[0] : 'Profile'}
-                </span>
+                <div className={isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}>
+                  {item.icon}
+                </div>
+                <span>{item.label}</span>
               </button>
+            );
+          })}
+        </nav>
 
-              {/* Discreet Admin Portal Entry Icon */}
-              <button
-                onClick={() => {
-                  window.history.pushState({}, '', '/admin');
-                  setActiveTab('admin');
-                  setShowAdminLoginForm(true);
-                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
-                }}
-                title="Admin Portal"
-                className="p-2.5 text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mr-1"
-              >
-                <Shield size={16} />
-              </button>
-           </div>
+        {/* Sidebar Footer */}
+        <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              {isDarkMode ? <Sun size={15} className="text-amber-500" /> : <Moon size={15} className="text-slate-600" />}
+              <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+            </span>
+            <span className="text-[10px] font-mono uppercase text-slate-400">
+              {isDarkMode ? 'DARK' : 'LIGHT'}
+            </span>
+          </button>
+
+          <div className="flex items-center justify-between pt-1">
+            <button 
+              onClick={() => {
+                setActiveTab('profile');
+                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+              }}
+              className={`flex-1 flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+                activeTab === 'profile' 
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold' 
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <UserAvatar 
+                avatarIcon={profile?.avatarIcon || 'graduation-cap'} 
+                name={profile?.name || 'Profile'}
+                size="xs"
+                showStatus
+                isOnline={dbConnected ?? true}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-slate-900 dark:text-white truncate">
+                  {profile?.name || 'Profile'}
+                </p>
+                <p className="text-[10px] text-slate-400 truncate">
+                  {profile?.university || 'Student'}
+                </p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                window.history.pushState({}, '', '/admin');
+                setActiveTab('admin');
+                setShowAdminLoginForm(true);
+                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+              }}
+              title="Admin Portal"
+              aria-label="Admin Portal"
+              className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer ml-1"
+            >
+              <Shield size={16} />
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative pt-16 lg:pt-0 transition-colors duration-300">
-        {showNotifications && (
-          <div className="absolute top-4 right-4 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-2xl rounded-3xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
-               <div className="flex items-center gap-2">
-                 <h3 className="text-sm font-serif font-bold text-slate-900 dark:text-slate-100">Notifications</h3>
-                 {unreadCount > 0 && (
-                   <span className={`px-2 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-full border border-blue-500/20 transition-all duration-500 ${isMarkingAllRead ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
-                     {unreadCount} new
-                   </span>
-                 )}
-               </div>
-               <div className="flex items-center gap-2">
-                 {unreadCount > 0 && (
-                   <button 
-                     onClick={handleMarkAllAsReadAnimated}
-                     disabled={isMarkingAllRead}
-                     className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest hover:text-blue-700 dark:hover:text-blue-300 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                     title="Mark all notifications as read"
-                   >
-                     <CheckCheck size={13} className={`transition-transform duration-300 ${isMarkingAllRead ? 'scale-125 text-emerald-500' : ''}`} />
-                     <span>{isMarkingAllRead ? 'Reading...' : 'Read All'}</span>
-                   </button>
-                 )}
-                 <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-1 rounded-lg">
-                   <X size={14} />
-                 </button>
-               </div>
-            </div>
-
-            <div 
-              ref={notificationScrollRef}
-              className="max-h-[400px] overflow-y-auto custom-scrollbar transition-all duration-300"
-            >
-               {notifications.length === 0 ? (
-                 <div className="p-10 text-center space-y-3">
-                   <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800/60 rounded-2xl flex items-center justify-center text-slate-300 dark:text-slate-600 mx-auto">
-                     {ICONS.Bell}
-                   </div>
-                   <p className="text-slate-400 text-xs font-medium italic">No notifications yet.</p>
-                 </div>
-               ) : (
-                 <div className={`divide-y divide-slate-100 dark:divide-slate-800 transition-all duration-300 ${isClearingNotifications ? 'opacity-0 scale-95 -translate-y-2' : 'opacity-100 scale-100'}`}>
-                    {notifications.map(n => {
-                      const isUnread = !n.read;
-                      return (
-                        <div 
-                          key={n.id} 
-                          data-notification-id={n.id}
-                          onClick={() => {
-                            if (n.link) setActiveTab(n.link);
-                            setShowNotifications(false);
-                            setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, read: true } : notif));
-                          }}
-                          className={`notification-item p-4 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all duration-500 cursor-pointer group relative ${
-                            isUnread && !isMarkingAllRead 
-                              ? 'bg-blue-50/40 dark:bg-blue-950/30' 
-                              : isUnread && isMarkingAllRead
-                              ? 'bg-emerald-50/40 dark:bg-emerald-950/30 ring-1 ring-emerald-500/30'
-                              : ''
-                          }`}
-                        >
-                           {/* Unread indicator dot with smooth scale animation */}
-                           <div 
-                             className={`absolute top-5 left-3 w-2 h-2 rounded-full transition-all duration-500 ease-out ${
-                               isUnread && !isMarkingAllRead 
-                                 ? 'bg-blue-600 dark:bg-blue-400 scale-100 opacity-100' 
-                                 : isUnread && isMarkingAllRead
-                                 ? 'bg-emerald-500 scale-125 opacity-100 animate-ping'
-                                 : 'scale-0 opacity-0'
-                             }`} 
-                           />
-
-                           <div className="pl-4 space-y-1">
-                              <div className="flex items-center justify-between">
-                                 <h4 className={`text-xs font-bold transition-colors duration-300 ${isUnread ? 'text-slate-900 dark:text-slate-100 font-extrabold' : 'text-slate-700 dark:text-slate-300'}`}>
-                                   {n.title}
-                                 </h4>
-                                 <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium">{new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{n.message}</p>
-                           </div>
-                        </div>
-                      );
-                    })}
-                 </div>
-               )}
-            </div>
-
-            {notifications.length > 0 && (
-              <button 
-                onClick={handleClearAllAnimated}
-                disabled={isClearingNotifications}
-                className="w-full p-3 text-[10px] font-bold text-rose-500 dark:text-rose-400 uppercase tracking-widest bg-rose-50/30 dark:bg-rose-950/20 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-t border-rose-100 dark:border-rose-900/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <Trash2 size={12} />
-                <span>{isClearingNotifications ? 'Clearing...' : 'Clear All'}</span>
-              </button>
-            )}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Desktop Top Header Bar */}
+        <header className="hidden lg:flex h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 items-center justify-between px-8 z-20 shrink-0">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-400 font-medium">KorsIQ</span>
+            <span className="text-slate-300 dark:text-slate-700">/</span>
+            <span className="text-slate-900 dark:text-slate-100 font-semibold">{currentNavTitle}</span>
           </div>
-        )}
 
-        <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
-           {renderContent()}
-        </div>
+          <div className="flex items-center gap-3">
+            {/* Notifications Trigger */}
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className={`p-2 rounded-lg transition-colors relative ${
+                showNotifications 
+                  ? 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400' 
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Notifications"
+            >
+              {ICONS.Bell}
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full" />
+              )}
+            </button>
 
-        {profile && profile.onboarded && (
-          <ScolarisChatWidget 
-            courses={courses}
-            activeCourseId={selectedCourseId}
-            activeHub={hubs[selectedCourseId || (courses[0]?.id || '')] || null}
-          />
-        )}
-      </main>
+            {/* Profile Avatar Pill */}
+            <button
+              onClick={() => setActiveTab('profile')}
+              className="flex items-center gap-2 p-1 pl-2 pr-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors cursor-pointer"
+            >
+              <UserAvatar 
+                avatarIcon={profile?.avatarIcon || 'graduation-cap'} 
+                name={profile?.name || 'Profile'}
+                size="xs"
+              />
+              <span className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                {profile?.name ? profile.name.split(' ')[0] : 'Profile'}
+              </span>
+            </button>
+          </div>
+        </header>
+
+        {/* Scrollable Main Area */}
+        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative pt-14 lg:pt-0 pb-20 lg:pb-8">
+          {showNotifications && (
+            <div className="absolute top-4 right-4 sm:right-8 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-xl z-50 overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-900 dark:text-slate-100">Notifications</h3>
+                  {unreadCount > 0 && (
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded-full border border-blue-200">
+                      {unreadCount} new
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={handleMarkAllAsReadAnimated}
+                      disabled={isMarkingAllRead}
+                      className="text-[11px] font-medium text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="Mark all notifications as read"
+                    >
+                      <CheckCheck size={13} />
+                      <span>{isMarkingAllRead ? 'Marking...' : 'Mark all read'}</span>
+                    </button>
+                  )}
+                  <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-md">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <div 
+                ref={notificationScrollRef}
+                className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800"
+              >
+                {notifications.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400 font-medium">
+                    No notifications yet.
+                  </div>
+                ) : (
+                  notifications.map(n => {
+                    const isUnread = !n.read;
+                    return (
+                      <div 
+                        key={n.id} 
+                        onClick={() => {
+                          if (n.link) setActiveTab(n.link);
+                          setShowNotifications(false);
+                          setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, read: true } : notif));
+                        }}
+                        className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer flex items-start gap-3 ${
+                          isUnread ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''
+                        }`}
+                      >
+                        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${isUnread ? 'bg-blue-600' : 'bg-transparent'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className={`text-xs ${isUnread ? 'font-semibold text-slate-900 dark:text-slate-100' : 'font-medium text-slate-700 dark:text-slate-300'} truncate`}>
+                              {n.title}
+                            </h4>
+                            <span className="text-[10px] text-slate-400 shrink-0">
+                              {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                            {n.message}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {notifications.length > 0 && (
+                <button 
+                  onClick={handleClearAllAnimated}
+                  disabled={isClearingNotifications}
+                  className="w-full p-2.5 text-xs font-medium text-rose-600 hover:bg-rose-50 border-t border-slate-200 dark:border-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 size={12} />
+                  <span>{isClearingNotifications ? 'Clearing...' : 'Clear all'}</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
+            {renderContent()}
+          </div>
+
+          {profile && profile.onboarded && (
+            <ScolarisChatWidget 
+              courses={courses}
+              activeCourseId={selectedCourseId}
+              activeHub={hubs[selectedCourseId || (courses[0]?.id || '')] || null}
+            />
+          )}
+        </main>
+
+        {/* Mobile Pinned Bottom Navigation Bar */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 grid grid-cols-5 z-40 px-1">
+          {[
+            { id: 'dashboard', label: 'Dashboard', icon: ICONS.Dashboard },
+            { id: 'studio', label: 'Studio', icon: ICONS.Studio },
+            { id: 'groups', label: 'Circles', icon: ICONS.Groups },
+            { id: 'calculator', label: 'CGPA', icon: ICONS.Calculator },
+            { id: 'profile', label: 'Profile', icon: ICONS.User },
+          ].map((item) => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id as AppState)}
+                className={`flex flex-col items-center justify-center py-1 transition-colors ${
+                  isActive ? 'text-blue-600 dark:text-blue-400 font-semibold' : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <div className="scale-90">{item.icon}</div>
+                <span className="text-[10px] mt-0.5">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
 
       {profile && profile.onboarded && !profile.tutorialSeen && (
          <Tutorial onComplete={handleTutorialComplete} />

@@ -30,53 +30,51 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
       {/* Hero Section */}
       <main className="relative pt-6 pb-12 px-6 overflow-hidden">
         {/* Background elements */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-50/50 rounded-full blur-[100px] pointer-events-none -z-10" />
         
         <div className="max-w-3xl mx-auto text-center space-y-6">
-          <h1 className="text-2xl md:text-4xl font-serif font-bold tracking-tighter text-slate-900 leading-[1.1] animate-in fade-in zoom-in duration-1000">
+          <h1 className="text-2xl md:text-4xl font-serif font-bold tracking-tight text-slate-900 leading-[1.1] animate-in fade-in zoom-in duration-700">
             Outsmart Your<br />Syllabus.
           </h1>
 
-          <p className="text-xs md:text-sm text-slate-500 font-medium max-w-xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+          <p className="text-xs md:text-sm text-slate-500 font-normal max-w-xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-4 duration-500">
             KorsIQ is your AI-powered study companion — from smart schedules and instant flashcards to collaborative study circles and CGPA tracking.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-500">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1 animate-in fade-in slide-in-from-bottom-6 duration-700">
              <button 
                onClick={onStart}
-               className="w-full sm:w-auto px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-[11px] flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all shadow-xl shadow-slate-200"
+               className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-xs flex items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-xs cursor-pointer"
              >
                Start for Free <ArrowRight size={14} />
              </button>
              <button 
-               onClick={() => onSignIn()} // Assuming this might be used for direct dashboard access too if we added a direct dashboard skip in LandingPage? 
-               // Actually the user said "add a button that takes user directly to dashboard" - maybe they want it on the landing page too.
-               className="w-full sm:w-auto px-6 py-2.5 bg-white text-slate-900 border border-slate-200 rounded-xl font-bold text-[11px] hover:bg-slate-50 transition-all shadow-sm"
+               onClick={() => onSignIn()}
+               className="w-full sm:w-auto px-5 py-2.5 bg-white text-slate-800 border border-slate-200 rounded-lg font-semibold text-xs hover:bg-slate-50 transition-all shadow-2xs cursor-pointer"
              >
                Sign In
              </button>
           </div>
 
-          <div className="flex items-center justify-center gap-2 text-slate-400 font-bold text-[9px] uppercase tracking-widest animate-in fade-in duration-1000 delay-700">
-             <Star size={10} className="fill-blue-500 text-blue-500" />
-             Free & Open for Students <span className="opacity-30 mx-2 text-lg leading-none">•</span> Unlimited AI Academic Studio
+          <div className="flex items-center justify-center gap-2 text-slate-400 font-semibold text-[10px] uppercase tracking-wider">
+             <Star size={10} className="fill-blue-600 text-blue-600" />
+             Free &amp; Open for Students <span className="opacity-30 mx-2 text-lg leading-none">•</span> Unlimited AI Academic Studio
           </div>
         </div>
 
         {/* Feature Cards Grid (Compact) */}
-        <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mt-16 animate-in fade-in slide-in-from-bottom-12 duration-1000 delay-1000">
+        <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3.5 mt-16 animate-in fade-in slide-in-from-bottom-8 duration-700">
            {[
-             { title: 'AI Hub', desc: 'Instant summaries & flashcards', icon: ICONS.StudyHub, color: 'text-blue-600', bg: 'bg-blue-50' },
-             { title: 'Schedule', desc: 'AI personalized study plans', icon: ICONS.Schedule, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-             { title: 'Circles', desc: 'Real-time collaborative hubs', icon: ICONS.Groups, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-             { title: 'Analytics', desc: 'Track visual productivity data', icon: ICONS.Analytics, color: 'text-purple-600', bg: 'bg-purple-50' }
+             { title: 'Academic Studio', desc: 'Section-by-section papers', icon: ICONS.StudyHub, color: 'text-blue-600', bg: 'bg-blue-50' },
+             { title: 'Schedule Planner', desc: 'AI personalized timetable', icon: ICONS.Schedule, color: 'text-blue-600', bg: 'bg-blue-50' },
+             { title: 'Private Circles', desc: 'Invite codes & note sharing', icon: ICONS.Groups, color: 'text-emerald-700', bg: 'bg-emerald-50' },
+             { title: 'CGPA Intelligence', desc: 'Target tracking & 5.0 scale', icon: ICONS.Analytics, color: 'text-blue-700', bg: 'bg-blue-50' }
            ].map((feature, i) => (
-             <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-100 hover:-translate-y-1 transition-all group">
-                <div className={`w-10 h-10 ${feature.bg} ${feature.color} rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
-                   {React.cloneElement(feature.icon as React.ReactElement, { size: 18 } as any)}
+             <div key={i} className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:border-slate-300 transition-all group">
+                <div className={`w-9 h-9 ${feature.bg} ${feature.color} rounded-lg flex items-center justify-center mb-3`}>
+                   {React.cloneElement(feature.icon as React.ReactElement, { size: 16 } as any)}
                 </div>
                 <h3 className="text-sm font-serif font-bold text-slate-900 mb-1">{feature.title}</h3>
-                <p className="text-slate-400 font-medium text-[10px] leading-tight">{feature.desc}</p>
+                <p className="text-slate-500 font-normal text-[11px] leading-tight">{feature.desc}</p>
              </div>
            ))}
         </div>
