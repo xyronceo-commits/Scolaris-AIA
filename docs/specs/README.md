@@ -13,11 +13,14 @@ The guided path for the KorsIQ interface. Read these in order before building or
 | 3 | [03-onboarding.md](03-onboarding.md) | The four onboarding steps: verify email, profile, courses, plan |
 | 4 | [04-handoff-and-open-questions.md](04-handoff-and-open-questions.md) | Pre-build checklist, still-to-design list, acceptance criteria, open questions |
 | 5 | [05-current-app-gap-notes.md](05-current-app-gap-notes.md) | Where the current code differs from these specs, and decisions needed |
+| 6 | [REBUILD_PROMPT.md](REBUILD_PROMPT.md) | A phased prompt to give an AI coding agent (Antigravity) to rebuild the UI to these specs |
 
 Original design files (the source of truth for visuals) are in [`source/`](source/):
 
 - `KorsIQ_High_Fidelity_Screens.pdf`
 - `KorsIQ_Onboarding_Screens.pdf`
+
+Repo-wide agent rules live in [`/AGENTS.md`](../../AGENTS.md).
 
 ## How to use this folder
 

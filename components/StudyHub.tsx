@@ -392,7 +392,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         addNotification('content', 'Summary Ready', `Read and summarized core takeaways from ${name}!`, 'hub');
         setActiveTool('summary');
       } else {
-        const errMsg = res.error || "We couldn't read this document correctly. Please try uploading another copy.";
+        const errMsg = "We couldn't read any text from this document. Please try uploading another copy.";
         throw new Error(errMsg);
       }
     } catch (err: any) {

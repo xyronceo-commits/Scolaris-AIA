@@ -2109,34 +2109,6 @@ You MUST return a JSON object containing structured study assets with this exact
         if (isPdf) {
           textContent = await parsePdfBuffer(buffer);
         } else {
-          // If this is an image (jpg/png/webp), check if Groq vision is available
-          const groqKey = cleanEnvKey('GROQ_API_KEY');
-          if (groqKey && (mime.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(fileName || ''))) {
-            try {
-              const groq = new Groq({ apiKey: groqKey });
-              const visionResp = await groq.chat.completions.create({
-                model: 'llama-3.2-11b-vision-preview',
-                messages: [
-                  { role: 'system', content: visionSchemaPrompt },
-                  {
-                    role: 'user',
-                    content: [
-                      { type: 'text', text: 'Scan and transcribe this document, then synthesize structured study assets matching the JSON schema.' },
-                      { type: 'image_url', image_url: { url: `data:${mime};base64,${contentBase64}` } }
-                    ] as any
-                  }
-                ],
-                temperature: 0.2,
-                response_format: { type: 'json_object' }
-              });
-              const vText = visionResp.choices[0]?.message?.content;
-              if (vText) {
-                return res.json({ success: true, data: JSON.parse(vText) });
-              }
-            } catch (vErr) {
-              console.warn('Groq vision model attempt warning:', vErr);
-            }
-          }
           // Do not decode raw image binary as utf-8; only decode text-like files
           if (!mime.startsWith('image/')) {
             textContent = buffer.toString('utf-8');

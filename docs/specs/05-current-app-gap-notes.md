@@ -1,6 +1,6 @@
 # 05 Current app vs specs: gap notes
 
-> **These notes were written by reading the code on `main` on 7 November 2026, not taken from the design PDFs.** They record where the running app differs from `01` to `04` so nobody has to rediscover it. Re-check against the code before relying on any line; the app changes quickly.
+> **These notes were written by reading the code on `main` (re-verified against commit `08716cc`, 7 November 2026), not taken from the design PDFs.** They record where the running app differs from `01` to `04` so nobody has to rediscover it. Re-check against the code before relying on any line; the app changes quickly.
 
 Items marked **Decision needed** must be settled by the product owner. Do not silently pick one side.
 
@@ -25,14 +25,18 @@ Items marked **Decision needed** must be settled by the product owner. Do not si
 
 | Spec | Current app |
 |------|-------------|
-| Desktop sidebar of six: Overview, Study Planner, Academic Studio, Private Circles, Resources, Settings. Mobile bottom bar of five: Home, Planner, Studio, Circles, Library. | Nine items in `App.tsx`: Dashboard, Academic Studio, Courses, Schedule, Study Hub, Circles, CGPA & Planner, Analytics, Study Timer. |
+| Desktop sidebar of six: Overview, Study Planner, Academic Studio, Private Circles, Resources, Settings. Mobile bottom bar of five: Home, Planner, Studio, Circles, Library. | Desktop sidebar of nine in `App.tsx`: Dashboard, Academic Studio, Courses, Schedule, Study Hub, Circles, CGPA & Planner, Analytics, Study Timer. Mobile bottom bar of five: Dashboard, Studio, Circles, CGPA, Profile. |
 
 ## Visual style
 
 | Spec | Current app |
 |------|-------------|
-| Blue `#2563EB`, flat, one sans-serif family in two weights. | Inter is loaded, but headings use a serif face in several screens, and buttons and accents use indigo. |
+| Blue `#2563EB`, flat, one sans-serif family in two weights, 8 px corners. | A recent commit (`ff6eb39`) redesigned the UI with a "Linear and Notion" style. Inter is the base font, but serif headings (`font-serif`) are still used in many components. **These specs are the intended direction and take precedence over that redesign.** |
 | Logo placeholder in mockups; sample the exact blue from the original logo. | The real logo is in `public/` (`korsiq-logo.png`, `korsiq-logo-light.png`). The brain-and-cap mark was built with blue measured at approximately `#0A58F0`, which differs slightly from the spec's `#2563EB`. **Decision needed:** align the palette to the logo blue or the spec blue. |
+
+## AI provider
+
+The app is now Gemini-only (Groq was removed). AI calls go through the Express backend (`/api/...`); the browser never holds an AI key.
 
 ## Plans and limits
 
