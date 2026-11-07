@@ -162,6 +162,20 @@ The following existing features do not have a dedicated slot in the 6 main deskt
   - Step 3 (Plan): Three spec plan cards side by side (Free ₦0, Plus ₦7,500, Academic Studio ₦15,000). Free preselected. Choosing paid triggers non-blocking "Available soon" modal and preserves Free selection. Single primary button "Go to dashboard".
 - **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 8: Plan and Usage in Settings
+
+- **Structure in Settings (`components/Profile.tsx`):** Added a dedicated "Plan and usage" subnavigation tab to Settings alongside Academic Identity and Preferences.
+- **Current Plan Card:** Displays the current active plan name (Free), monthly billing rate (₦0 / month), and an interactive `Change plan` button.
+- **Storage Card:** Computes and displays real storage utilization based on actual files fetched via `DBService.getUserFiles(userId)` and `fileSize` parsing against the `BETA_PLAN_LIMITS` storage allowance (e.g. `0.0 MB of 500 MB (beta)`), including monthly upload count.
+- **AI Credits Card (Omission per Spec Rule):**
+  - Spec rule: *"The AI credits card must only appear if real metering exists. No fake content anywhere: no invented credit numbers."*
+  - Because no backend AI credit counter or metering table currently exists in the database schema, this card is intentionally omitted rather than fabricating fake usage figures.
+- **Quiet Upgrade Card:** Features the exact spec copy *"Need more room to write? Upgrade to Plus or Academic Studio for dissertation tools, larger file allowances, real citation chips, and formatted Word (.docx) export."* with a single primary button `See plans`.
+- **Plans Modal & Payment Guard:** Clicking `Change plan` or `See plans` presents the three spec plans (Free ₦0, Plus ₦7,500/mo, Academic Studio ₦15,000/mo). Selecting a paid plan triggers the non-blocking "Available soon" modal and preserves Free plan status without changing client/database tier.
+- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
 
 
 

@@ -1,8 +1,20 @@
-import React from 'react';
-import { UserProfile } from '../types';
-import { ICONS } from '../constants';
+import React, { useState, useEffect } from 'react';
+import { UserProfile, UserFile } from '../types';
+import { ICONS, BETA_PLAN_LIMITS } from '../constants';
 import { UserAvatar, AVATAR_OPTIONS } from './UserAvatar';
-import { ArrowRight, LogOut, Sparkles, X, Check, AlertCircle } from 'lucide-react';
+import { DBService } from '../services/db';
+import { getCurrentUserId } from '../lib/supabase';
+import { 
+  ArrowRight, 
+  LogOut, 
+  Sparkles, 
+  X, 
+  Check, 
+  AlertCircle,
+  HardDrive,
+  CreditCard,
+  Crown
+} from 'lucide-react';
 
 interface ProfileProps {
   profile: UserProfile;
@@ -11,245 +23,640 @@ interface ProfileProps {
   onDelete: () => void;
 }
 
-const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDelete }) => {
-  const [isEditing, setIsEditing] = React.useState(false);
-  const [editedProfile, setEditedProfile] = React.useState(profile);
+export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut, onDelete }) => {
+  const [activeTab, setActiveTab] = useState<'plan' | 'identity' | 'account'>('plan');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedProfile, setEditedProfile] = useState(profile);
+  const [showPlansModal, setShowPlansModal] = useState(false);
+  const [showAvailableSoon, setShowAvailableSoon] = useState(false);
+  const [userFiles, setUserFiles] = useState<UserFile[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(true);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setEditedProfile(profile);
   }, [profile]);
 
-  const handleSave = () => {
+  useEffect(() => {
+    const uid = getCurrentUserId() || profile.email;
+    DBService.getUserFiles(uid)
+      .then((files) => {
+        setUserFiles(files);
+      })
+      .catch((err) => {
+        console.error('Error fetching user files for storage calculation:', err);
+      })
+      .finally(() => {
+        setIsLoadingFiles(false);
+      });
+  }, [profile.email]);
+
+  const handleSaveIdentity = async () => {
     setProfile(editedProfile);
+    const uid = getCurrentUserId();
+    if (uid) {
+      await DBService.saveProfile(uid, editedProfile).catch(() => {});
+    }
     setIsEditing(false);
   };
 
+  const parseBytes = (fileSizeStr: string): number => {
+    if (!fileSizeStr) return 0;
+    const match = fileSizeStr.match(/([\d.]+)\s*(B|KB|MB|GB)/i);
+    if (!match) {
+      const raw = parseFloat(fileSizeStr);
+      return isNaN(raw) ? 0 : raw;
+    }
+    const val = parseFloat(match[1]);
+    const unit = match[2].toUpperCase();
+    if (unit === 'GB') return val * 1024 * 1024 * 1024;
+    if (unit === 'MB') return val * 1024 * 1024;
+    if (unit === 'KB') return val * 1024;
+    return val;
+  };
+
+  // Real Storage Calculation
+  const totalStorageBytes = userFiles.reduce((acc, f) => acc + parseBytes(f.fileSize), 0);
+  const totalStorageMB = (totalStorageBytes / (1024 * 1024)).toFixed(1);
+
+  // Uploads this month
+  const now = new Date();
+  const uploadsThisMonth = userFiles.filter(f => {
+    const d = new Date(f.uploadedAt);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
+
+  // Plan limits (Beta placeholder from constants.tsx)
+  const planKey = (profile.tier === 'sage' ? 'studio' : profile.tier === 'scholar' ? 'plus' : 'free') as keyof typeof BETA_PLAN_LIMITS;
+  const currentPlan = BETA_PLAN_LIMITS[planKey] || BETA_PLAN_LIMITS.free;
+  const storageLimitMB = (currentPlan.storageLimitBytes / (1024 * 1024)).toFixed(0);
+  const storagePercent = Math.min(100, Math.round((totalStorageBytes / currentPlan.storageLimitBytes) * 100));
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-300 pb-20 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between border-b border-slate-200 pb-5">
-        <div className="space-y-0.5">
-          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight leading-none">Profile & Account</h1>
-          <p className="text-slate-500 font-normal text-xs mt-1">Manage your academic profile, preferences, and account credentials</p>
+    <div className="space-y-6 animate-in fade-in duration-300 pb-20 max-w-4xl mx-auto font-sans text-[#111827] dark:text-white">
+      {/* Top Header & Settings Tabs */}
+      <div className="space-y-4 border-b border-[#E5E7EB] dark:border-slate-800 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-[#111827] dark:text-white">Settings</h1>
+            <p className="text-xs text-[#5B6472]">Manage your plan, academic identity, and preferences</p>
+          </div>
+
+          {activeTab === 'identity' && (
+            <button 
+              type="button"
+              onClick={() => isEditing ? handleSaveIdentity() : setIsEditing(true)}
+              className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer min-h-[44px] ${
+                isEditing 
+                ? 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm' 
+                : 'bg-white dark:bg-slate-800 text-[#111827] dark:text-white border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {isEditing ? 'Save Changes' : 'Edit Profile'}
+            </button>
+          )}
         </div>
-        <button 
-          onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer ${
-            isEditing 
-            ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-xs' 
-            : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-2xs'
-          }`}
-        >
-          {isEditing ? 'Save Changes' : 'Edit Profile'}
-        </button>
+
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-lg text-xs font-semibold max-w-md">
+          <button
+            type="button"
+            onClick={() => setActiveTab('plan')}
+            className={`flex-1 py-2 px-3 rounded-md min-h-[36px] transition-colors cursor-pointer text-center ${
+              activeTab === 'plan'
+                ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                : 'text-[#5B6472] hover:text-[#111827] dark:hover:text-white'
+            }`}
+          >
+            Plan and usage
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('identity')}
+            className={`flex-1 py-2 px-3 rounded-md min-h-[36px] transition-colors cursor-pointer text-center ${
+              activeTab === 'identity'
+                ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                : 'text-[#5B6472] hover:text-[#111827] dark:hover:text-white'
+            }`}
+          >
+            Academic identity
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('account')}
+            className={`flex-1 py-2 px-3 rounded-md min-h-[36px] transition-colors cursor-pointer text-center ${
+              activeTab === 'account'
+                ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                : 'text-[#5B6472] hover:text-[#111827] dark:hover:text-white'
+            }`}
+          >
+            Account
+          </button>
+        </div>
       </div>
 
-      <div className="space-y-6">
-        {/* Account Card */}
-        <section className="space-y-2">
-           <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Academic Identity</h3>
-           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-                 <div className="shrink-0">
-                   <UserAvatar 
-                     avatarIcon={editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap'}
-                     name={profile.name}
-                     size="xl"
-                     showStatus
-                     isOnline
-                   />
-                 </div>
-                 <div className="space-y-1 w-full max-w-md">
-                    {isEditing ? (
-                      <input 
-                        type="text"
-                        value={editedProfile.name}
-                        onChange={e => setEditedProfile({...editedProfile, name: e.target.value})}
-                        className="w-full text-base font-serif font-bold text-slate-900 border-b border-blue-400 focus:outline-none bg-transparent pb-0.5"
-                      />
-                    ) : (
-                      <h2 className="text-base font-serif font-bold text-slate-900">{profile.name}</h2>
-                    )}
-                    {isEditing ? (
-                      <input 
-                        type="text"
-                        value={editedProfile.university}
-                        onChange={e => setEditedProfile({...editedProfile, university: e.target.value})}
-                        className="w-full text-xs text-slate-500 border-b border-blue-200 focus:outline-none bg-transparent mt-1 pb-0.5"
-                        placeholder="Institution name"
-                      />
-                    ) : (
-                      <p className="text-slate-500 font-medium text-xs">{profile.university}</p>
-                    )}
-                 </div>
-              </div>
+      {/* ========================================================= */}
+      {/* TAB 1: Plan and Usage (Spec: Screen 6)                    */}
+      {/* ========================================================= */}
+      {activeTab === 'plan' && (
+        <div className="space-y-6">
+          <div className="space-y-0.5">
+            <h2 className="text-base font-bold text-[#111827] dark:text-white">Plan and usage</h2>
+            <p className="text-xs text-[#5B6472]">Your plan, AI credits and storage</p>
+          </div>
 
-              {/* Avatar Icon Choice Selection Grid */}
-              {isEditing && (
-                <div className="pt-4 border-t border-slate-100 space-y-2.5">
-                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                    Choose Profile Avatar Icon
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5">
-                    {AVATAR_OPTIONS.map((opt) => {
-                      const isSelected = (editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap') === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => setEditedProfile({ ...editedProfile, avatarIcon: opt.id })}
-                          className={`flex flex-col items-center justify-center p-2.5 rounded-lg transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-blue-50 border-2 border-blue-600 shadow-2xs'
-                              : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
-                          }`}
-                          title={opt.name}
-                        >
-                          <UserAvatar avatarIcon={opt.id} size="sm" />
-                          <span className="text-[9px] font-semibold text-slate-600 truncate w-full text-center mt-1">
-                            {opt.name}
-                          </span>
-                        </button>
-                      );
-                    })}
+          {/* Desktop Two-Column / Mobile Stacked Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Left Column (8 cols on desktop): Current Plan, Storage */}
+            <div className="lg:col-span-8 space-y-4">
+              {/* Current Plan Card */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-[#E5E7EB] dark:border-slate-800">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Current Plan</span>
+                    <h3 className="text-lg font-bold text-[#111827] dark:text-white">{currentPlan.name}</h3>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPlansModal(true)}
+                    className="px-3.5 py-2 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-[#111827] dark:text-white rounded-lg min-h-[44px] cursor-pointer"
+                  >
+                    Change plan
+                  </button>
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 pt-1">
-                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">User ID</p>
-                    <p className="text-xs font-mono font-bold text-slate-800 truncate">SCL-882-991-X</p>
-                 </div>
-                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Email Address</p>
-                    <p className="text-xs font-medium text-slate-800 truncate">{profile.email}</p>
-                 </div>
-                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Level of Study</p>
-                    {isEditing ? (
-                      <select 
-                        value={editedProfile.level}
-                        onChange={e => setEditedProfile({...editedProfile, level: e.target.value})}
-                        className="text-xs font-semibold text-slate-900 bg-white border border-slate-200 rounded px-2 py-0.5 focus:outline-none cursor-pointer"
-                      >
-                         <option>Freshman</option>
-                         <option>Sophomore</option>
-                         <option>Junior</option>
-                         <option>Senior</option>
-                         <option>Post-Grad</option>
-                         <option>Undergraduate</option>
-                         <option>Postgraduate</option>
-                         <option>PhD / Research</option>
-                      </select>
-                    ) : (
-                      <p className="text-xs font-semibold text-slate-800">{profile.level}</p>
-                    )}
-                 </div>
-                 <div className="space-y-1 p-3 bg-slate-50 rounded-lg border border-slate-150">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Targeted CGPA</p>
-                    {isEditing ? (
-                      <input 
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max="5.00"
-                        value={editedProfile.targetCGPA !== undefined ? editedProfile.targetCGPA : 0.00}
-                        onChange={e => setEditedProfile({...editedProfile, targetCGPA: parseFloat(e.target.value) || 0})}
-                        className="text-xs font-bold text-blue-600 bg-white border border-slate-200 rounded px-2 py-0.5 focus:outline-none w-20 font-mono"
-                      />
-                    ) : (
-                      <p className="text-xs font-bold text-blue-600 font-mono">{(profile?.targetCGPA ?? 0.00).toFixed(2)}</p>
-                    )}
-                 </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">{currentPlan.price}</span>
+                  </div>
+                  <p className="text-xs text-[#5B6472] max-w-sm">
+                    {currentPlan.tagline}
+                  </p>
+                </div>
               </div>
-           </div>
-        </section>
 
-        {/* Preferences Section */}
-        <section className="space-y-2">
-           <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Preferences</h3>
-              <button 
-                onClick={() => setProfile({ ...profile, tutorialSeen: false })}
-                className="group flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-all cursor-pointer text-xs"
-              >
-                <Sparkles size={11} className="text-blue-600" />
-                <span className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider">Reset Tutorial</span>
-              </button>
-           </div>
-           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+              {/* Storage Card */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <HardDrive size={16} className="text-[#2563EB]" />
+                    <h3 className="font-bold text-sm text-[#111827] dark:text-white">Storage</h3>
+                  </div>
+                  <span className="text-xs text-[#5B6472]">
+                    {totalStorageMB} MB of {storageLimitMB} MB (beta)
+                  </span>
+                </div>
+
+                {/* Storage Meter Bar */}
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-[#2563EB] h-full rounded-full transition-all duration-300"
+                    style={{ width: `${storagePercent}%` }}
+                  />
+                </div>
+
+                <p className="text-xs text-[#5B6472]">
+                  {uploadsThisMonth} upload{uploadsThisMonth === 1 ? '' : 's'} this month. Beta storage allowance.
+                </p>
+              </div>
+
+              {/* NOTE ON AI CREDITS CARD:
+                  Per spec rule: "The AI credits card must only appear if real metering exists.
+                  No fake content anywhere: no invented credit numbers."
+                  Since no backend metering counter exists, the card is omitted cleanly. */}
+            </div>
+
+            {/* Right Column (4 cols on desktop): Quiet Upgrade Card */}
+            <div className="lg:col-span-4 space-y-4">
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between h-full">
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-wider">
+                    Upgrade
+                  </span>
+                  <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                    Need more room to write?
+                  </h3>
+                  <p className="text-xs text-[#5B6472] leading-relaxed">
+                    Upgrade to Plus or Academic Studio for dissertation tools, larger file allowances, real citation chips, and formatted Word (.docx) export.
+                  </p>
+                </div>
+
+                {/* Single Primary Button per Spec */}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPlansModal(true)}
+                    className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm"
+                  >
+                    <span>See plans</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 2: Academic Identity (Profile Settings)              */}
+      {/* ========================================================= */}
+      {activeTab === 'identity' && (
+        <div className="space-y-5">
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+              <div className="shrink-0">
+                <UserAvatar 
+                  avatarIcon={editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap'}
+                  name={profile.name}
+                  size="xl"
+                  showStatus
+                  isOnline
+                />
+              </div>
+              <div className="space-y-1 w-full max-w-md">
+                {isEditing ? (
+                  <input 
+                    type="text"
+                    value={editedProfile.name}
+                    onChange={e => setEditedProfile({...editedProfile, name: e.target.value})}
+                    placeholder="Full name"
+                    className="w-full text-base font-bold text-[#111827] dark:text-white border-b border-[#2563EB] focus:outline-none bg-transparent pb-0.5"
+                  />
+                ) : (
+                  <h2 className="text-base font-bold text-[#111827] dark:text-white">{profile.name}</h2>
+                )}
+                {isEditing ? (
+                  <input 
+                    type="text"
+                    value={editedProfile.university}
+                    onChange={e => setEditedProfile({...editedProfile, university: e.target.value})}
+                    className="w-full text-xs text-[#5B6472] border-b border-[#E5E7EB] focus:outline-none bg-transparent mt-1 pb-0.5"
+                    placeholder="Institution name"
+                  />
+                ) : (
+                  <p className="text-[#5B6472] font-medium text-xs">{profile.university || 'University Student'}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Avatar Icon Picker */}
+            {isEditing && (
+              <div className="pt-4 border-t border-[#E5E7EB] dark:border-slate-800 space-y-2.5">
+                <label className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider block">
+                  Profile Icon
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5">
+                  {AVATAR_OPTIONS.map((opt) => {
+                    const isSelected = (editedProfile.avatarIcon || profile.avatarIcon || 'graduation-cap') === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setEditedProfile({ ...editedProfile, avatarIcon: opt.id })}
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-lg transition-all cursor-pointer min-h-[44px] ${
+                          isSelected
+                            ? 'bg-[#EFF6FF] border-2 border-[#2563EB]'
+                            : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 border border-[#E5E7EB] dark:border-slate-700'
+                        }`}
+                        title={opt.name}
+                      >
+                        <UserAvatar avatarIcon={opt.id} size="sm" />
+                        <span className="text-[9px] font-semibold text-[#5B6472] truncate w-full text-center mt-1">
+                          {opt.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Email Address</p>
+                <p className="text-xs font-semibold text-[#111827] dark:text-white truncate">{profile.email}</p>
+              </div>
+              <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Department</p>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editedProfile.department || ''}
+                    onChange={e => setEditedProfile({...editedProfile, department: e.target.value, major: e.target.value})}
+                    className="text-xs font-semibold text-[#111827] dark:text-white bg-transparent border-b border-[#2563EB] outline-none w-full"
+                    placeholder="e.g. Computer Science"
+                  />
+                ) : (
+                  <p className="text-xs font-semibold text-[#111827] dark:text-white">{profile.department || profile.major || 'Not specified'}</p>
+                )}
+              </div>
+              <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Level of Study</p>
+                {isEditing ? (
+                  <select 
+                    value={editedProfile.level}
+                    onChange={e => setEditedProfile({...editedProfile, level: e.target.value})}
+                    className="text-xs font-semibold text-[#111827] dark:text-white bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-700 rounded px-2 py-1 outline-none cursor-pointer w-full"
+                  >
+                    <option>100L / Year 1</option>
+                    <option>200L / Year 2</option>
+                    <option>300L / Year 3</option>
+                    <option>400L / Year 4</option>
+                    <option>500L / Year 5</option>
+                    <option>Postgraduate</option>
+                  </select>
+                ) : (
+                  <p className="text-xs font-semibold text-[#111827] dark:text-white">{profile.level}</p>
+                )}
+              </div>
+              <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Target CGPA</p>
+                {isEditing ? (
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="5.00"
+                    value={editedProfile.targetCGPA !== undefined ? editedProfile.targetCGPA : 0.00}
+                    onChange={e => setEditedProfile({...editedProfile, targetCGPA: parseFloat(e.target.value) || 0})}
+                    className="text-xs font-bold text-[#2563EB] bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-700 rounded px-2 py-0.5 outline-none w-24 font-mono"
+                  />
+                ) : (
+                  <p className="text-xs font-bold text-[#2563EB] font-mono">{(profile?.targetCGPA ?? 0.00).toFixed(2)}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 3: Preferences & Security                             */}
+      {/* ========================================================= */}
+      {activeTab === 'account' && (
+        <div className="space-y-6">
+          {/* Notification Preferences */}
+          <section className="space-y-2">
+            <h3 className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Preferences</h3>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4">
               {[
-                { id: 'messages', label: 'Group Messages', desc: 'Alerts for new messages in study circles', icon: ICONS.Groups, value: profile.notifications?.messages ?? true },
-                { id: 'sessions', label: 'Upcoming Sessions', desc: 'Reminders for your scheduled study times', icon: ICONS.Schedule, value: profile.notifications?.sessions ?? true },
-                { id: 'aiContent', label: 'AI Content Readiness', desc: 'Alerts when your AI materials are processed', icon: ICONS.Sparkles, value: profile.notifications?.aiContent ?? true },
+                { id: 'messages', label: 'Group Messages', desc: 'Alerts for new discussions in study circles', value: profile.notifications?.messages ?? true },
+                { id: 'sessions', label: 'Upcoming Sessions', desc: 'Reminders for your scheduled study times', value: profile.notifications?.sessions ?? true },
+                { id: 'aiContent', label: 'AI Readiness', desc: 'Alerts when generated study materials are ready', value: profile.notifications?.aiContent ?? true },
               ].map(notif => (
                 <div key={notif.id} className="flex items-center justify-between py-1">
-                   <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500">
-                         {notif.icon}
-                      </div>
-                      <div className="space-y-0.5">
-                         <h4 className="text-xs font-semibold text-slate-900">{notif.label}</h4>
-                         <p className="text-[11px] text-slate-500">{notif.desc}</p>
-                      </div>
-                   </div>
-                   <button 
-                     onClick={() => setProfile({
-                       ...profile,
-                       notifications: {
-                         messages: profile.notifications?.messages ?? true,
-                         sessions: profile.notifications?.sessions ?? true,
-                         aiContent: profile.notifications?.aiContent ?? true,
-                         [notif.id]: !notif.value
-                       }
-                     })}
-                     className={`w-10 h-5 rounded-full relative transition-all cursor-pointer ${notif.value ? 'bg-blue-600' : 'bg-slate-200'}`}
-                   >
-                     <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-xs ${notif.value ? 'left-5' : 'left-0.5'}`} />
-                   </button>
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-semibold text-[#111827] dark:text-white">{notif.label}</h4>
+                    <p className="text-[11px] text-[#5B6472]">{notif.desc}</p>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setProfile({
+                      ...profile,
+                      notifications: {
+                        messages: profile.notifications?.messages ?? true,
+                        sessions: profile.notifications?.sessions ?? true,
+                        aiContent: profile.notifications?.aiContent ?? true,
+                        [notif.id]: !notif.value
+                      }
+                    })}
+                    className={`w-11 h-6 rounded-full relative transition-colors cursor-pointer min-h-[24px] ${notif.value ? 'bg-[#2563EB]' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    aria-label={`Toggle ${notif.label}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-xs ${notif.value ? 'left-6' : 'left-1'}`} />
+                  </button>
                 </div>
               ))}
-           </div>
-        </section>
+            </div>
+          </section>
 
-        {/* System & Security Section */}
-        <section className="space-y-2">
-           <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Account Actions</h3>
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {/* Account Actions */}
+          <section className="space-y-2">
+            <h3 className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Account Actions</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <button 
+                type="button"
                 onClick={onSignOut}
-                className="w-full p-4 text-left bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-all group flex items-center justify-between shadow-2xs cursor-pointer"
+                className="w-full p-4 text-left bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg hover:border-slate-300 transition-all flex items-center justify-between shadow-xs cursor-pointer min-h-[44px]"
               >
                 <div className="flex items-center gap-3">
-                   <div className="w-8 h-8 bg-slate-100 text-slate-600 rounded-lg flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-all">
-                      <LogOut size={15} />
-                   </div>
-                   <div className="space-y-0.5">
-                      <h4 className="text-xs font-bold text-slate-900">Sign Out</h4>
-                      <p className="text-[10px] text-slate-500">End your current session</p>
-                   </div>
+                  <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 text-[#111827] dark:text-white rounded-lg flex items-center justify-center">
+                    <LogOut size={15} />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-bold text-[#111827] dark:text-white">Sign Out</h4>
+                    <p className="text-[10px] text-[#5B6472]">End your current session</p>
+                  </div>
                 </div>
-                <ArrowRight size={13} className="text-slate-300 group-hover:text-slate-800 group-hover:translate-x-0.5 transition-all" />
+                <ArrowRight size={14} className="text-[#5B6472]" />
               </button>
 
               <button 
-                onClick={() => { if(confirm("Permanently delete academic records?")) onDelete(); }}
-                className="w-full p-4 text-left bg-white border border-rose-200 rounded-xl hover:bg-rose-50/50 transition-all group flex items-center justify-between shadow-2xs cursor-pointer"
+                type="button"
+                onClick={() => { if (confirm('Are you sure you want to delete your account? All study records will be permanently removed.')) onDelete(); }}
+                className="w-full p-4 text-left bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/40 rounded-lg hover:bg-rose-50/50 transition-all flex items-center justify-between shadow-xs cursor-pointer min-h-[44px]"
               >
                 <div className="flex items-center gap-3">
-                   <div className="w-8 h-8 bg-rose-50 text-rose-600 rounded-lg flex items-center justify-center group-hover:bg-rose-600 group-hover:text-white transition-all">
-                      <X size={15} />
-                   </div>
-                   <div className="space-y-0.5">
-                      <h4 className="text-xs font-bold text-rose-900">Delete Account</h4>
-                      <p className="text-[10px] text-rose-500">Permanently wipe all data</p>
-                   </div>
+                  <div className="w-8 h-8 bg-rose-50 dark:bg-rose-950/60 text-rose-600 rounded-lg flex items-center justify-center">
+                    <X size={15} />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400">Delete Account</h4>
+                    <p className="text-[10px] text-rose-500">Permanently wipe all data</p>
+                  </div>
                 </div>
-                <ArrowRight size={13} className="text-rose-300 group-hover:text-rose-700 group-hover:translate-x-0.5 transition-all" />
+                <ArrowRight size={14} className="text-rose-400" />
               </button>
-           </div>
-        </section>
-      </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL 1: Choose a Plan (Spec: 3 cards, Free preselected)  */}
+      {/* ========================================================= */}
+      {showPlansModal && (
+        <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-3xl w-full p-6 space-y-5 shadow-xl text-left my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
+              <div>
+                <h3 className="font-bold text-lg text-[#111827] dark:text-white">Choose a plan</h3>
+                <p className="text-xs text-[#5B6472]">Start free or upgrade for more room to write</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlansModal(false)}
+                className="p-2 text-[#5B6472] hover:text-[#111827] min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Free Card */}
+              <div className="border border-[#2563EB] ring-2 ring-[#2563EB]/20 bg-white dark:bg-slate-900 rounded-lg p-5 flex flex-col justify-between space-y-4">
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="font-bold text-base text-[#111827] dark:text-white">Free</h4>
+                    <p className="text-xs text-[#5B6472] mt-0.5">Get organized and start studying.</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦0</span>
+                    <span className="text-xs text-[#5B6472]"> / month</span>
+                  </div>
+                  <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Up to 5 courses</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Basic CGPA calculator</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>100 MB file storage</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Public study circles</span>
+                    </li>
+                  </ul>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPlansModal(false)}
+                  className="w-full py-2.5 bg-[#2563EB] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                >
+                  Current Plan
+                </button>
+              </div>
+
+              {/* Plus Card */}
+              <div className="border border-[#E5E7EB] dark:border-slate-800 bg-white dark:bg-slate-900 rounded-lg p-5 flex flex-col justify-between space-y-4 relative">
+                <div className="absolute -top-2.5 right-4 px-2 py-0.5 bg-[#2563EB] text-white text-[10px] font-bold uppercase rounded tracking-wider">
+                  Popular
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="font-bold text-base text-[#111827] dark:text-white">Plus</h4>
+                    <p className="text-xs text-[#5B6472] mt-0.5">For students who want the AI edge.</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦7,500</span>
+                    <span className="text-xs text-[#5B6472]"> / month</span>
+                  </div>
+                  <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Unlimited courses &amp; timetable</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Scenario CGPA projection</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>2 GB file storage</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Private circles with invite codes</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>200 monthly AI study credits</span>
+                    </li>
+                  </ul>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPlansModal(false);
+                    setShowAvailableSoon(true);
+                  }}
+                  className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                >
+                  Choose Plus
+                </button>
+              </div>
+
+              {/* Academic Studio Card */}
+              <div className="border border-[#E5E7EB] dark:border-slate-800 bg-white dark:bg-slate-900 rounded-lg p-5 flex flex-col justify-between space-y-4">
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="font-bold text-base text-[#111827] dark:text-white">Academic Studio</h4>
+                    <p className="text-xs text-[#5B6472] mt-0.5">Full Studio workspace.</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦15,000</span>
+                    <span className="text-xs text-[#5B6472]"> / month</span>
+                  </div>
+                  <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Everything in Plus</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Academic Studio editor</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Real-source citation chips</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Word (.docx) &amp; PDF export</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>1,000 AI credits, 10 GB storage</span>
+                    </li>
+                  </ul>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPlansModal(false);
+                    setShowAvailableSoon(true);
+                  }}
+                  className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                >
+                  Choose Academic Studio
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Available Soon Modal per Open Decision 3 */}
+      {showAvailableSoon && (
+        <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-xl text-left">
+            <div className="space-y-1.5">
+              <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                Available soon
+              </h3>
+              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+                Paid plans are available soon. We've kept you on Free so your active studying remains uninterrupted.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAvailableSoon(false)}
+                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
