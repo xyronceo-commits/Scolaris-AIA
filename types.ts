@@ -100,6 +100,7 @@ export interface UserFile {
   timestamp: number;
   courseCode?: string;
   courseTitle?: string;
+  status?: 'ready' | 'processing';
 }
 
 export interface LibraryFile {

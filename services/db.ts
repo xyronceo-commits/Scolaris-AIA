@@ -109,6 +109,7 @@ function rowToUserFile(row: any, urls: Record<string, string> = {}): UserFile {
     timestamp: Number(row.ts) || Date.now(),
     courseCode: row.course_code || '',
     courseTitle: row.course_title || '',
+    status: row.status || (row.storage_path ? 'ready' : undefined),
   };
 }
 

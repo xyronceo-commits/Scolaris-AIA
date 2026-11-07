@@ -403,10 +403,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       {new Date(file.timestamp || file.uploadedAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3">
-                      {/* Status uses icon-free text tags per spec */}
-                      <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300">
-                        Ready
-                      </span>
+                      {/* Status uses icon-free text tags per spec only if real status exists */}
+                      {file.status && (
+                        <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                          file.status === 'processing'
+                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                            : 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300'
+                        }`}>
+                          {file.status === 'processing' ? 'Processing' : 'Ready'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -456,9 +462,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       {file.fileName}
                     </span>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#EFF6FF] text-[#2563EB] shrink-0">
-                    Ready
-                  </span>
+                  {file.status && (
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                      file.status === 'processing'
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                        : 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300'
+                    }`}>
+                      {file.status === 'processing' ? 'Processing' : 'Ready'}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-[#5B6472] dark:text-slate-400">
                   <span>{file.userId === userId ? 'You' : 'Circle'} · {file.fileSize || '—'}</span>

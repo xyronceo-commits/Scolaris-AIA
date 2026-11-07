@@ -91,5 +91,19 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Typography & Layout:** Replaced all `font-serif` headings with clean `font-sans`, 8px corner radius, and responsive cards layout (mobile: Current and Target side-by-side, Projected below).
 - **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 4: Resources (Library)
+
+- **Search, Filters & Quota Bar:** Built `components/ResourcesView.tsx` with instant search, filter chips (All, My files, Circles), and dynamic storage quota meter displaying used storage vs plan limit and uploads this month.
+- **Upload Error Precision:** Implemented 3 separate distinct upload failure error messages:
+  1. *File rejected:* Triggers on unsupported MIME types or files exceeding the 30MB per-document limit.
+  2. *Upload failed:* Triggers on network or storage connection interruptions.
+  3. *Details not saved:* Triggers if the file blob transfers to storage but database row creation fails.
+- **Quota-Reached Sheet:** If storage limit is exceeded, an alert banner lists the largest files with their sizes to help the user clear space.
+- **Real Status Tags:** Added migration `supabase/migrations/20261107_user_files_status.sql` adding nullable `status TEXT DEFAULT 'ready'` to `user_files`. Rendered icon-free text tags (`Ready`, `Processing`) only if real status exists (no fake status indicators).
+- **Verification:** Responsive testing at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
+
 
 
