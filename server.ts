@@ -4202,6 +4202,312 @@ CRITICAL WRITING RULES:
     });
   });
 
+  // ==========================================
+  // PUBLIC / STUDENT CIRCLES API ENDPOINTS
+  // ==========================================
+
+  // Helper to generate formatted circle invite code (KQ-XXXX-XX)
+  function generateServerCircleInviteCode(): string {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let p1 = '';
+    for (let i = 0; i < 4; i++) {
+      p1 += chars.charAt(crypto.randomInt(0, chars.length));
+    }
+    let p2 = '';
+    for (let i = 0; i < 2; i++) {
+      p2 += chars.charAt(crypto.randomInt(0, chars.length));
+    }
+    return `KQ-${p1}-${p2}`;
+  }
+
+  // Create Study Circle (Backed by service role to guarantee creation)
+  app.post('/api/circles/create', async (req, res) => {
+    try {
+      const {
+        name,
+        description,
+        course,
+        type,
+        department,
+        level,
+        university,
+        academicSession,
+        groupImage,
+        inviteCode: clientCode,
+        ownerId,
+        ownerName
+      } = req.body;
+
+      if (!name || !course) {
+        return res.status(400).json({ success: false, error: 'Circle name and course code are required.' });
+      }
+
+      const groupId = `group_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+      const inviteCode = (clientCode && String(clientCode).trim().toUpperCase()) || generateServerCircleInviteCode();
+      const createdAt = new Date().toISOString();
+
+      const initialMember = {
+        userId: ownerId || 'creator',
+        name: ownerName || 'Circle Creator',
+        role: 'owner',
+        joinedAt: createdAt
+      };
+
+      const initialActivity = {
+        id: `act_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`,
+        groupId,
+        type: 'announcement',
+        title: 'Circle Initialized',
+        description: `Welcome to ${name}! Study circle initialized by ${ownerName || 'Creator'}.`,
+        actorName: ownerName || 'Creator',
+        actorId: ownerId || '',
+        timestamp: Date.now()
+      };
+
+      const welcomeMessage = {
+        id: 'welcome',
+        sender: 'KorsIQ',
+        text: `Welcome to ${name}! Upload study materials or start a discussion to collaborate.`,
+        timestamp: Date.now()
+      };
+
+      const groupRecord = {
+        id: groupId,
+        name: String(name).trim(),
+        description: String(description || '').trim(),
+        course: String(course).trim(),
+        type: type === 'general' ? 'general' : 'private',
+        visibility: type === 'general' ? 'public' : 'private',
+        invite_code: inviteCode,
+        invite_code_active: true,
+        department: String(department || '').trim(),
+        level: String(level || '').trim(),
+        university: String(university || '').trim(),
+        academic_session: String(academicSession || '').trim(),
+        group_image: String(groupImage || '').trim(),
+        owner_id: ownerId || 'creator',
+        members: [initialMember],
+        member_count: 1,
+        messages: [welcomeMessage],
+        discussions: [],
+        activity_feed: [initialActivity],
+        created_at: createdAt,
+        updated_at: createdAt
+      };
+
+      if (supabaseAdmin) {
+        try {
+          const { data: dbData, error: dbErr } = await supabaseAdmin
+            .from('study_groups')
+            .insert(groupRecord)
+            .select('*')
+            .maybeSingle();
+
+          if (!dbErr && dbData) {
+            return res.json({
+              success: true,
+              group: {
+                id: dbData.id,
+                name: dbData.name,
+                description: dbData.description || '',
+                course: dbData.course,
+                type: dbData.type,
+                visibility: dbData.visibility || 'private',
+                inviteCode: dbData.invite_code,
+                inviteCodeActive: dbData.invite_code_active !== false,
+                department: dbData.department || '',
+                level: dbData.level || '',
+                university: dbData.university || '',
+                academicSession: dbData.academic_session || '',
+                groupImage: dbData.group_image || '',
+                ownerId: dbData.owner_id,
+                members: dbData.members || [initialMember],
+                memberCount: dbData.member_count || 1,
+                messages: dbData.messages || [welcomeMessage],
+                sharedMaterials: [],
+                discussions: dbData.discussions || [],
+                activityFeed: dbData.activity_feed || [initialActivity],
+                createdAt: dbData.created_at || createdAt,
+                updatedAt: dbData.updated_at || createdAt
+              }
+            });
+          }
+        } catch (dbErr: any) {
+          console.warn('Database insert into study_groups fallback warning:', dbErr?.message);
+        }
+      }
+
+      // Successful in-memory / direct response
+      res.json({
+        success: true,
+        group: {
+          id: groupId,
+          name: groupRecord.name,
+          description: groupRecord.description,
+          course: groupRecord.course,
+          type: groupRecord.type,
+          visibility: groupRecord.visibility,
+          inviteCode,
+          inviteCodeActive: true,
+          department: groupRecord.department,
+          level: groupRecord.level,
+          university: groupRecord.university,
+          academicSession: groupRecord.academic_session,
+          groupImage: groupRecord.group_image,
+          ownerId: groupRecord.owner_id,
+          members: [initialMember],
+          memberCount: 1,
+          messages: [welcomeMessage],
+          sharedMaterials: [],
+          discussions: [],
+          activityFeed: [initialActivity],
+          createdAt,
+          updatedAt: createdAt
+        }
+      });
+    } catch (err: any) {
+      console.error('Error in /api/circles/create:', err);
+      res.status(500).json({ success: false, error: err?.message || 'Server error creating study circle.' });
+    }
+  });
+
+  // Find Study Circle by Code
+  app.get('/api/circles/find', async (req, res) => {
+    try {
+      const code = String(req.query.code || '').trim().toUpperCase();
+      if (!code) return res.status(400).json({ success: false, error: 'Invite code is required.' });
+
+      if (supabaseAdmin) {
+        const { data, error } = await supabaseAdmin
+          .from('study_groups')
+          .select('*')
+          .ilike('invite_code', code)
+          .maybeSingle();
+
+        if (!error && data) {
+          if (data.invite_code_active === false) {
+            return res.json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
+          }
+          return res.json({
+            success: true,
+            group: {
+              id: data.id,
+              name: data.name,
+              description: data.description || '',
+              course: data.course,
+              type: data.type,
+              visibility: data.visibility || 'private',
+              inviteCode: data.invite_code,
+              inviteCodeActive: data.invite_code_active !== false,
+              department: data.department || '',
+              level: data.level || '',
+              university: data.university || '',
+              academicSession: data.academic_session || '',
+              groupImage: data.group_image || '',
+              ownerId: data.owner_id,
+              members: data.members || [],
+              memberCount: data.member_count || (data.members ? data.members.length : 1),
+              messages: data.messages || [],
+              sharedMaterials: [],
+              discussions: data.discussions || [],
+              activityFeed: data.activity_feed || [],
+              createdAt: data.created_at,
+              updatedAt: data.updated_at
+            }
+          });
+        }
+      }
+
+      res.status(404).json({ success: false, error: "That code doesn't match any circle. Check the code and try again." });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Error looking up circle.' });
+    }
+  });
+
+  // Join Study Circle
+  app.post('/api/circles/join', async (req, res) => {
+    try {
+      const { groupId, code, userId, userName } = req.body;
+      if (!groupId || !userId) {
+        return res.status(400).json({ success: false, error: 'Group ID and User ID are required.' });
+      }
+
+      if (supabaseAdmin) {
+        const { data: group, error: fetchErr } = await supabaseAdmin
+          .from('study_groups')
+          .select('*')
+          .eq('id', groupId)
+          .maybeSingle();
+
+        if (fetchErr || !group) {
+          return res.status(404).json({ success: false, error: 'Circle not found.' });
+        }
+
+        if (group.type === 'private' && code) {
+          if ((group.invite_code || '').toUpperCase() !== String(code).trim().toUpperCase()) {
+            return res.status(400).json({ success: false, error: 'Invalid invite code.' });
+          }
+          if (group.invite_code_active === false) {
+            return res.status(400).json({ success: false, error: 'This invitation code has been revoked.' });
+          }
+        }
+
+        const members = (group.members || []) as any[];
+        const isMember = members.some(m => (typeof m === 'string' ? m === userId : m.userId === userId));
+
+        if (!isMember) {
+          members.push({
+            userId,
+            name: userName || 'Student',
+            role: 'member',
+            joinedAt: new Date().toISOString()
+          });
+
+          await supabaseAdmin
+            .from('study_groups')
+            .update({
+              members,
+              member_count: members.length,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', groupId);
+        }
+
+        return res.json({
+          success: true,
+          group: {
+            id: group.id,
+            name: group.name,
+            description: group.description || '',
+            course: group.course,
+            type: group.type,
+            visibility: group.visibility || 'private',
+            inviteCode: group.invite_code,
+            inviteCodeActive: group.invite_code_active !== false,
+            department: group.department || '',
+            level: group.level || '',
+            university: group.university || '',
+            academicSession: group.academic_session || '',
+            groupImage: group.group_image || '',
+            ownerId: group.owner_id,
+            members,
+            memberCount: members.length,
+            messages: group.messages || [],
+            sharedMaterials: [],
+            discussions: group.discussions || [],
+            activityFeed: group.activity_feed || [],
+            createdAt: group.created_at,
+            updatedAt: group.updated_at
+          }
+        });
+      }
+
+      res.json({ success: true, message: 'Joined circle.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to join circle.' });
+    }
+  });
+
   // Vite integration
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

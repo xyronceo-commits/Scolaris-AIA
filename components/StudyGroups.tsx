@@ -4,7 +4,8 @@ import {
   Globe, Lock, Link as LinkIcon, Check, Copy, Upload, Download, FileText, 
   LogOut, Share2, Search, Plus, X, ArrowRight, MessageSquare, Files, Bot, 
   Sparkles, Users, BookOpen, School, ShieldAlert, Award, Send, RefreshCw, 
-  HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash
+  HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash,
+  KeyRound, AlertCircle, CheckCircle2, Loader2
 } from 'lucide-react';
 import { DBService, generateCircleInviteCode } from '../services/db';
 import { getHeaders } from '../services/gemini';
@@ -15,13 +16,14 @@ import { UserAvatar } from './UserAvatar';
 
 interface StudyGroupsProps {
   profile: UserProfile;
+  userId?: string;
   groups: StudyGroup[];
   setGroups: React.Dispatch<React.SetStateAction<StudyGroup[]>>;
   hubs: Record<string, StudyHubData>;
   addNotification: (type: AppNotification['type'], title: string, message: string, link?: AppState) => void;
 }
 
-export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGroups, hubs, addNotification }) => {
+export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, groups, setGroups, hubs, addNotification }) => {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(groups[0]?.id || null);
   const [sidebarMode, setSidebarMode] = useState<'my' | 'explore'>('my');
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,16 +33,20 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
 
-  // Create Group Form State
+  // Create Group Form State & Invite Code Generation
   const [createName, setCreateName] = useState('');
   const [createDesc, setCreateDesc] = useState('');
   const [createCourse, setCreateCourse] = useState('');
-  const [createType, setCreateType] = useState<'general' | 'private'>('general');
+  const [createType, setCreateType] = useState<'general' | 'private'>('private');
   const [createDept, setCreateDept] = useState('');
   const [createLevel, setCreateLevel] = useState('');
   const [createUni, setCreateUni] = useState('');
   const [createSession, setCreateSession] = useState('');
   const [createImage, setCreateImage] = useState('');
+  const [createInviteCode, setCreateInviteCode] = useState(() => generateCircleInviteCode());
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreatingCircle, setIsCreatingCircle] = useState(false);
+  const [createdCircleSuccess, setCreatedCircleSuccess] = useState<StudyGroup | null>(null);
 
   // Join Group State
   const [joinCode, setJoinCode] = useState('');
@@ -75,7 +81,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const currentUserId = getCurrentUserId() || profile.email || 'guest_user';
+  const currentUserId = userId || getCurrentUserId() || (profile as any)?.id || profile.email || 'guest_user';
   const activeGroup = groups.find(g => g.id === activeGroupId);
 
   // Filtered Groups for My Circles vs Explore
@@ -143,16 +149,28 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
   // Handle Group Creation
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createName.trim() || !createCourse.trim()) return;
+    setCreateError(null);
 
+    const cleanName = createName.trim();
+    const cleanCourse = createCourse.trim();
+
+    if (!cleanName || !cleanCourse) {
+      setCreateError('Circle name and course code are required.');
+      return;
+    }
+
+    setIsCreatingCircle(true);
     setIsAiThinking(true);
+
     try {
+      const codeToAssign = createInviteCode || generateCircleInviteCode();
       const createdGroup = await DBService.createGroup(
         {
-          name: createName.trim(),
+          name: cleanName,
           description: createDesc.trim(),
-          course: createCourse.trim(),
+          course: cleanCourse,
           type: createType,
+          inviteCode: codeToAssign,
           department: createDept.trim(),
           level: createLevel.trim(),
           university: createUni.trim(),
@@ -163,25 +181,29 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         profile.name
       );
 
-      setGroups(prev => [createdGroup, ...prev]);
+      setGroups(prev => [createdGroup, ...prev.filter(g => g.id !== createdGroup.id)]);
       setActiveGroupId(createdGroup.id);
       setShowCreateModal(false);
+      setCreatedCircleSuccess(createdGroup);
 
-      // Reset form
+      // Reset form & generate fresh code for next time
       setCreateName('');
       setCreateDesc('');
       setCreateCourse('');
-      setCreateType('general');
+      setCreateType('private');
       setCreateDept('');
       setCreateLevel('');
       setCreateUni('');
       setCreateSession('');
       setCreateImage('');
+      setCreateInviteCode(generateCircleInviteCode());
 
-      addNotification('message', 'Group Formed', `Study group "${createdGroup.name}" is ready!`, 'groups');
-    } catch (err) {
-      console.error('Error creating group:', err);
+      addNotification('message', 'Circle Formed', `Study circle "${createdGroup.name}" is ready with invite code ${createdGroup.inviteCode}!`, 'groups');
+    } catch (err: any) {
+      console.error('Error creating circle:', err);
+      setCreateError(err?.message || 'Failed to create study circle. Please try again.');
     } finally {
+      setIsCreatingCircle(false);
       setIsAiThinking(false);
     }
   };
@@ -610,11 +632,9 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
         <button
           type="button"
           onClick={() => {
-            if (isFreePlan) {
-              setShowCircleUpgradePrompt(true);
-            } else {
-              setShowCreateModal(true);
-            }
+            setCreateError(null);
+            if (!createInviteCode) setCreateInviteCode(generateCircleInviteCode());
+            setShowCreateModal(true);
           }}
           className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm"
         >
@@ -1233,6 +1253,49 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                 </div>
               </div>
 
+              {/* Auto-Generated Invite Code Display */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <KeyRound size={13} /> Circle Invite Code
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCreateInviteCode(generateCircleInviteCode())}
+                    className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw size={11} /> Generate New
+                  </button>
+                </div>
+                <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-900/60">
+                  <span className="font-mono font-bold text-sm tracking-widest text-slate-900 dark:text-white">
+                    {createInviteCode}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(createInviteCode);
+                      setCopiedCode(true);
+                      setTimeout(() => setCopiedCode(false), 2000);
+                    }}
+                    className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 flex items-center gap-1 cursor-pointer"
+                  >
+                    {copiedCode ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                    <span>{copiedCode ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Students will use this code to join your circle.
+                </p>
+              </div>
+
+              {createError && (
+                <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-lg text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{createError}</span>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
@@ -1243,13 +1306,69 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, groups, setGr
                 </button>
                 <button
                   type="submit"
-                  disabled={!createName.trim() || !createCourse.trim()}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer shadow-xs"
+                  disabled={isCreatingCircle || !createName.trim() || !createCourse.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg disabled:opacity-50 transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
                 >
-                  Create Circle
+                  {isCreatingCircle ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Creating Circle...</span>
+                    </>
+                  ) : (
+                    <span>Create Circle</span>
+                  )}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CIRCLE CREATED SUCCESS MODAL */}
+      {createdCircleSuccess && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md p-6 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 text-center animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto">
+              <CheckCircle2 size={28} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Study Circle Created!</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                "{createdCircleSuccess.name}" ({createdCircleSuccess.course}) is ready.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Invite Code</span>
+              <div className="font-mono font-bold text-xl tracking-widest text-blue-600 dark:text-blue-400">
+                {createdCircleSuccess.inviteCode}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Share this invite code with other students so they can join your circle.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(`Join my KorsIQ study circle "${createdCircleSuccess.name}"! Use invite code: ${createdCircleSuccess.inviteCode}`);
+                  setCopiedCode(true);
+                  setTimeout(() => setCopiedCode(false), 2000);
+                }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {copiedCode ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                <span>{copiedCode ? 'Copied' : 'Copy Invite Info'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreatedCircleSuccess(null)}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold cursor-pointer shadow-sm"
+              >
+                Enter Circle
+              </button>
+            </div>
           </div>
         </div>
       )}

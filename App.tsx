@@ -796,6 +796,7 @@ const App: React.FC = () => {
       case 'groups':
         return <StudyGroups 
           profile={profile} 
+          userId={authUser?.uid}
           groups={groups} 
           setGroups={setGroups} 
           hubs={hubs}
