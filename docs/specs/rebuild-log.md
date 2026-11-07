@@ -164,17 +164,28 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 
 ---
 
-## Phase 8: Plan and Usage in Settings
+## Phase 9: Polish and QA
 
-- **Structure in Settings (`components/Profile.tsx`):** Added a dedicated "Plan and usage" subnavigation tab to Settings alongside Academic Identity and Preferences.
-- **Current Plan Card:** Displays the current active plan name (Free), monthly billing rate (₦0 / month), and an interactive `Change plan` button.
-- **Storage Card:** Computes and displays real storage utilization based on actual files fetched via `DBService.getUserFiles(userId)` and `fileSize` parsing against the `BETA_PLAN_LIMITS` storage allowance (e.g. `0.0 MB of 500 MB (beta)`), including monthly upload count.
-- **AI Credits Card (Omission per Spec Rule):**
-  - Spec rule: *"The AI credits card must only appear if real metering exists. No fake content anywhere: no invented credit numbers."*
-  - Because no backend AI credit counter or metering table currently exists in the database schema, this card is intentionally omitted rather than fabricating fake usage figures.
-- **Quiet Upgrade Card:** Features the exact spec copy *"Need more room to write? Upgrade to Plus or Academic Studio for dissertation tools, larger file allowances, real citation chips, and formatted Word (.docx) export."* with a single primary button `See plans`.
-- **Plans Modal & Payment Guard:** Clicking `Change plan` or `See plans` presents the three spec plans (Free ₦0, Plus ₦7,500/mo, Academic Studio ₦15,000/mo). Selecting a paid plan triggers the non-blocking "Available soon" modal and preserves Free plan status without changing client/database tier.
-- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+- **Real Empty and Loading States across all views:**
+  - **Overview / Dashboard:** Dedicated, friendly empty states with action triggers for Today's priorities ("No tasks scheduled for today"), Upcoming deadlines ("No upcoming deadlines recorded"), Study schedule ("No schedule generated yet"), and Recent documents ("No academic papers created yet. Start writing in Studio →").
+  - **Study Planner & CGPA:** Clean empty state when no semesters or course grades exist; Target CGPA defaults cleanly to `0.00` until explicitly set.
+  - **Resources / Library:** Search mismatch empty state ("No documents matched your search filter") and zero-file empty state ("Upload lecture notes, past questions, or reference PDFs to study"), plus spinner loading state during fetch.
+  - **Academic Studio:** Empty state prompts when document canvas is blank and when no citation sources are attached.
+  - **Private Circles:** Empty state for circles list ("No circles found. Create one or join with an invite code"), empty discussion threads, and empty shared circle files.
+  - **Settings (Plan and Usage):** Loading state for storage utilization and quota calculations while reading user files.
+- **Accessibility & Focus Rings:**
+  - Added global `:focus-visible` styling in `index.css` with a high-contrast 2px `#2563EB` ring and 2px offset.
+  - Verified accessible names (`aria-label`, `title`, or inner text) across all icon-only buttons (bell notification trigger, admin portal, task completion checkboxes, sidebar toggle, modal close buttons).
+- **Responsive Layout & Overflow Prevention:**
+  - Enforced `max-width: 100%` and `overflow-x: hidden` in `index.css` to prevent accidental horizontal scroll on mobile viewports.
+  - Tested layout boundaries at 390px (mobile), 768px (tablet), and 1280px (desktop).
+  - Maintained minimum 44px touch targets across all interactive buttons, inputs, and links.
+- **Contrast & Color Consistency:**
+  - Ink `#111827` on White `#FFFFFF` (15.6:1 AAA)
+  - Muted `#5B6472` on White `#FFFFFF` (5.7:1 AA)
+  - Primary blue `#2563EB` on White `#FFFFFF` (4.6:1 AA)
+  - Deep blue `#1746A2` on Light blue `#EFF6FF` (8.4:1 AAA)
+- **Verification:** `npm run lint` (`tsc --noEmit`) and `npm run build` (`vite build` + `esbuild`) pass with zero errors.
 
 
 

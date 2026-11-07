@@ -246,7 +246,7 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 relative font-sans text-[#111827] dark:text-white">
       {/* KorsIQ Logo top left per Spec */}
-      <div className="absolute top-6 left-6">
+      <div className="w-full max-w-md sm:max-w-none sm:absolute sm:top-6 sm:left-6 mb-4 sm:mb-0 flex items-center justify-between">
         <KorsIQLogo size={28} />
       </div>
 
