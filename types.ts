@@ -48,6 +48,7 @@ export interface UserProfile {
   age: number;
   semesterEnd: string;
   targetCGPA?: number;
+  gradingScale?: number | string;
   avatarIcon?: string;
   onboarded: boolean;
   tutorialSeen: boolean;
@@ -100,6 +101,7 @@ export interface UserFile {
   timestamp: number;
   courseCode?: string;
   courseTitle?: string;
+  status?: 'ready' | 'processing';
 }
 
 export interface LibraryFile {
@@ -130,7 +132,7 @@ export interface GroupMember {
   name: string;
   email?: string;
   avatarIcon?: string;
-  role: 'owner' | 'admin' | 'member';
+  role: 'owner' | 'admin' | 'moderator' | 'member';
   joinedAt: string | number;
 }
 
@@ -241,7 +243,26 @@ export interface StudyGroup {
   updatedAt?: string;
 }
 
-export type AppState = 'onboarding' | 'dashboard' | 'studio' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';
+export type AppState = 
+  | 'overview' 
+  | 'dashboard' 
+  | 'planner' 
+  | 'studio' 
+  | 'circles' 
+  | 'groups' 
+  | 'resources' 
+  | 'settings' 
+  | 'courses' 
+  | 'hub' 
+  | 'schedule' 
+  | 'timetable' 
+  | 'calculator' 
+  | 'pomodoro' 
+  | 'profile' 
+  | 'analytics' 
+  | 'library' 
+  | 'admin' 
+  | 'onboarding';
 
 export interface CGPACourseRecord {
   code: string;

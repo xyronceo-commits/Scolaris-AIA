@@ -109,6 +109,7 @@ function rowToUserFile(row: any, urls: Record<string, string> = {}): UserFile {
     timestamp: Number(row.ts) || Date.now(),
     courseCode: row.course_code || '',
     courseTitle: row.course_title || '',
+    status: row.status || (row.storage_path ? 'ready' : undefined),
   };
 }
 
@@ -161,13 +162,17 @@ function rowToGroup(row: any, materials: any[] = []): StudyGroup {
 }
 
 export function generateCircleInviteCode(): string {
-  // Format: KOR-XXXXXX (6 secure uppercase alphanumeric chars, excluding ambiguous 0, O, 1, I)
+  // Format: KQ-XXXX-XX (e.g. KQ-7F3A-92, excluding ambiguous 0, O, 1, I)
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  let p1 = '';
+  for (let i = 0; i < 4; i++) {
+    p1 += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `KOR-${code}`;
+  let p2 = '';
+  for (let i = 0; i < 2; i++) {
+    p2 += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `KQ-${p1}-${p2}`;
 }
 
 async function loadGroupMaterials(groupIds: string[]): Promise<Record<string, any[]>> {
@@ -314,7 +319,7 @@ export const DBService = {
   async saveCourse(userId: string, course: Course) {
     try {
       const list = readCache<Course[]>('courses', userId, []);
-      const courseId = course.id || `course_${Date.now()}`;
+      const courseId = course.id || `course_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const merged = { ...course, id: courseId };
       const idx = list.findIndex((c) => c.id === courseId);
       if (idx >= 0) list[idx] = merged;
@@ -339,6 +344,10 @@ export const DBService = {
       console.error('saveCourse error:', err);
       return { error: err };
     }
+  },
+
+  async addCourse(userId: string, course: Course) {
+    return this.saveCourse(userId, course);
   },
 
   async saveCourses(userId: string, courses: Course[]) {

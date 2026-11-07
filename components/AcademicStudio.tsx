@@ -38,7 +38,8 @@ import {
   Zap,
   Bookmark,
   Share2,
-  Crown
+  Crown,
+  ListOrdered
 } from 'lucide-react';
 import {
   AcademicDocument,
@@ -148,6 +149,41 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+
+  // Mobile Bottom Sheets & Quiet Upgrade State
+  const [mobileSheet, setMobileSheet] = useState<'outline' | 'sources' | 'cite' | 'versions' | null>(null);
+  const [showQuietUpgrade, setShowQuietUpgrade] = useState<{ feature: string; description: string } | null>(null);
+  const [editorHistory, setEditorHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+
+  const isExportAllowed = profile?.tier === 'scholar' || profile?.tier === 'sage' || profile?.isPro;
+  const isVersionsAllowed = profile?.tier === 'sage';
+
+  const handleEditorChangeWithHistory = (newVal: string) => {
+    handleEditorChange(newVal);
+    setEditorHistory((prev) => {
+      const updated = [...prev.slice(0, historyIndex + 1), newVal];
+      if (updated.length > 25) updated.shift();
+      return updated;
+    });
+    setHistoryIndex((prev) => prev + 1);
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const prevVal = editorHistory[historyIndex - 1];
+      setHistoryIndex((prev) => prev - 1);
+      handleEditorChange(prevVal);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < editorHistory.length - 1) {
+      const nextVal = editorHistory[historyIndex + 1];
+      setHistoryIndex((prev) => prev + 1);
+      handleEditorChange(nextVal);
+    }
+  };
 
   // Version History State
   const [versions, setVersions] = useState<StudioVersion[]>([]);
@@ -1243,51 +1279,73 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       {/* ========================================================= */}
       {activeDocument && activeDocument.status !== 'planning' && (
         <div className="space-y-4">
-          {/* Top Control Bar */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          {/* Top Control Bar per Spec: Title, Saved State, Undo/Redo, Export */}
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setActiveDocId(null)}
-                className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                className="p-2 text-[#5B6472] hover:text-[#111827] dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
                 title="Back to Documents"
+                aria-label="Back to Documents"
               >
                 <ArrowLeft size={16} />
               </button>
               <div className="min-w-0">
-                <h2 className="font-semibold text-sm text-slate-900 dark:text-white truncate max-w-xs sm:max-w-md">
+                <h2 className="font-bold text-sm text-[#111827] dark:text-white truncate max-w-xs sm:max-w-md">
                   {activeDocument.title}
                 </h2>
-                <p className="text-[11px] text-slate-500 font-medium">
-                  {activeDocument.docType.replace('_', ' ')} • {activeDocument.citationStyle} • {activeDocument.currentWordCount.toLocaleString()} words
-                </p>
+                <div className="flex items-center gap-2 text-[11px] text-[#5B6472]">
+                  <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                    <CheckCircle2 size={12} />
+                    <span>Saved</span>
+                  </span>
+                  <span>•</span>
+                  <span>{activeDocument.currentWordCount.toLocaleString()} words</span>
+                </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleBatchGenerateAll}
-                disabled={isSectionGenerating || !!batchProgress}
-                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <Wand2 size={13} className="text-blue-600" />
-                <span>Batch Generate All</span>
-              </button>
+              {/* Undo / Redo */}
+              <div className="flex items-center bg-slate-50 dark:bg-slate-800 rounded-lg border border-[#E5E7EB] dark:border-slate-700 p-0.5">
+                <button
+                  onClick={handleUndo}
+                  disabled={historyIndex <= 0}
+                  className="px-2.5 py-1.5 text-xs text-[#5B6472] hover:text-[#111827] disabled:opacity-40 min-h-[44px] flex items-center gap-1 cursor-pointer"
+                  title="Undo change"
+                  aria-label="Undo"
+                >
+                  <RotateCcw size={13} />
+                  <span>Undo</span>
+                </button>
+                <span className="text-slate-300 dark:text-slate-700 px-1">|</span>
+                <button
+                  onClick={handleRedo}
+                  disabled={historyIndex >= editorHistory.length - 1}
+                  className="px-2.5 py-1.5 text-xs text-[#5B6472] hover:text-[#111827] disabled:opacity-40 min-h-[44px] flex items-center gap-1 cursor-pointer"
+                  title="Redo change"
+                  aria-label="Redo"
+                >
+                  <span>Redo</span>
+                </button>
+              </div>
 
+              {/* Primary Action Button: Export (Gated with Quiet Upgrade Prompt where excluded) */}
               <button
-                onClick={handleRunDocumentReview}
-                disabled={isReviewLoading}
-                className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                onClick={() => {
+                  if (!isExportAllowed) {
+                    setShowQuietUpgrade({
+                      feature: 'Export Manuscript',
+                      description: 'Exporting formatted Microsoft Word (.docx) and PDF documents is included in the Plus and Academic Studio plans.'
+                    });
+                  } else {
+                    setShowExportModal(true);
+                  }
+                }}
+                className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-sm min-h-[44px]"
               >
-                <FileCheck size={13} />
-                <span>Review Audit</span>
-              </button>
-
-              <button
-                onClick={() => setShowExportModal(true)}
-                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Download size={13} />
-                <span>Export (.docx / PDF)</span>
+                <Download size={14} />
+                <span>Export</span>
               </button>
             </div>
           </div>
@@ -1314,15 +1372,15 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
 
           {/* 3-COLUMN WORKSPACE GRID */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[640px]">
-            {/* COLUMN 1: LEFT SIDEBAR - OUTLINE & NAVIGATION (3 Cols) */}
-            <div className="lg:col-span-3 space-y-3">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-3 h-full flex flex-col justify-between shadow-xs">
+            {/* COLUMN 1: LEFT SIDEBAR - OUTLINE & NAVIGATION (3 Cols on Desktop) */}
+            <div className="hidden lg:block lg:col-span-3 space-y-3">
+              <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg p-3.5 space-y-3 h-full flex flex-col justify-between shadow-xs">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-1">
-                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <span className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">
                       Outline ({activeDocument.sections.length})
                     </span>
-                    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded">
+                    <span className="text-[10px] font-semibold text-[#2563EB] bg-[#EFF6FF] dark:bg-blue-950/60 px-2 py-0.5 rounded">
                       {Math.min(100, Math.round((activeDocument.currentWordCount / activeDocument.targetWordCount) * 100))}%
                     </span>
                   </div>
@@ -1340,17 +1398,17 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                           onClick={() => setActiveSectionId(sec.id)}
                           className={`w-full text-left p-2.5 rounded-lg transition-colors cursor-pointer flex items-start gap-2.5 ${
                             isActive
-                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold border-l-2 border-blue-600'
-                              : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                              ? 'bg-[#EFF6FF] dark:bg-blue-950/60 text-[#2563EB] font-semibold border-l-2 border-[#2563EB]'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-[#111827] dark:text-slate-300'
                           }`}
                         >
                           <span
                             className={`w-5 h-5 rounded text-[10px] font-semibold flex items-center justify-center shrink-0 mt-0.5 ${
                               isActive
-                                ? 'bg-blue-600 text-white'
+                                ? 'bg-[#2563EB] text-white'
                                 : hasContent
                                 ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-slate-100 text-slate-600'
+                                : 'bg-slate-100 text-[#5B6472]'
                             }`}
                           >
                             {hasContent ? '✓' : idx + 1}
@@ -1359,7 +1417,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                             <p className="text-xs truncate leading-tight">
                               {sec.title}
                             </p>
-                            <p className="text-[10px] text-slate-400 mt-0.5">
+                            <p className="text-[10px] text-[#5B6472] mt-0.5">
                               {sec.wordCount || 0} words
                             </p>
                           </div>
@@ -1369,14 +1427,14 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </div>
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-xs text-slate-500 space-y-1 border border-slate-200/60 dark:border-slate-800">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-xs text-[#5B6472] space-y-1 border border-[#E5E7EB] dark:border-slate-800">
                   <div className="flex justify-between">
                     <span>Goal:</span>
                     <span>{activeDocument.targetWordCount.toLocaleString()} words</span>
                   </div>
                   <div className="flex justify-between font-semibold">
                     <span>Written:</span>
-                    <span className="text-blue-600 dark:text-blue-400">
+                    <span className="text-[#2563EB] dark:text-blue-400">
                       {activeDocument.currentWordCount.toLocaleString()} words
                     </span>
                   </div>
@@ -1384,86 +1442,39 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
               </div>
             </div>
 
-            {/* COLUMN 2: CENTER - NOTION / WORD PAPER CANVAS (6 Cols) */}
-            <div className="lg:col-span-6 space-y-3">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4 shadow-xs flex flex-col h-full">
+            {/* COLUMN 2: CENTER - NOTION / WORD PAPER CANVAS (6 Cols on Desktop, Full on Mobile) */}
+            <div className="col-span-1 lg:col-span-6 space-y-3">
+              <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg p-5 sm:p-6 space-y-4 shadow-xs flex flex-col h-full">
                 {/* Active Section Header */}
                 {(() => {
                   const currentSec = activeDocument.sections.find((s) => s.id === activeSectionId);
                   const currentOutline = activeDocument.outline.find((o) => o.id === currentSec?.outlineItemId);
 
                   return (
-                    <div className="space-y-1.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <div className="space-y-1 pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#2563EB] bg-[#EFF6FF] dark:bg-blue-950/60 px-2 py-0.5 rounded">
                           Section {currentSec?.order || 1} of {activeDocument.sections.length}
                         </span>
-                        <span className="text-xs text-slate-400 font-medium">
+                        <span className="text-xs text-[#5B6472] font-medium">
                           Goal: ~{currentOutline?.targetWords || 400} words
                         </span>
                       </div>
-                      <h3 className="font-semibold text-base text-slate-900 dark:text-white">
+                      <h3 className="font-bold text-base text-[#111827] dark:text-white">
                         {currentSec?.title || 'Section Editor'}
                       </h3>
-                      {currentOutline?.description && (
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          {currentOutline.description}
-                        </p>
-                      )}
+                      <p className="text-xs text-[#5B6472]">
+                        Draft the next paragraph yourself, or ask for a suggested draft of this section.
+                      </p>
                     </div>
                   );
                 })()}
-
-                {/* Ribbon Toolbar */}
-                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200/60 dark:border-slate-800">
-                  <button
-                    onClick={() => handleGenerateActiveSection('generate')}
-                    disabled={isSectionGenerating}
-                    className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-                  >
-                    <Wand2 size={12} />
-                    <span>{isSectionGenerating ? 'Generating...' : 'Generate Section'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleGenerateActiveSection('expand')}
-                    disabled={isSectionGenerating || !editorText}
-                    className="px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
-                  >
-                    Expand
-                  </button>
-
-                  <button
-                    onClick={() => handleGenerateActiveSection('academic_tone')}
-                    disabled={isSectionGenerating || !editorText}
-                    className="px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
-                  >
-                    Tone
-                  </button>
-
-                  <button
-                    onClick={() => handleGenerateActiveSection('grammar')}
-                    disabled={isSectionGenerating || !editorText}
-                    className="px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40"
-                  >
-                    Grammar
-                  </button>
-
-                  <button
-                    onClick={() => handleGenerateActiveSection('regenerate')}
-                    disabled={isSectionGenerating}
-                    className="p-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-600 dark:text-slate-300 rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-40 ml-auto"
-                    title="Regenerate Section"
-                  >
-                    <RefreshCw size={13} />
-                  </button>
-                </div>
 
                 {/* Editor Textarea (Clean Paper Canvas) */}
                 <div className="flex-1 flex flex-col relative">
                   <textarea
                     value={editorText}
-                    onChange={(e) => handleEditorChange(e.target.value)}
+                    onChange={(e) => handleEditorChangeWithHistory(e.target.value)}
                     onSelect={(e) => {
                       const target = e.target as HTMLTextAreaElement;
                       const sel = target.value.substring(target.selectionStart, target.selectionEnd);
@@ -1472,13 +1483,13 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                         setEditorSelectionRange({ start: target.selectionStart, end: target.selectionEnd });
                       }
                     }}
-                    placeholder="Draft section content here in scholarly prose, or click 'Generate Section' to compose the draft based on your approved outline and research citations..."
-                    className="w-full flex-1 min-h-[380px] p-4 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg font-serif text-sm leading-relaxed text-slate-900 dark:text-slate-100 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors resize-none"
+                    placeholder="Start writing, or ask for a suggested draft."
+                    className="w-full flex-1 min-h-[380px] p-4 bg-white dark:bg-slate-950 border border-[#E5E7EB] dark:border-slate-800 rounded-lg font-sans text-sm leading-relaxed text-[#111827] dark:text-slate-100 outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors resize-none"
                   />
 
                   {/* Selected Text Floating Helper */}
                   {selectedTextSnippet && (
-                    <div className="absolute bottom-4 left-4 right-4 bg-slate-900 text-white p-3 rounded-lg shadow-xl flex items-center justify-between gap-3 text-xs border border-slate-800">
+                    <div className="absolute bottom-4 left-4 right-4 bg-[#111827] text-white p-3 rounded-lg shadow-xl flex items-center justify-between gap-3 text-xs border border-slate-800">
                       <div className="truncate flex-1">
                         <span className="text-blue-400 font-semibold">Selected: </span>
                         <span className="italic truncate">"{selectedTextSnippet}"</span>
@@ -1486,7 +1497,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           onClick={() => handleContextualAssist('Elevate academic tone and vocabulary')}
-                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-semibold cursor-pointer"
+                          className="px-2.5 py-1 bg-[#2563EB] hover:bg-blue-500 rounded text-xs font-semibold cursor-pointer"
                         >
                           Rewrite
                         </button>
@@ -1502,325 +1513,342 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                 </div>
 
                 {/* Editor Footer Status */}
-                <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
                   <span>
-                    Words in section: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{editorText.trim().split(/\s+/).filter(Boolean).length}</strong>
+                    Words in section: <strong className="text-[#111827] dark:text-slate-300 font-semibold">{editorText.trim().split(/\s+/).filter(Boolean).length}</strong>
                   </span>
-                  <span>Autosaved to cloud</span>
+                  <span>Autosaved</span>
                 </div>
               </div>
             </div>
 
-            {/* COLUMN 3: RIGHT SIDEBAR - TABBED ASSISTANT (3 Cols) */}
-            <div className="lg:col-span-3 space-y-3">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-3 h-full flex flex-col shadow-xs">
-                {/* Tabs */}
-                <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-semibold">
+            {/* COLUMN 3: RIGHT SIDEBAR - BRIEF, SOURCES & ACTIONS (3 Cols on Desktop) */}
+            <div className="hidden lg:block lg:col-span-3 space-y-3">
+              <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg p-3.5 space-y-3.5 h-full flex flex-col shadow-xs">
+                {/* Brief Card */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-[#E5E7EB] dark:border-slate-800 rounded-lg space-y-1">
+                  <p className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Brief</p>
+                  <p className="text-xs font-semibold text-[#111827] dark:text-white capitalize">
+                    {activeDocument.docType.replace('_', ' ')} · {activeDocument.targetWordCount.toLocaleString()} words · {profile?.level || 'undergraduate'} · {activeDocument.citationStyle}
+                  </p>
+                </div>
+
+                {/* Action Buttons: Draft this section, Revise selection, Check citations */}
+                <div className="space-y-2">
                   <button
-                    onClick={() => setActiveRightTab('assistant')}
-                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
-                      activeRightTab === 'assistant' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
-                    }`}
+                    type="button"
+                    onClick={() => handleGenerateActiveSection('generate')}
+                    disabled={isSectionGenerating}
+                    className="w-full py-2.5 px-3 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50 min-h-[44px]"
                   >
-                    Assistant
+                    <Wand2 size={14} />
+                    <span>{isSectionGenerating ? 'Drafting...' : 'Draft this section'}</span>
                   </button>
+
                   <button
-                    onClick={() => setActiveRightTab('references')}
-                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
-                      activeRightTab === 'references' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
-                    }`}
+                    type="button"
+                    onClick={() => {
+                      if (selectedTextSnippet) {
+                        handleContextualAssist('Elevate academic tone and vocabulary');
+                      } else {
+                        handleGenerateActiveSection('academic_tone');
+                      }
+                    }}
+                    disabled={isSectionGenerating || !editorText}
+                    className="w-full py-2 px-3 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-[#111827] dark:text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 min-h-[44px]"
                   >
-                    Sources
+                    <span>Revise selection</span>
                   </button>
+
                   <button
-                    onClick={() => setActiveRightTab('review')}
-                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
-                      activeRightTab === 'review' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
-                    }`}
+                    type="button"
+                    onClick={handleRunDocumentReview}
+                    disabled={isReviewLoading}
+                    className="w-full py-2 px-3 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-[#111827] dark:text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 min-h-[44px]"
                   >
-                    Review
-                  </button>
-                  <button
-                    onClick={() => setActiveRightTab('versions')}
-                    className={`flex-1 py-1 rounded cursor-pointer transition-colors ${
-                      activeRightTab === 'versions' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
-                    }`}
-                  >
-                    History
+                    <span>Check citations</span>
                   </button>
                 </div>
 
-                {/* TAB CONTENT A: IN-CONTEXT ASSISTANT */}
-                {activeRightTab === 'assistant' && (
-                  <div className="space-y-3 flex-1 flex flex-col justify-between">
-                    <div className="space-y-3">
-                      <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-lg border border-blue-100 dark:border-blue-900/60 text-xs space-y-1">
-                        <p className="font-semibold text-blue-900 dark:text-blue-300">Contextual Writing Assistant</p>
-                        <p className="text-blue-800 dark:text-blue-300/80 text-[11px] leading-relaxed">
-                          Select text in the editor to rewrite specific passages, or choose a quick action below.
-                        </p>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                          Suggested Improvements
-                        </label>
-                        <div className="space-y-1">
-                          {[
-                            'Add empirical evidence & statistics',
-                            'Synthesize theoretical counter-arguments',
-                            'Improve sentence variety & flow',
-                            'Formulate concluding paragraph',
-                          ].map((chip) => (
-                            <button
-                              key={chip}
-                              onClick={() => handleContextualAssist(chip)}
-                              disabled={isAssistLoading}
-                              className="w-full text-left p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 hover:bg-blue-50 dark:hover:bg-blue-950 text-xs text-slate-700 dark:text-slate-300 hover:text-blue-600 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-800"
-                            >
-                              + {chip}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                      <textarea
-                        value={contextualAssistPrompt}
-                        onChange={(e) => setContextualAssistPrompt(e.target.value)}
-                        placeholder="Instruction for AI assistant (e.g. 'Add a smooth transition to section 3')..."
-                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs outline-none focus:border-blue-600 border border-slate-200 dark:border-slate-700 resize-none h-20"
-                      />
+                {/* Sources List & Citation Chips */}
+                <div className="flex-1 flex flex-col justify-between space-y-2 pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">
+                        Sources ({activeDocument.references.length})
+                      </span>
                       <button
-                        onClick={() => {
-                          if (contextualAssistPrompt.trim()) {
-                            handleContextualAssist(contextualAssistPrompt.trim());
-                            setContextualAssistPrompt('');
-                          }
-                        }}
-                        disabled={isAssistLoading || !contextualAssistPrompt.trim()}
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        type="button"
+                        onClick={() => setShowAddRefModal(true)}
+                        className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer"
                       >
-                        {isAssistLoading ? 'Processing...' : 'Apply Instruction'}
+                        + Add Source
                       </button>
                     </div>
-                  </div>
-                )}
 
-                {/* TAB CONTENT B: REFERENCE SOURCES */}
-                {activeRightTab === 'references' && (
-                  <div className="space-y-3 flex-1 flex flex-col justify-between">
-                    <div className="space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                          Linked Sources ({activeDocument.references.length})
-                        </span>
+                    {activeDocument.references.length === 0 ? (
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg text-center text-xs text-[#5B6472] space-y-2">
+                        <p>No attached sources yet.</p>
                         <button
+                          type="button"
                           onClick={() => setShowAddRefModal(true)}
-                          className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                          className="px-3 py-1.5 bg-[#2563EB] text-white rounded text-xs font-semibold cursor-pointer"
                         >
-                          + Add Source
+                          Attach Source
                         </button>
                       </div>
-
-                      {activeDocument.references.length === 0 ? (
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg text-center text-xs text-slate-400 space-y-2">
-                          <p>No reference materials linked yet.</p>
-                          <button
-                            onClick={() => setShowAddRefModal(true)}
-                            className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-semibold cursor-pointer"
-                          >
-                            Add Source
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                          {activeDocument.references.map((ref) => (
+                    ) : (
+                      <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                        {activeDocument.references.map((ref) => {
+                          const leadAuthor = ref.authors.split(',')[0].split(' ')[0];
+                          const chipLabel = `(${leadAuthor}, ${ref.year || 'n.d.'})`;
+                          return (
                             <div
                               key={ref.id}
-                              className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5 text-xs"
+                              className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-[#E5E7EB] dark:border-slate-800 rounded-lg space-y-1.5 text-xs"
                             >
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="font-semibold text-slate-900 dark:text-white line-clamp-2">
+                              <div className="flex items-start justify-between gap-1.5">
+                                <p className="font-semibold text-[#111827] dark:text-white line-clamp-2 text-xs">
                                   {ref.title}
                                 </p>
                                 <button
                                   type="button"
                                   onClick={() => handleInsertCitation(ref)}
-                                  className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-xs font-semibold hover:bg-blue-100 cursor-pointer shrink-0"
-                                  title="Insert in-text citation at cursor"
+                                  className="px-2 py-1 bg-[#EFF6FF] text-[#2563EB] hover:bg-[#2563EB] hover:text-white rounded text-[11px] font-bold cursor-pointer shrink-0 transition-colors"
+                                  title={`Insert citation chip ${chipLabel} at cursor`}
                                 >
-                                  Cite
+                                  {chipLabel}
                                 </button>
                               </div>
-                              <p className="text-[11px] text-slate-500">
+                              <p className="text-[11px] text-[#5B6472]">
                                 {ref.authors} ({ref.year || 'n.d.'})
                               </p>
-                              {ref.contentSnippet && (
-                                <p className="text-[11px] text-slate-400 italic line-clamp-2 bg-white dark:bg-slate-900 p-1.5 rounded border border-slate-100 dark:border-slate-800">
-                                  "{ref.contentSnippet}"
-                                </p>
-                              )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* TAB CONTENT C: COMPREHENSIVE DOCUMENT REVIEW */}
-                {activeRightTab === 'review' && (
-                  <div className="space-y-3 flex-1 flex flex-col justify-between">
-                    {isReviewLoading ? (
-                      <div className="p-8 text-center space-y-2 my-auto">
-                        <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-                        <p className="text-xs text-slate-400 font-medium">Running Scholarly Audit...</p>
-                      </div>
-                    ) : !reviewResult ? (
-                      <div className="p-4 text-center space-y-3 my-auto text-xs text-slate-500">
-                        <p>Evaluate your document across grammar, scholarly tone, and citation integrity.</p>
-                        <button
-                          onClick={handleRunDocumentReview}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs"
-                        >
-                          Run Academic Review
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
-                        {/* Score Card */}
-                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg flex items-center justify-between">
-                          <div>
-                            <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
-                              Quality Score
-                            </p>
-                            <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
-                              {reviewResult.summary}
-                            </p>
-                          </div>
-                          <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400 ml-2">
-                            {reviewResult.academicQualityScore}%
-                          </span>
-                        </div>
-
-                        {/* Suggestions List */}
-                        <div className="space-y-2">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                            Suggestions ({reviewResult.suggestions.length})
-                          </p>
-                          {reviewResult.suggestions.map((sug) => {
-                            if (sug.status !== 'pending') return null;
-
-                            return (
-                              <div
-                                key={sug.id}
-                                className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2 text-xs"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
-                                    {sug.type}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 capitalize">
-                                    {sug.severity}
-                                  </span>
-                                </div>
-                                <p className="font-semibold text-slate-900 dark:text-white leading-tight">
-                                  {sug.title}
-                                </p>
-                                <p className="text-slate-500 leading-relaxed text-[11px]">
-                                  {sug.explanation}
-                                </p>
-
-                                {sug.suggestedReplacement && (
-                                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 rounded border border-emerald-200 text-xs text-emerald-800 dark:text-emerald-300">
-                                    <strong>Recommended: </strong>"{sug.suggestedReplacement}"
-                                  </div>
-                                )}
-
-                                <div className="flex items-center justify-end gap-1.5 pt-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDismissReviewSuggestion(sug.id)}
-                                    className="px-2 py-1 text-slate-400 hover:text-slate-600 text-xs font-medium cursor-pointer"
-                                  >
-                                    Dismiss
-                                  </button>
-                                  {sug.suggestedReplacement && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleApplyReviewSuggestion(sug)}
-                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold cursor-pointer"
-                                    >
-                                      Accept
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
-                )}
 
-                {/* TAB CONTENT D: VERSION HISTORY */}
-                {activeRightTab === 'versions' && (
-                  <div className="space-y-3 flex-1 flex flex-col justify-between">
-                    <div className="space-y-2.5">
-                      <div className="space-y-1.5">
-                        <input
-                          type="text"
-                          value={versionNote}
-                          onChange={(e) => setVersionNote(e.target.value)}
-                          placeholder="Note for snapshot..."
-                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs outline-none border border-slate-200 dark:border-slate-700"
-                        />
-                        <button
-                          onClick={handleSaveVersionSnapshot}
-                          disabled={isVersionSaving}
-                          className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                        >
-                          {isVersionSaving ? 'Saving...' : 'Save Snapshot'}
-                        </button>
-                      </div>
-
-                      <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                        {versions.map((ver) => (
-                          <div
-                            key={ver.id}
-                            className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 text-xs space-y-1"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                {ver.wordCount.toLocaleString()} words
-                              </span>
-                              <button
-                                onClick={() => handleRestoreVersion(ver)}
-                                className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
-                              >
-                                Restore
-                              </button>
-                            </div>
-                            <p className="text-[10px] text-slate-400">
-                              {new Date(ver.createdAt).toLocaleString()}
-                            </p>
-                            {ver.notes && (
-                              <p className="text-[11px] text-slate-500 italic">
-                                {ver.notes}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                  {/* Versions access */}
+                  <div className="pt-2 border-t border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isVersionsAllowed) {
+                          setShowQuietUpgrade({
+                            feature: 'Version History',
+                            description: 'Document versioning and revision history are available in the Academic Studio plan.'
+                          });
+                        } else {
+                          setActiveRightTab('versions');
+                        }
+                      }}
+                      className="text-xs text-[#5B6472] hover:text-[#2563EB] flex items-center gap-1 font-medium cursor-pointer"
+                    >
+                      <History size={13} />
+                      <span>Versions</span>
+                    </button>
+                    <span className="text-[10px] text-[#5B6472]">KorsIQ Studio</span>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
+
+          {/* MOBILE FOCUSED MODE BOTTOM BAR (Visible on < lg) */}
+          <div className="lg:hidden fixed bottom-14 left-0 right-0 z-30 bg-white dark:bg-slate-900 border-t border-[#E5E7EB] dark:border-slate-800 px-3 py-1.5 flex items-center justify-around shadow-md">
+            <button
+              type="button"
+              onClick={() => setMobileSheet('outline')}
+              className="flex flex-col items-center justify-center min-h-[44px] min-w-[44px] text-[11px] font-semibold text-[#5B6472] hover:text-[#2563EB]"
+            >
+              <ListOrdered size={16} />
+              <span>Outline</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileSheet('sources')}
+              className="flex flex-col items-center justify-center min-h-[44px] min-w-[44px] text-[11px] font-semibold text-[#5B6472] hover:text-[#2563EB]"
+            >
+              <BookOpen size={16} />
+              <span>Sources</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileSheet('cite')}
+              className="flex flex-col items-center justify-center min-h-[44px] min-w-[44px] text-[11px] font-semibold text-[#5B6472] hover:text-[#2563EB]"
+            >
+              <Quote size={16} />
+              <span>Cite</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isVersionsAllowed) {
+                  setShowQuietUpgrade({
+                    feature: 'Version History',
+                    description: 'Document versioning and revision history are available in the Academic Studio plan.'
+                  });
+                } else {
+                  setMobileSheet('versions');
+                }
+              }}
+              className="flex flex-col items-center justify-center min-h-[44px] min-w-[44px] text-[11px] font-semibold text-[#5B6472] hover:text-[#2563EB]"
+            >
+              <History size={16} />
+              <span>Versions</span>
+            </button>
+          </div>
+
+          {/* MOBILE BOTTOM SHEETS */}
+          {mobileSheet && (
+            <div className="fixed inset-0 z-50 bg-[#111827]/40 flex flex-col justify-end">
+              <div className="bg-white dark:bg-slate-900 border-t border-[#E5E7EB] dark:border-slate-800 rounded-t-xl max-h-[75vh] flex flex-col p-4 shadow-xl space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-[#E5E7EB]">
+                  <h3 className="font-bold text-sm text-[#111827] dark:text-white capitalize">
+                    {mobileSheet === 'outline' ? 'Document Outline' : mobileSheet === 'sources' ? 'Attached Sources' : mobileSheet === 'cite' ? 'Insert Citation' : 'Version History'}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setMobileSheet(null)}
+                    className="p-2 text-[#5B6472] hover:text-[#111827] min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                    aria-label="Close sheet"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2 py-1">
+                  {mobileSheet === 'outline' && (
+                    <div className="space-y-1.5">
+                      {activeDocument.sections.map((sec, idx) => (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveSectionId(sec.id);
+                            setMobileSheet(null);
+                          }}
+                          className={`w-full text-left p-3 rounded-lg border min-h-[44px] flex items-center justify-between cursor-pointer ${
+                            sec.id === activeSectionId
+                              ? 'bg-[#EFF6FF] border-[#2563EB] text-[#2563EB] font-bold'
+                              : 'border-[#E5E7EB] hover:bg-slate-50 text-[#111827]'
+                          }`}
+                        >
+                          <span className="text-xs truncate">{idx + 1}. {sec.title}</span>
+                          <span className="text-[11px] text-[#5B6472]">{sec.wordCount || 0} w</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {mobileSheet === 'sources' && (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileSheet(null);
+                          setShowAddRefModal(true);
+                        }}
+                        className="w-full py-2 bg-[#2563EB] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer"
+                      >
+                        + Add Source
+                      </button>
+                      {activeDocument.references.length === 0 ? (
+                        <p className="text-xs text-[#5B6472] text-center py-4">No sources attached yet.</p>
+                      ) : (
+                        activeDocument.references.map((ref) => (
+                          <div key={ref.id} className="p-2.5 bg-slate-50 rounded-lg border border-[#E5E7EB] text-xs">
+                            <p className="font-semibold text-[#111827]">{ref.title}</p>
+                            <p className="text-[11px] text-[#5B6472]">{ref.authors} ({ref.year || 'n.d.'})</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {mobileSheet === 'cite' && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-[#5B6472]">Tap a citation chip to insert into the active section:</p>
+                      {activeDocument.references.length === 0 ? (
+                        <div className="text-center py-4 text-xs text-[#5B6472]">
+                          <p>No attached sources to cite.</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMobileSheet(null);
+                              setShowAddRefModal(true);
+                            }}
+                            className="mt-2 px-3 py-1.5 bg-[#2563EB] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer"
+                          >
+                            Add Source
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {activeDocument.references.map((ref) => {
+                            const leadAuthor = ref.authors.split(',')[0].split(' ')[0];
+                            const chipLabel = `(${leadAuthor}, ${ref.year || 'n.d.'})`;
+                            return (
+                              <button
+                                key={ref.id}
+                                type="button"
+                                onClick={() => {
+                                  handleInsertCitation(ref);
+                                  setMobileSheet(null);
+                                  showToast(`Inserted citation: ${chipLabel}`);
+                                }}
+                                className="px-3 py-2 bg-[#EFF6FF] border border-[#2563EB]/40 text-[#2563EB] hover:bg-[#2563EB] hover:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] flex items-center gap-1.5"
+                              >
+                                <Quote size={12} />
+                                <span>{chipLabel}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {mobileSheet === 'versions' && (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveVersionSnapshot}
+                        disabled={isVersionSaving}
+                        className="w-full py-2 bg-[#2563EB] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer"
+                      >
+                        {isVersionSaving ? 'Saving...' : 'Save Current Snapshot'}
+                      </button>
+                      {versions.length === 0 ? (
+                        <p className="text-xs text-[#5B6472] text-center py-4">No snapshots saved yet.</p>
+                      ) : (
+                        versions.map((ver) => (
+                          <div key={ver.id} className="p-2.5 bg-slate-50 rounded-lg border border-[#E5E7EB] text-xs flex items-center justify-between">
+                            <div>
+                              <p className="font-semibold">{ver.wordCount.toLocaleString()} words</p>
+                              <p className="text-[10px] text-[#5B6472]">{new Date(ver.createdAt).toLocaleString()}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleRestoreVersion(ver);
+                                setMobileSheet(null);
+                              }}
+                              className="text-xs font-semibold text-[#2563EB] p-2 min-h-[44px] cursor-pointer"
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2228,7 +2256,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             </div>
 
             {/* Live Visual Academic Preview */}
-            <div className="p-8 sm:p-10 bg-white text-slate-900 border border-slate-200 rounded-lg shadow-inner font-serif text-sm space-y-6 max-h-[480px] overflow-y-auto custom-scrollbar">
+            <div className="p-8 sm:p-10 bg-white text-slate-900 border border-slate-200 rounded-lg shadow-inner font-sans text-sm space-y-6 max-h-[480px] overflow-y-auto custom-scrollbar">
               {/* Cover Page */}
               <div className="text-center space-y-4 pb-8 border-b border-dashed border-slate-300">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -2267,7 +2295,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     <h2 className="text-base font-bold uppercase tracking-wide border-b border-slate-100 pb-1">
                       {sec.level === 1 ? `CHAPTER ${idx + 1}: ` : ''}{sec.title}
                     </h2>
-                    <div className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap font-serif indent-6">
+                    <div className="text-xs leading-relaxed text-slate-800 whitespace-pre-wrap font-sans indent-6">
                       {sec.content || '[Section under active development]'}
                     </div>
                   </div>
@@ -2278,7 +2306,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
               {activeDocument.references.length > 0 && (
                 <div className="pt-6 border-t border-slate-200 space-y-2">
                   <h2 className="text-base font-bold uppercase tracking-wide">REFERENCES</h2>
-                  <div className="space-y-1.5 text-xs font-serif pl-6 -indent-6">
+                  <div className="space-y-1.5 text-xs font-sans pl-6 -indent-6">
                     {activeDocument.references.map((ref) => (
                       <p key={ref.id} className="leading-relaxed">
                         {ref.authors} ({ref.year || 'n.d.'}). {ref.title}. {ref.doi && `https://doi.org/${ref.doi}`}
@@ -2355,6 +2383,43 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                 className="w-full py-2 text-slate-500 hover:text-slate-700 text-xs font-medium cursor-pointer"
               >
                 Maybe later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ========================================================= */}
+      {/* MODAL 5: QUIET UPGRADE PROMPT (SPEC: ONE CARD, ONE PRIMARY BUTTON) */}
+      {/* ========================================================= */}
+      {showQuietUpgrade && (
+        <div className="fixed inset-0 z-50 bg-[#111827]/40 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-lg text-left">
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-wider">
+                Plus &amp; Studio Feature
+              </span>
+              <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                {showQuietUpgrade.feature}
+              </h3>
+              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+                {showQuietUpgrade.description}
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowQuietUpgrade(null)}
+                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm min-h-[44px]"
+              >
+                See plans
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowQuietUpgrade(null)}
+                className="w-full py-2 text-[#5B6472] hover:text-[#111827] text-xs font-medium cursor-pointer min-h-[44px]"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -1,20 +1,15 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { 
-  GraduationCap, 
+  Plus, 
+  Trash2, 
   ArrowRight, 
-  ArrowLeft, 
   Check, 
-  BookOpen, 
-  Sparkles, 
-  Building2, 
-  Target, 
-  Compass, 
-  Layers, 
-  HelpCircle 
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
-import { UserProfile, SubscriptionTier } from '../types';
-import { AVATAR_OPTIONS, UserAvatar } from './UserAvatar';
+import { UserProfile, Course, Difficulty } from '../types';
+import { DBService } from '../services/db';
+import { getCurrentUserId } from '../lib/supabase';
 import KorsIQLogo from './KorsIQLogo';
 
 interface OnboardingProps {
@@ -23,540 +18,621 @@ interface OnboardingProps {
   onComplete: (profile: UserProfile) => void;
 }
 
+const NIGERIAN_UNIVERSITIES = [
+  'University of Lagos (UNILAG)',
+  'University of Ibadan (UI)',
+  'Obafemi Awolowo University (OAU)',
+  'University of Nigeria, Nsukka (UNN)',
+  'Ahmadu Bello University (ABU)',
+  'Federal University of Technology, Akure (FUTA)',
+  'University of Ilorin (UNILORIN)',
+  'Covenant University',
+  'Babcock University',
+  'Other'
+];
+
 const ACADEMIC_LEVELS = [
-  { id: '100L / Freshman', label: '100L / Freshman (Year 1)' },
-  { id: '200L / Sophomore', label: '200L / Sophomore (Year 2)' },
-  { id: '300L / Junior', label: '300L / Junior (Year 3)' },
-  { id: '400L / Senior', label: '400L / Senior (Year 4)' },
-  { id: '500L / Final Year', label: '500L / Final Year (Year 5)' },
-  { id: 'Postgraduate / Masters / PhD', label: 'Postgraduate / Masters / PhD' },
+  '100L / Year 1',
+  '200L / Year 2',
+  '300L / Year 3',
+  '400L / Year 4',
+  '500L / Year 5',
+  'Postgraduate'
 ];
 
-const PRIMARY_GOALS = [
-  'Achieve First Class / 4.0+ GPA',
-  'Master Complex Coursework Concepts',
-  'Prepare for Upcoming Exams & Tests',
-  'Build Consistent Daily Study Habits',
-  'Condense Dense Syllabi & Lecture Slides'
+const GRADING_SCALES = [
+  { id: '5.0', label: '5.0 (Standard Nigerian)' },
+  { id: '4.0', label: '4.0 (US style)' },
+  { id: '7.0', label: '7.0 (UI style)' },
+  { id: 'other', label: 'Other' }
 ];
 
-const STUDY_STYLES = [
-  { id: 'Active Recall & Quizzes', label: 'Active Recall & Quizzes', desc: 'Self-testing with interactive practice questions' },
-  { id: 'Deep Focus & Summaries', label: 'Deep Focus & Summaries', desc: 'Condensing textbooks and lectures into concise outlines' },
-  { id: 'Flashcards & Spaced Repetition', label: 'Flashcards & Spaced Repetition', desc: 'Memorising definitions and formulas regularly' },
-  { id: 'Audio Podcasts & Discussion', label: 'Audio & Study Circles', desc: 'Audio breakdowns and collaborative peer queries' }
-];
-
-const ASSISTANCE_OPTIONS = [
-  'Exam Preparation',
-  'Lecture Note Condensation',
-  'Complex Problem Solving',
-  'Formula & Definition Recall',
-  'Study Schedule Discipline',
-  'Coursework Retention'
-];
+interface CourseRow {
+  id: string;
+  code: string;
+  units: number;
+  title: string;
+}
 
 export const Onboarding: React.FC<OnboardingProps> = ({ 
   userEmail, 
   initialProfile, 
   onComplete 
 }) => {
-  const [step, setStep] = useState<number>(1);
-  const [direction, setDirection] = useState<number>(1);
+  // Step 1: Academic profile, Step 2: Add your courses, Step 3: Choose a plan
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [showPaidPlanNotice, setShowPaidPlanNotice] = useState(false);
 
-  // Form state pre-populated with any existing registration data
-  const [formData, setFormData] = useState({
-    name: initialProfile?.name || '',
-    avatarIcon: initialProfile?.avatarIcon || 'graduation-cap',
-    university: initialProfile?.university || '',
-    major: initialProfile?.major || '',
-    department: initialProfile?.department || '',
-    level: initialProfile?.level || ACADEMIC_LEVELS[0].id,
-    age: initialProfile?.age || 20,
-    semesterEnd: initialProfile?.semesterEnd || new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
-    targetCGPA: initialProfile?.targetCGPA || 4.5,
-    academicGoals: initialProfile?.academicGoals || PRIMARY_GOALS[0],
-    studyStyle: initialProfile?.studyStyle || STUDY_STYLES[0].id,
-    assistanceAreas: initialProfile?.assistanceAreas || [ASSISTANCE_OPTIONS[0], ASSISTANCE_OPTIONS[1]],
-  });
+  // Form State
+  const [name, setName] = useState(initialProfile?.name || '');
+  const [university, setUniversity] = useState(initialProfile?.university || '');
+  const [department, setDepartment] = useState(initialProfile?.department || initialProfile?.major || '');
+  const [level, setLevel] = useState(initialProfile?.level || ACADEMIC_LEVELS[0]);
+  const [gradingScale, setGradingScale] = useState(initialProfile?.gradingScale || '5.0');
+  const [targetCGPA, setTargetCGPA] = useState<string>(
+    initialProfile?.targetCGPA ? String(initialProfile.targetCGPA) : '4.50'
+  );
 
-  const nextStep = () => {
+  // Courses State: Starts with 3 rows per spec
+  const [courses, setCourses] = useState<CourseRow[]>([
+    { id: '1', code: '', units: 3, title: '' },
+    { id: '2', code: '', units: 3, title: '' },
+    { id: '3', code: '', units: 3, title: '' }
+  ]);
+
+  // Selected Plan: Free preselected per spec
+  const [selectedPlan, setSelectedPlan] = useState<'free' | 'plus' | 'studio'>('free');
+
+  const userId = getCurrentUserId() || userEmail;
+
+  // Handle Step 1 -> Step 2
+  const handleProfileContinue = (e?: React.FormEvent) => {
+    e?.preventDefault();
     setValidationError(null);
-
-    // Validation per step
-    if (step === 1) {
-      if (!formData.name.trim() || formData.name.trim().length < 2) {
-        setValidationError('Please enter your full name (minimum 2 characters).');
-        return;
-      }
-    } else if (step === 2) {
-      if (!formData.university.trim()) {
-        setValidationError('Please provide your university or academic institution.');
-        return;
-      }
-      if (!formData.major.trim()) {
-        setValidationError('Please enter your course of study or major.');
-        return;
-      }
-      if (!formData.level) {
-        setValidationError('Please select your current academic year or level.');
-        return;
-      }
-    }
-
-    setDirection(1);
-    setStep((s) => Math.min(s + 1, 3));
-  };
-
-  const prevStep = () => {
-    setValidationError(null);
-    setDirection(-1);
-    setStep((s) => Math.max(s - 1, 1));
-  };
-
-  const toggleAssistanceArea = (area: string) => {
-    setFormData((prev) => {
-      const exists = prev.assistanceAreas.includes(area);
-      return {
-        ...prev,
-        assistanceAreas: exists
-          ? prev.assistanceAreas.filter((a) => a !== area)
-          : [...prev.assistanceAreas, area],
-      };
-    });
-  };
-
-  const handleFinalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setValidationError(null);
-
-    if (!formData.academicGoals) {
-      setValidationError('Please select your primary academic goal.');
+    if (!name.trim()) {
+      setValidationError('Please enter your full name.');
       return;
     }
+    setStep(2);
+  };
 
+  const handleAddCourseRow = () => {
+    setCourses(prev => [
+      ...prev,
+      { id: String(Date.now()), code: '', units: 3, title: '' }
+    ]);
+  };
+
+  const handleRemoveCourseRow = (id: string) => {
+    if (courses.length <= 1) return;
+    setCourses(prev => prev.filter(c => c.id !== id));
+  };
+
+  const handleUpdateCourseRow = (id: string, field: keyof CourseRow, value: any) => {
+    setCourses(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+
+  // Handle Step 2 -> Step 3
+  const handleSaveCourses = async () => {
     setIsSubmitting(true);
+    setValidationError(null);
 
+    try {
+      const validCourses = courses.filter(c => c.code.trim().length > 0);
+      for (const c of validCourses) {
+        const newCourse: Course = {
+          id: `crs_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          code: c.code.trim().toUpperCase(),
+          title: c.title.trim() || c.code.trim().toUpperCase(),
+          units: Number(c.units) || 3,
+          difficulty: Difficulty.MEDIUM
+        };
+        await DBService.addCourse(userId, newCourse);
+      }
+      setStep(3);
+    } catch (err) {
+      console.error('Error saving courses during onboarding:', err);
+      // Non-blocking, advance to step 3
+      setStep(3);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Step 3 -> Finish
+  const handleFinishOnboarding = () => {
     const completedProfile: UserProfile = {
-      name: formData.name.trim(),
+      name: name.trim() || 'Student',
       email: userEmail,
-      university: formData.university.trim(),
-      level: formData.level,
-      age: formData.age || 20,
-      semesterEnd: formData.semesterEnd,
-      targetCGPA: formData.targetCGPA || 4.5,
-      avatarIcon: formData.avatarIcon || 'graduation-cap',
+      university: university.trim(),
+      department: department.trim(),
+      major: department.trim(),
+      level: level,
+      age: initialProfile?.age || 20,
+      semesterEnd: initialProfile?.semesterEnd || new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
+      targetCGPA: parseFloat(targetCGPA) || 4.5,
+      gradingScale: Number(gradingScale) || 5.0,
+      avatarIcon: initialProfile?.avatarIcon || 'graduation-cap',
       onboarded: true,
-      tutorialSeen: false,
-      isPro: true,
-      tier: 'scholar' as SubscriptionTier,
-      notifications: {
+      tutorialSeen: true,
+      isPro: initialProfile?.isPro || false,
+      tier: initialProfile?.tier || 'free',
+      notifications: initialProfile?.notifications || {
         messages: true,
         sessions: true,
         aiContent: true,
-      },
-      major: formData.major.trim(),
-      department: formData.department.trim(),
-      academicGoals: formData.academicGoals,
-      studyStyle: formData.studyStyle,
-      assistanceAreas: formData.assistanceAreas,
+        browserPush: false
+      }
     };
 
     onComplete(completedProfile);
   };
 
-  const variants = {
-    enter: (d: number) => ({
-      x: d > 0 ? 30 : -30,
-      opacity: 0,
-    }),
-    center: {
-      zIndex: 1,
-      x: 0,
-      opacity: 1,
-    },
-    exit: (d: number) => ({
-      zIndex: 0,
-      x: d < 0 ? 30 : -30,
-      opacity: 0,
-    }),
-  };
-
-  const totalSteps = 3;
-  const progressPercent = Math.round((step / totalSteps) * 100);
-
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center py-8 px-4 sm:px-6 relative overflow-y-auto font-sans text-slate-900 selection:bg-blue-100">
-      <div className="max-w-xl w-full relative z-10 my-auto">
-        {/* Header Branding */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3 bg-slate-900 text-white rounded-xl shadow-xs mb-3">
-            <KorsIQLogo variant="icon" size={36} onDark />
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 relative font-sans text-[#111827] dark:text-white">
+      {/* Top Header: Logo left, Skip right for steps 1 and 2 */}
+      <div className="w-full max-w-xl flex items-center justify-between pb-6">
+        <KorsIQLogo size={28} />
+        {step < 3 && (
+          <button
+            type="button"
+            onClick={() => {
+              setValidationError(null);
+              setStep((s) => (s + 1) as 2 | 3);
+            }}
+            className="text-xs font-semibold text-[#5B6472] hover:text-[#111827] dark:hover:text-white cursor-pointer min-h-[44px] px-2 flex items-center"
+          >
+            Skip for now
+          </button>
+        )}
+      </div>
+
+      <div className="w-full max-w-xl space-y-6">
+        {/* Simple 3-Segment Progress Bar per Spec: Profile, Courses, Plan */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div className={`h-1.5 rounded-full ${step >= 1 ? 'bg-[#2563EB]' : 'bg-[#E5E7EB] dark:bg-slate-800'}`} />
+            <div className={`h-1.5 rounded-full ${step >= 2 ? 'bg-[#2563EB]' : 'bg-[#E5E7EB] dark:bg-slate-800'}`} />
+            <div className={`h-1.5 rounded-full ${step >= 3 ? 'bg-[#2563EB]' : 'bg-[#E5E7EB] dark:bg-slate-800'}`} />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mb-1">
-            Welcome to KorsIQ
-          </h1>
-          <p className="text-slate-500 font-medium text-xs">
-            Step {step} of {totalSteps} — {step === 1 ? 'Personal Profile' : step === 2 ? 'Academic Context' : 'Study Preferences'}
-          </p>
+          <div className="flex justify-between text-[11px] font-semibold text-[#5B6472]">
+            <span className={step >= 1 ? 'text-[#2563EB]' : ''}>Profile</span>
+            <span className={step >= 2 ? 'text-[#2563EB]' : ''}>Courses</span>
+            <span className={step >= 3 ? 'text-[#2563EB]' : ''}>Plan</span>
+          </div>
         </div>
 
-        {/* Progress Tracker Bar */}
-        <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mb-6">
-          <div 
-            className="h-full bg-blue-600 transition-all duration-300 ease-out rounded-full"
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-
-        {/* Main Card */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 sm:p-8 relative">
-          
-          {/* Step Pill Indicator */}
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
-            <div className="flex items-center gap-2">
-              <span className="w-6 h-6 rounded-md bg-blue-50 text-blue-700 text-xs font-bold flex items-center justify-center border border-blue-100">
-                {step}
-              </span>
-              <span className="text-xs font-semibold text-slate-800">
-                {step === 1 && 'Personal Information'}
-                {step === 2 && 'Academic Profile'}
-                {step === 3 && 'Learning Preferences'}
-              </span>
+        {/* ========================================================= */}
+        {/* STEP 1: Academic Profile                                  */}
+        {/* ========================================================= */}
+        {step === 1 && (
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg p-6 sm:p-8 space-y-5 shadow-xs">
+            <div className="space-y-1">
+              <h1 className="text-xl font-bold text-[#111827] dark:text-white">Tell us about your studies</h1>
+              <p className="text-xs text-[#5B6472] leading-relaxed">
+                KorsIQ tunes its AI, planner and circles to your university.
+              </p>
             </div>
-            <span className="text-xs font-mono font-medium text-slate-500">
-              {progressPercent}% COMPLETE
-            </span>
-          </div>
 
-          {/* Validation Error Banner */}
-          {validationError && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-3.5 mb-5 bg-rose-50 border border-rose-200/80 rounded-2xl text-xs font-semibold text-rose-700 flex items-center gap-2"
-            >
-              <span>{validationError}</span>
-            </motion.div>
-          )}
+            {validationError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2 text-rose-700 text-xs font-medium">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>{validationError}</span>
+              </div>
+            )}
 
-          <form onSubmit={step === 3 ? handleFinalSubmit : (e) => { e.preventDefault(); nextStep(); }}>
-            <AnimatePresence mode="wait" custom={direction}>
-              <motion.div
-                key={step}
-                custom={direction}
-                variants={variants}
-                initial="enter"
-                animate="center"
-                exit="exit"
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="space-y-6"
-              >
-                {/* ---------------- STEP 1: PERSONAL INFORMATION ---------------- */}
-                {step === 1 && (
-                  <div className="space-y-5">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                        Full Name <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        autoFocus
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        placeholder="Alex Morgan"
-                        className="w-full h-11 bg-white border border-slate-300 rounded-lg px-3 text-xs font-medium text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                      />
-                      <p className="text-xs text-slate-500 ml-1">
-                        This is the name your study groups and AI tutors will address you by.
-                      </p>
-                    </div>
+            <form onSubmit={handleProfileContinue} className="space-y-4 max-w-md">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[#111827] dark:text-white">
+                  Full name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Oluwaseun Adeleke"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                />
+              </div>
 
-                    {/* Profile Avatar Selection (Optional) */}
-                    <div className="space-y-2 pt-2">
-                      <div className="flex items-center justify-between ml-1">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                          Scholar Avatar <span className="font-normal lowercase">(optional)</span>
-                        </label>
-                        <span className="text-xs text-blue-600 font-medium">
-                          Choose an icon
-                        </span>
-                      </div>
-                      
-                      <div className="grid grid-cols-4 sm:grid-cols-4 gap-2 pt-1">
-                        {AVATAR_OPTIONS.map((opt) => {
-                          const isSelected = formData.avatarIcon === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => setFormData({ ...formData, avatarIcon: opt.id })}
-                              className={`p-2.5 rounded-lg border text-center flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'border-blue-600 bg-blue-50/60 shadow-2xs ring-1 ring-blue-600'
-                                  : 'border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-slate-300'
-                              }`}
-                            >
-                              <div className={`w-8 h-8 rounded-md flex items-center justify-center ${opt.bgClass}`}>
-                                {opt.icon}
-                              </div>
-                              <span className="text-[11px] font-medium text-slate-700 truncate w-full">
-                                {opt.name}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[#111827] dark:text-white">
+                  University or institution
+                </label>
+                <input
+                  type="text"
+                  list="university-options"
+                  value={university}
+                  onChange={(e) => setUniversity(e.target.value)}
+                  placeholder="Select or type your institution"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                />
+                <datalist id="university-options">
+                  {NIGERIAN_UNIVERSITIES.map((u) => (
+                    <option key={u} value={u} />
+                  ))}
+                </datalist>
+              </div>
 
-                    {/* Semester End Date / Exam Target Period */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                          Semester End Date <span className="font-normal lowercase">(optional)</span>
-                        </label>
-                        <input
-                          type="date"
-                          value={formData.semesterEnd}
-                          onChange={(e) => setFormData({ ...formData, semesterEnd: e.target.value })}
-                          className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all cursor-pointer"
-                        />
-                      </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[#111827] dark:text-white">
+                  Department or programme
+                </label>
+                <input
+                  type="text"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  placeholder="e.g. Computer Science"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                />
+              </div>
 
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                          Age <span className="font-normal lowercase">(optional)</span>
-                        </label>
-                        <input
-                          type="number"
-                          min="14"
-                          max="100"
-                          value={formData.age || ''}
-                          onChange={(e) => setFormData({ ...formData, age: parseInt(e.target.value, 10) || 0 })}
-                          placeholder="20"
-                          className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-[#111827] dark:text-white">
+                    Current level / year
+                  </label>
+                  <select
+                    value={level}
+                    onChange={(e) => setLevel(e.target.value)}
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                  >
+                    {ACADEMIC_LEVELS.map((lvl) => (
+                      <option key={lvl} value={lvl}>{lvl}</option>
+                    ))}
+                  </select>
+                </div>
 
-                {/* ---------------- STEP 2: ACADEMIC PROFILE ---------------- */}
-                {step === 2 && (
-                  <div className="space-y-5">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                        Institution / University <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        autoFocus
-                        value={formData.university}
-                        onChange={(e) => setFormData({ ...formData, university: e.target.value })}
-                        placeholder="e.g. University of Lagos, Oxford, MIT"
-                        className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 text-xs font-medium text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                      />
-                    </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-[#111827] dark:text-white">
+                    Grading scale
+                  </label>
+                  <select
+                    value={gradingScale}
+                    onChange={(e) => setGradingScale(e.target.value)}
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                  >
+                    {GRADING_SCALES.map((gs) => (
+                      <option key={gs.id} value={gs.id}>{gs.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                          Course of Study / Major <span className="text-rose-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={formData.major}
-                          onChange={(e) => setFormData({ ...formData, major: e.target.value })}
-                          placeholder="e.g. Computer Science, Law"
-                          className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 text-xs font-medium text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                        />
-                      </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[#111827] dark:text-white">
+                  Target CGPA (optional)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="7"
+                  value={targetCGPA}
+                  onChange={(e) => setTargetCGPA(e.target.value)}
+                  placeholder="e.g. 4.50"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                />
+              </div>
 
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                          Department / Faculty <span className="font-normal lowercase">(optional)</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={formData.department}
-                          onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                          placeholder="e.g. Physical Sciences"
-                          className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 text-xs font-medium text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Academic Level */}
-                    <div className="space-y-1 pt-1">
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                        Academic Level <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {ACADEMIC_LEVELS.map((lvl) => {
-                          const isSelected = formData.level === lvl.id;
-                          return (
-                            <button
-                              key={lvl.id}
-                              type="button"
-                              onClick={() => setFormData({ ...formData, level: lvl.id })}
-                              className={`p-2.5 rounded-lg border text-left flex items-center justify-between text-xs font-medium transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'border-blue-600 bg-blue-50/60 text-blue-900 shadow-2xs font-semibold'
-                                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              <span>{lvl.label}</span>
-                              {isSelected && <Check size={14} className="text-blue-600 shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ---------------- STEP 3: STUDY PREFERENCES ---------------- */}
-                {step === 3 && (
-                  <div className="space-y-5">
-                    {/* Primary Goal */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                        Primary Academic Goal <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="space-y-2">
-                        {PRIMARY_GOALS.map((goal) => {
-                          const isSelected = formData.academicGoals === goal;
-                          return (
-                            <button
-                              key={goal}
-                              type="button"
-                              onClick={() => setFormData({ ...formData, academicGoals: goal })}
-                              className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between text-xs font-medium transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'border-blue-600 bg-blue-50/60 text-blue-900 shadow-2xs font-semibold'
-                                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              <span>{goal}</span>
-                              {isSelected && <Check size={14} className="text-blue-600 shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Preferred Study Style */}
-                    <div className="space-y-1 pt-1">
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                        Preferred Study Style <span className="font-normal lowercase">(optional)</span>
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {STUDY_STYLES.map((style) => {
-                          const isSelected = formData.studyStyle === style.id;
-                          return (
-                            <button
-                              key={style.id}
-                              type="button"
-                              onClick={() => setFormData({ ...formData, studyStyle: style.id })}
-                              className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'border-blue-600 bg-blue-50/60 text-blue-950 shadow-2xs'
-                                  : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-0.5">
-                                <span className="text-xs font-semibold text-slate-800">{style.label}</span>
-                                {isSelected && <Check size={13} className="text-blue-600" />}
-                              </div>
-                              <p className="text-[11px] text-slate-500 leading-snug">{style.desc}</p>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Assistance Areas (Multi-select badges) */}
-                    <div className="space-y-2 pt-1">
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
-                        Where do you need support? <span className="font-normal lowercase">(select all that apply)</span>
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {ASSISTANCE_OPTIONS.map((area) => {
-                          const isSelected = formData.assistanceAreas.includes(area);
-                          return (
-                            <button
-                              key={area}
-                              type="button"
-                              onClick={() => toggleAssistanceArea(area)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 border ${
-                                isSelected
-                                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                              }`}
-                            >
-                              {isSelected && <Check size={12} />}
-                              <span>{area}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </motion.div>
-            </AnimatePresence>
-
-            {/* Navigation & Action Buttons */}
-            <div className="flex items-center gap-3 pt-4 mt-6 border-t border-slate-100">
-              {step > 1 && (
+              <div className="pt-2">
                 <button
-                  type="button"
-                  onClick={prevStep}
-                  disabled={isSubmitting}
-                  className="px-4 h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <ArrowLeft size={14} />
-                  <span>Back</span>
-                </button>
-              )}
-
-              {step < 3 ? (
-                <button
-                  type="button"
-                  onClick={nextStep}
-                  className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg transition-colors shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
+                  type="submit"
+                  className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm"
                 >
                   <span>Continue</span>
                   <ArrowRight size={14} />
                 </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 h-10 bg-slate-900 hover:bg-black text-white font-medium text-xs rounded-lg transition-colors shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99] disabled:opacity-60"
-                >
-                  {isSubmitting ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Finalizing Setup...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <span>Complete Setup &amp; Enter Dashboard</span>
-                      <ArrowRight size={14} />
-                    </>
-                  )}
-                </button>
-              )}
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* STEP 2: Add Your Courses                                 */}
+        {/* ========================================================= */}
+        {step === 2 && (
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg p-6 sm:p-8 space-y-5 shadow-xs">
+            <div className="space-y-1">
+              <h1 className="text-xl font-bold text-[#111827] dark:text-white">Add your courses for this semester</h1>
+              <p className="text-xs text-[#5B6472] leading-relaxed">
+                You can add more later. We will build your planner and study hub from these.
+              </p>
             </div>
-          </form>
-        </div>
+
+            <div className="space-y-3">
+              {courses.map((row, idx) => (
+                <div key={row.id} className="flex items-center gap-2">
+                  <div className="w-32 shrink-0">
+                    <input
+                      type="text"
+                      placeholder="Code (e.g. CSC 301)"
+                      value={row.code}
+                      onChange={(e) => handleUpdateCourseRow(row.id, 'code', e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px] font-semibold uppercase"
+                    />
+                  </div>
+                  <div className="w-20 shrink-0">
+                    <input
+                      type="number"
+                      min={1}
+                      max={6}
+                      value={row.units}
+                      onChange={(e) => handleUpdateCourseRow(row.id, 'units', Number(e.target.value))}
+                      className="w-full px-2 py-2 text-center bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                      title="Credit Units"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      placeholder="Title (e.g. Operating Systems)"
+                      value={row.title}
+                      onChange={(e) => handleUpdateCourseRow(row.id, 'title', e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={courses.length <= 1}
+                    onClick={() => handleRemoveCourseRow(row.id)}
+                    className="p-2 text-[#5B6472] hover:text-rose-600 disabled:opacity-30 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                    aria-label={`Remove course row ${idx + 1}`}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={handleAddCourseRow}
+                className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer min-h-[44px] flex items-center gap-1"
+              >
+                <Plus size={14} />
+                <span>+ Add another course</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStep(3)}
+                className="text-xs font-semibold text-[#5B6472] hover:text-[#111827] cursor-pointer min-h-[44px] px-2 flex items-center"
+              >
+                I'll add courses later
+              </button>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleSaveCourses}
+                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm disabled:opacity-50"
+              >
+                <span>{isSubmitting ? 'Saving courses...' : 'Save and continue'}</span>
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* STEP 3: Choose a Plan                                     */}
+        {/* ========================================================= */}
+        {step === 3 && (
+          <div className="space-y-5">
+            <div className="text-center space-y-1">
+              <h1 className="text-xl font-bold text-[#111827] dark:text-white">Pick the plan that fits your semester</h1>
+              <p className="text-xs text-[#5B6472] leading-relaxed">
+                Start free. Upgrade whenever you need more room to write or collaborate.
+              </p>
+            </div>
+
+            {/* Three plan cards side by side (stacked on mobile) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Card 1: Free */}
+              <div
+                className={`bg-white dark:bg-slate-900 rounded-lg p-5 border flex flex-col justify-between space-y-4 transition-all shadow-xs ${
+                  selectedPlan === 'free'
+                    ? 'border-[#2563EB] ring-2 ring-[#2563EB]/20'
+                    : 'border-[#E5E7EB] dark:border-slate-800'
+                }`}
+              >
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-bold text-base text-[#111827] dark:text-white">Free</h3>
+                    <p className="text-xs text-[#5B6472] mt-0.5">Get organized and start studying.</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦0</span>
+                    <span className="text-xs text-[#5B6472]"> / month</span>
+                  </div>
+                  <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Up to 5 courses</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Basic CGPA calculator</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>100 MB file storage</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Public study circles</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlan('free')}
+                  className={`w-full py-2.5 rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors ${
+                    selectedPlan === 'free'
+                      ? 'bg-[#2563EB] text-white hover:bg-[#1D4ED8]'
+                      : 'border border-[#E5E7EB] text-[#111827] hover:bg-slate-50'
+                  }`}
+                >
+                  Continue with Free
+                </button>
+              </div>
+
+              {/* Card 2: Plus */}
+              <div
+                className={`bg-white dark:bg-slate-900 rounded-lg p-5 border flex flex-col justify-between space-y-4 transition-all shadow-xs relative ${
+                  selectedPlan === 'plus'
+                    ? 'border-[#2563EB] ring-2 ring-[#2563EB]/20'
+                    : 'border-[#E5E7EB] dark:border-slate-800'
+                }`}
+              >
+                <div className="absolute -top-2.5 right-4 px-2 py-0.5 bg-[#2563EB] text-white text-[10px] font-bold uppercase rounded tracking-wider">
+                  Popular
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-bold text-base text-[#111827] dark:text-white">Plus</h3>
+                    <p className="text-xs text-[#5B6472] mt-0.5">For students who want the AI edge.</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦7,500</span>
+                    <span className="text-xs text-[#5B6472]"> / month</span>
+                  </div>
+                  <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Unlimited courses and timetable</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Scenario CGPA projection</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>2 GB file storage</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Private circles with invite codes</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>200 monthly AI study credits</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPaidPlanNotice(true);
+                  }}
+                  className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                >
+                  Choose Plus
+                </button>
+              </div>
+
+              {/* Card 3: Academic Studio */}
+              <div
+                className={`bg-white dark:bg-slate-900 rounded-lg p-5 border flex flex-col justify-between space-y-4 transition-all shadow-xs ${
+                  selectedPlan === 'studio'
+                    ? 'border-[#2563EB] ring-2 ring-[#2563EB]/20'
+                    : 'border-[#E5E7EB] dark:border-slate-800'
+                }`}
+              >
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-bold text-base text-[#111827] dark:text-white">Academic Studio</h3>
+                    <p className="text-xs text-[#5B6472] mt-0.5">Research, write and produce. Full Studio.</p>
+                  </div>
+                  <div>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦15,000</span>
+                    <span className="text-xs text-[#5B6472]"> / month</span>
+                  </div>
+                  <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Everything in Plus</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Academic Studio editor</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Real-source citation chips</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>Word (.docx) &amp; PDF export</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>1,000 AI credits, 10 GB storage</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPaidPlanNotice(true);
+                  }}
+                  className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+                >
+                  Choose Academic Studio
+                </button>
+              </div>
+            </div>
+
+            {/* Single Primary Action Button below cards per Spec */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleFinishOnboarding}
+                className="w-full py-3 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm"
+              >
+                <span>Go to dashboard</span>
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Non-blocking Notice Modal per Open Decision 3 */}
+      {showPaidPlanNotice && (
+        <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-xl text-left">
+            <div className="space-y-1.5">
+              <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                Available soon
+              </h3>
+              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+                Paid plans are available soon. We've started you on Free so you can begin studying today.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPaidPlanNotice(false)}
+                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -17,6 +17,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Visible keyboard focus for accessibility */
+:focus-visible {
+  outline: 2px solid #2563EB !important;
+  outline-offset: 2px !important;
+}
+
+/* Prevent accidental horizontal overflow across all devices */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 /* Custom scrollbar for clean, distraction-free viewing */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;

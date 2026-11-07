@@ -660,7 +660,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             <span className="text-xs text-slate-400">•</span>
             <span className="text-xs font-semibold text-slate-500">Grading System: {gradingScale.toFixed(2)} Scale</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 tracking-tight mt-1.5">
+          <h1 className="text-2xl sm:text-3xl font-sans font-bold text-slate-900 tracking-tight mt-1.5">
             CGPA Target & Study Planner
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-sans mt-0.5">
@@ -740,202 +740,163 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
       {activeTab === 'overview' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
-          {/* Key Metric Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            
-            {/* Current CGPA */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Current CGPA</span>
-                <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
-                  {semesters.length} {semesters.length === 1 ? 'Period' : 'Periods'}
-                </span>
-              </div>
-              <div className="my-3">
-                <div className="text-3xl font-black text-slate-900 tracking-tight font-serif">
-                  {currentCGPA > 0 ? currentCGPA.toFixed(2) : '0.00'}
-                </div>
-                <p className="text-xs text-slate-500 font-medium mt-1">
-                  {currentCGPA > 0 
-                    ? (currentCGPA >= 4.5 ? 'First Class Standing' : (currentCGPA >= 3.5 ? 'Second Class Upper' : 'Second Class Standing'))
-                    : 'No academic records added yet.'}
-                </p>
-              </div>
-              <button 
-                onClick={() => setActiveTab('records')}
-                className="text-xs text-blue-600 font-semibold hover:underline flex items-center gap-1 cursor-pointer self-start"
-              >
-                <span>Manage Course Records</span>
-                <ChevronRight size={13} />
-              </button>
-            </div>
+          {/* Key Metric Cards per Spec: Current, Target, Projected */}
+          {(() => {
+            const completedUnits = semesters.reduce((sum, s) => sum + (s.totalCredits || 0), 0);
+            const remainingSemesters = Math.max(1, academicConfig.totalSemesters - academicConfig.completedSemesters);
+            const currentSemesterUnits = courses.reduce((sum, c) => sum + (c.units || 0), 0) || 18;
+            const estimatedRemainingUnits = remainingSemesters * currentSemesterUnits;
+            const projectedCGPA = (completedUnits > 0 && targetCGPA > 0)
+              ? ((currentCGPA * completedUnits) + (targetCGPA * estimatedRemainingUnits)) / (completedUnits + estimatedRemainingUnits)
+              : (targetCGPA > 0 ? targetCGPA : currentCGPA > 0 ? currentCGPA : 0.00);
 
-            {/* Target CGPA (Strictly defaults to 0.00 for new users) */}
-            <div className="bg-white p-5 rounded-xl border border-blue-100 bg-blue-50/20 shadow-xs flex flex-col justify-between relative overflow-hidden group">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
-                  <Target size={12} />
-                  Target CGPA Goal
-                  {targetSavedSuccess && (
-                    <span className="text-[9px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-0.5 animate-in fade-in">
-                      <Check size={9} /> Saved
-                    </span>
-                  )}
-                </span>
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 
-                {!isEditingTarget ? (
-                  <button
-                    onClick={() => {
-                      setTempTargetInput(targetCGPA.toFixed(2));
-                      setIsEditingTarget(true);
-                    }}
-                    className="text-[10px] font-semibold text-blue-700 hover:text-blue-900 bg-blue-100/70 px-2.5 py-1 rounded-md cursor-pointer transition-colors"
-                  >
-                    Edit Target
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setIsEditingTarget(false)}
-                    className="text-[10px] font-semibold text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-
-              {!isEditingTarget ? (
-                <div className="my-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-black text-blue-600 tracking-tight font-serif">
-                      {targetCGPA.toFixed(2)}
+                {/* 1. Current CGPA Card */}
+                <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 flex flex-col justify-between col-span-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5B6472]">Current CGPA</span>
+                    <span className="text-[10px] font-semibold text-[#5B6472] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                      {semesters.length} {semesters.length === 1 ? 'Period' : 'Periods'}
                     </span>
-                    <span className="text-xs text-slate-400 font-semibold">/ {gradingScale.toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-slate-600 font-medium mt-1">
-                    {targetCGPA <= 0.00 ? (
-                      <span className="text-amber-600 font-semibold">Goal not configured yet — Click to set your goal</span>
-                    ) : (
-                      currentCGPA >= targetCGPA 
-                        ? 'Target achieved. Outstanding performance.' 
-                        : `${(targetCGPA - currentCGPA).toFixed(2)} point improvement target`
-                    )}
-                  </p>
+                  <div className="my-3">
+                    <div className="text-3xl font-bold text-[#111827] dark:text-white tracking-tight font-sans">
+                      {currentCGPA > 0 ? currentCGPA.toFixed(2) : '0.00'}
+                    </div>
+                    <p className="text-xs text-[#5B6472] font-medium mt-1">
+                      {currentCGPA > 0 
+                        ? (currentCGPA >= 4.5 ? 'First Class Standing' : (currentCGPA >= 3.5 ? 'Second Class Upper' : 'Second Class Standing'))
+                        : 'No academic records added yet.'}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setActiveTab('records')}
+                    className="text-xs text-[#2563EB] font-medium hover:underline flex items-center gap-1 cursor-pointer self-start min-h-[44px]"
+                  >
+                    <span>Manage Course Records</span>
+                    <ChevronRight size={13} />
+                  </button>
                 </div>
-              ) : (
-                <div className="my-2 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.00"
-                      max={gradingScale}
-                      value={tempTargetInput}
-                      onChange={e => setTempTargetInput(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleSaveTargetCGPA(); }}
-                      className="w-24 bg-white border border-slate-300 focus:border-blue-500 rounded-lg px-3 py-1.5 text-base font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-100"
-                      placeholder="0.00"
-                      autoFocus
-                    />
+
+                {/* 2. Target CGPA Card (Shows 0.00 until set) */}
+                <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 flex flex-col justify-between relative col-span-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#2563EB] flex items-center gap-1.5">
+                      <Target size={12} />
+                      Target CGPA
+                      {targetSavedSuccess && (
+                        <span className="text-[9px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded">
+                          Saved
+                        </span>
+                      )}
+                    </span>
+                    
+                    {!isEditingTarget ? (
+                      <button
+                        onClick={() => {
+                          setTempTargetInput(targetCGPA.toFixed(2));
+                          setIsEditingTarget(true);
+                        }}
+                        className="text-[10px] font-medium text-[#2563EB] hover:text-[#1D4ED8] bg-[#EFF6FF] dark:bg-blue-950 px-2 py-1 rounded cursor-pointer min-h-[44px] flex items-center justify-center"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setIsEditingTarget(false)}
+                        className="text-[10px] font-medium text-[#5B6472] hover:text-[#111827] cursor-pointer min-h-[44px] flex items-center justify-center"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+
+                  {!isEditingTarget ? (
+                    <div className="my-3">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-bold text-[#2563EB] tracking-tight font-sans">
+                          {targetCGPA > 0 ? targetCGPA.toFixed(2) : '0.00'}
+                        </span>
+                        <span className="text-xs text-[#5B6472] font-semibold">/ {gradingScale.toFixed(2)}</span>
+                      </div>
+                      <p className="text-xs text-[#5B6472] font-medium mt-1">
+                        {targetCGPA <= 0.00 ? (
+                          <span className="text-[#5B6472]">0.00 until target is set</span>
+                        ) : (
+                          currentCGPA >= targetCGPA 
+                            ? 'Target achieved.' 
+                            : `${(targetCGPA - currentCGPA).toFixed(2)} point target delta`
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="my-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.00"
+                          max={gradingScale}
+                          value={tempTargetInput}
+                          onChange={e => setTempTargetInput(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleSaveTargetCGPA(); }}
+                          className="w-20 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-sm font-bold text-[#111827] dark:text-white outline-none min-h-[44px]"
+                          placeholder="0.00"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleSaveTargetCGPA()}
+                          className="px-3 py-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-medium cursor-pointer min-h-[44px]"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-[#E5E7EB] dark:border-slate-800">
+                    <span className="text-[#5B6472]">Scale: {gradingScale.toFixed(1)}</span>
                     <button
-                      onClick={() => handleSaveTargetCGPA()}
-                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                      onClick={() => setGradingScale(gradingScale === 5.0 ? 4.0 : 5.0)}
+                      className="text-[10px] text-[#2563EB] hover:underline cursor-pointer"
                     >
-                      Save
+                      Switch to {gradingScale === 5.0 ? '4.0' : '5.0'}
                     </button>
                   </div>
-                  <div className="flex items-center gap-1 overflow-x-auto text-[10px] text-slate-500">
-                    <span className="font-semibold text-slate-400">Presets:</span>
-                    {(gradingScale === 5.0 ? [3.50, 4.00, 4.50, 4.80, 5.00] : [3.00, 3.50, 3.80, 4.00]).map(val => (
-                      <button
-                        key={val}
-                        onClick={() => handleSaveTargetCGPA(val)}
-                        className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-blue-600 font-semibold hover:bg-blue-50 cursor-pointer"
-                      >
-                        {val.toFixed(2)}
-                      </button>
-                    ))}
-                  </div>
                 </div>
-              )}
 
-              <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-slate-400">Remaining Semesters:</span>
-                <span className="font-semibold text-slate-800">
-                  {Math.max(1, academicConfig.totalSemesters - academicConfig.completedSemesters)}
-                </span>
-              </div>
-            </div>
-
-            {/* Academic Settings & Scale Card */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Grading System</span>
-                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-semibold">
+                {/* 3. Projected CGPA Card per Spec */}
+                <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 flex flex-col justify-between col-span-2 md:col-span-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5B6472]">Projected</span>
+                    <span className="text-[10px] font-semibold text-[#5B6472] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                      {remainingSemesters} sem left
+                    </span>
+                  </div>
+                  <div className="my-3">
+                    <div className="text-3xl font-bold text-[#111827] dark:text-white tracking-tight font-sans">
+                      {projectedCGPA.toFixed(2)}
+                    </div>
+                    <p className="text-xs text-[#5B6472] font-medium mt-1">
+                      Based on your target and remaining units
+                    </p>
+                  </div>
+                  
+                  {/* Named AI Primary Action Button per Spec */}
                   <button
-                    onClick={() => {
-                      setGradingScale(5.0);
-                      localStorage.setItem('korsiq_cgpa_scale', '5.0');
-                    }}
-                    className={`px-2 py-0.5 rounded ${gradingScale === 5.0 ? 'bg-white text-blue-600 shadow-2xs' : 'text-slate-500'}`}
+                    onClick={runAiAnalysis}
+                    disabled={isAnalyzing}
+                    className="w-full py-2.5 px-3 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
                   >
-                    5.0 Scale
-                  </button>
-                  <button
-                    onClick={() => {
-                      setGradingScale(4.0);
-                      localStorage.setItem('korsiq_cgpa_scale', '4.0');
-                    }}
-                    className={`px-2 py-0.5 rounded ${gradingScale === 4.0 ? 'bg-white text-blue-600 shadow-2xs' : 'text-slate-500'}`}
-                  >
-                    4.0 Scale
+                    {isAnalyzing ? 'Calculating explanation...' : 'Explain my CGPA'}
                   </button>
                 </div>
+
               </div>
-
-              <div className="space-y-2 my-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Academic Level:</span>
-                  <select
-                    value={academicConfig.currentLevel}
-                    onChange={e => updateAcademicConfig({ currentLevel: e.target.value })}
-                    className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-semibold"
-                  >
-                    <option value="100L">100 Level</option>
-                    <option value="200L">200 Level</option>
-                    <option value="300L">300 Level</option>
-                    <option value="400L">400 Level</option>
-                    <option value="500L">500 Level</option>
-                    <option value="Postgraduate">Postgraduate</option>
-                  </select>
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Daily Study Target:</span>
-                  <div className="flex items-center gap-1 font-semibold text-slate-800">
-                    <input
-                      type="number"
-                      min="1"
-                      max="12"
-                      value={academicConfig.preferredStudyHours}
-                      onChange={e => updateAcademicConfig({ preferredStudyHours: parseInt(e.target.value, 10) || 2 })}
-                      className="w-12 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-center text-xs"
-                    />
-                    <span>hrs/day</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={runAiAnalysis}
-                disabled={isAnalyzing}
-                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                <Sparkles size={13} className={isAnalyzing ? 'animate-spin' : 'text-blue-400'} />
-                <span>{isAnalyzing ? 'Analyzing Academic Data...' : 'Run Academic Evaluation'}</span>
-              </button>
-            </div>
-
-          </div>
+            );
+          })()}
 
           {/* Quick Actions & AI Overview Summary */}
           <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-xs">
@@ -947,7 +908,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                   </span>
                   <span className="text-xs text-slate-400">• Grounded Analysis</span>
                 </div>
-                <h3 className="text-xl font-serif font-bold text-slate-900 tracking-tight">
+                <h3 className="text-xl font-sans font-bold text-slate-900 tracking-tight">
                   {targetCGPA <= 0
                     ? "Set your Target CGPA to unlock full academic reasoning"
                     : `Academic Path to ${targetCGPA.toFixed(2)} CGPA`}
@@ -989,7 +950,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-base font-serif font-bold text-slate-900">Academic Records & Transcripts</h3>
+              <h3 className="text-base font-sans font-bold text-slate-900">Academic Records & Transcripts</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Upload official transcripts or past semester results (PDF or photo) to automatically import your grades.
               </p>
@@ -1031,7 +992,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                 <div key={sem.id || sIdx} className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                     <div>
-                      <h4 className="text-base font-serif font-bold text-slate-900">{sem.label}</h4>
+                      <h4 className="text-base font-sans font-bold text-slate-900">{sem.label}</h4>
                       <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-0.5">
                         {sem.courses?.length || 0} Registered Courses • Total Units: {sem.totalCredits || 20}
                       </p>
@@ -1111,7 +1072,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                   ) : (
                     <AlertTriangle size={18} className="text-amber-600" />
                   )}
-                  <h3 className="text-base font-serif font-bold text-slate-900">
+                  <h3 className="text-base font-sans font-bold text-slate-900">
                     {aiAnalysis.isAchievable
                       ? 'Target CGPA is Mathematically Achievable'
                       : 'Target CGPA Requires Adjustment'}
@@ -1162,7 +1123,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
               {/* Strategic Action Checklist */}
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
-                <h4 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wide">
+                <h4 className="text-sm font-sans font-bold text-slate-900 uppercase tracking-wide">
                   Strategic Steps for Academic Excellence
                 </h4>
                 <div className="space-y-2">
@@ -1181,7 +1142,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
               {aiAnalysis.highCreditPriorities && aiAnalysis.highCreditPriorities.length > 0 && (
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-serif font-bold text-slate-900 uppercase tracking-wide">
+                    <h4 className="text-sm font-sans font-bold text-slate-900 uppercase tracking-wide">
                       High-Credit Courses Weighting (Highest Leverage)
                     </h4>
                     <span className="text-[10px] text-slate-400 font-semibold">Priority weighting</span>
@@ -1230,7 +1191,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
             <div>
-              <h3 className="text-base font-serif font-bold text-slate-900">Personalized Weekly Timetable</h3>
+              <h3 className="text-base font-sans font-bold text-slate-900">Personalized Weekly Timetable</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Calculated from your registered courses, credit weights, and cognitive reading techniques.
               </p>
@@ -1346,7 +1307,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
         <div className="space-y-6 animate-in fade-in duration-200">
           
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-            <h3 className="text-base font-serif font-bold text-slate-900">Evidence-Based Academic Techniques</h3>
+            <h3 className="text-base font-sans font-bold text-slate-900">Evidence-Based Academic Techniques</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               KorsIQ leverages cognitive science methodologies to maximize retention, recall speed, and exam performance.
             </p>
@@ -1367,7 +1328,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                     </span>
                   </div>
                   <div>
-                    <h4 className="text-sm font-serif font-bold text-slate-900">{tech.name}</h4>
+                    <h4 className="text-sm font-sans font-bold text-slate-900">{tech.name}</h4>
                     <p className="text-xs text-slate-600 mt-1 leading-relaxed">{tech.desc}</p>
                   </div>
                   <div className="pt-2 border-t border-slate-100 text-[11px]">
@@ -1382,7 +1343,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
           {/* Course-by-Course Revision Plans */}
           {revisionPlans.length > 0 && (
             <div className="space-y-4 pt-2">
-              <h3 className="text-base font-serif font-bold text-slate-900">Personalized Course Revision Blueprints</h3>
+              <h3 className="text-base font-sans font-bold text-slate-900">Personalized Course Revision Blueprints</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {revisionPlans.map((plan, idx) => (
                   <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
@@ -1435,7 +1396,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                 <Sparkles size={16} />
               </span>
               <div>
-                <h3 className="text-sm font-serif font-bold text-slate-900">KorsIQ Academic Mentor</h3>
+                <h3 className="text-sm font-sans font-bold text-slate-900">KorsIQ Academic Mentor</h3>
                 <p className="text-xs text-slate-500">Ask questions regarding your CGPA target, course prioritization, and study schedules.</p>
               </div>
             </div>
@@ -1527,7 +1488,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
         <div className="space-y-6 animate-in fade-in duration-200">
           
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-1">
-            <h3 className="text-base font-serif font-bold text-slate-900">Calendar Integration & Smart Notifications</h3>
+            <h3 className="text-base font-sans font-bold text-slate-900">Calendar Integration & Smart Notifications</h3>
             <p className="text-xs text-slate-500">
               Connect your study timetable to Google Calendar and configure smart reminders so you never miss a revision session.
             </p>
@@ -1697,7 +1658,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
             
             <div className="flex justify-between items-center pb-3 border-b border-slate-100">
               <div>
-                <h3 className="text-base font-serif font-bold text-slate-900">Review Extracted Academic Results</h3>
+                <h3 className="text-base font-sans font-bold text-slate-900">Review Extracted Academic Results</h3>
                 <p className="text-xs text-slate-500">
                   Verify course credit units and grades extracted from your document before adding to your official records.
                 </p>

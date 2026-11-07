@@ -103,3 +103,53 @@ export const DIFFICULTY_COLORS = {
   Medium: 'bg-amber-50 text-amber-700 border-amber-100',
   Hard: 'bg-rose-50 text-rose-700 border-rose-100'
 };
+
+// ==========================================
+// BETA: Plan limits & feature allowances
+// All values below are provisional beta limits pending 30-day review.
+// ==========================================
+export const BETA_PLAN_LIMITS = {
+  free: {
+    name: 'Free',
+    price: '₦0',
+    priceNumeric: 0,
+    tagline: 'Get organised. Track your CGPA and plan your study time.',
+    storageLimitBytes: 500 * 1024 * 1024, // 500 MB (beta)
+    storageLimitDisplay: '500 MB',
+    monthlyUploadsLimit: 15,
+    aiCreditsAllowance: 0,
+    hasStudioAccess: false,
+    canCreateCircles: false, // can join only
+    canExportDocxPdf: false,
+    hasVersionHistory: false
+  },
+  plus: {
+    name: 'Plus',
+    price: '₦7,500 / month',
+    priceNumeric: 7500,
+    tagline: 'Study smarter. More AI help, storage and Lite Studio.',
+    storageLimitBytes: 2 * 1024 * 1024 * 1024, // 2 GB (beta)
+    storageLimitDisplay: '2 GB',
+    monthlyUploadsLimit: 50,
+    aiCreditsAllowance: 250,
+    hasStudioAccess: true, // Lite studio
+    canCreateCircles: true,
+    canExportDocxPdf: true,
+    hasVersionHistory: false
+  },
+  studio: {
+    name: 'Academic Studio',
+    price: '₦15,000 / month',
+    priceNumeric: 15000,
+    tagline: 'Research, write and produce. Full Studio workspace.',
+    storageLimitBytes: 10 * 1024 * 1024 * 1024, // 10 GB (beta)
+    storageLimitDisplay: '10 GB',
+    monthlyUploadsLimit: 200,
+    aiCreditsAllowance: 1000,
+    hasStudioAccess: true,
+    canCreateCircles: true,
+    canExportDocxPdf: true,
+    hasVersionHistory: true
+  }
+} as const;
+
