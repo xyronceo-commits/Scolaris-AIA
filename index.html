@@ -101,18 +101,33 @@
         theme: {
           extend: {
             colors: {
+              // KorsIQ Design System Tokens
+              primary: '#2563EB',      // Primary blue
+              'deep-blue': '#1746A2',  // Deep blue
+              ink: '#111827',          // Ink (body/headings)
+              muted: '#5B6472',        // Muted text
+              'light-blue': '#EFF6FF', // Light blue (active nav/info)
+              border: '#E5E7EB',       // Card and input borders
+              // TODO(confirm status colours)
+              'status-success': '#16A34A',
+              'status-warning': '#D97706',
+              'status-error': '#DC2626',
               brand: {
                 primary: '#2563EB',
-                secondary: '#1D4ED8',
-                surface: '#F1F5F9',
-                bg: '#F8FAFC',
-                border: '#E5E7EB',
-                text: '#111827',
-                muted: '#64748B'
+                deep: '#1746A2',
+                ink: '#111827',
+                muted: '#5B6472',
+                light: '#EFF6FF',
+                border: '#E5E7EB'
               }
             },
+            borderRadius: {
+              DEFAULT: '8px',
+              card: '8px',
+              input: '8px'
+            },
             fontFamily: {
-              sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+              sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
             }
           }
         }

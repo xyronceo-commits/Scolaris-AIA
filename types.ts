@@ -241,7 +241,26 @@ export interface StudyGroup {
   updatedAt?: string;
 }
 
-export type AppState = 'onboarding' | 'dashboard' | 'studio' | 'courses' | 'hub' | 'schedule' | 'timetable' | 'calculator' | 'pomodoro' | 'groups' | 'profile' | 'analytics' | 'library' | 'admin';
+export type AppState = 
+  | 'overview' 
+  | 'dashboard' 
+  | 'planner' 
+  | 'studio' 
+  | 'circles' 
+  | 'groups' 
+  | 'resources' 
+  | 'settings' 
+  | 'courses' 
+  | 'hub' 
+  | 'schedule' 
+  | 'timetable' 
+  | 'calculator' 
+  | 'pomodoro' 
+  | 'profile' 
+  | 'analytics' 
+  | 'library' 
+  | 'admin' 
+  | 'onboarding';
 
 export interface CGPACourseRecord {
   code: string;

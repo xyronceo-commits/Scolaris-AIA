@@ -26,6 +26,8 @@ import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/sup
 import { DBService } from './services/db';
 import { cleanupLegacyApiKeyStorage } from './services/gemini';
 import KorsIQLogo from './components/KorsIQLogo';
+import StudyPlannerView from './components/StudyPlannerView';
+import ResourcesView from './components/ResourcesView';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
@@ -667,6 +669,7 @@ const App: React.FC = () => {
     }
 
     switch (activeTab) {
+      case 'overview':
       case 'dashboard':
         return <Dashboard 
           profile={profile} 
@@ -675,21 +678,104 @@ const App: React.FC = () => {
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
           onNavigate={(tab) => { setActiveTab(tab); }}
         />;
-      case 'courses':
-        return <CourseManager 
-          courses={courses} 
-          setCourses={setCourses} 
-          onScheduleGenerated={(newSchedule) => { setSchedule(newSchedule); setActiveTab('schedule'); }} 
+      case 'planner':
+        return <StudyPlannerView 
+          initialTab="courses"
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
           profile={profile}
-        />;
-      case 'schedule':
-        return <ScheduleView 
-          schedule={schedule} 
-          courses={courses} 
+          onUpdateProfile={handleSaveProfile}
+          addNotification={addNotification}
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          hubs={hubs}
+        />;
+      case 'courses':
+        return <StudyPlannerView 
+          initialTab="courses"
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          profile={profile}
+          onUpdateProfile={handleSaveProfile}
+          addNotification={addNotification}
+          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          hubs={hubs}
+        />;
+      case 'calculator':
+        return <StudyPlannerView 
+          initialTab="cgpa"
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          profile={profile}
+          onUpdateProfile={handleSaveProfile}
+          addNotification={addNotification}
+          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          hubs={hubs}
         />;
       case 'timetable':
-        return <TimetableView schedule={schedule} courses={courses} />;
+        return <StudyPlannerView 
+          initialTab="timetable"
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          profile={profile}
+          onUpdateProfile={handleSaveProfile}
+          addNotification={addNotification}
+          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          hubs={hubs}
+        />;
+      case 'schedule':
+        return <StudyPlannerView 
+          initialTab="revision"
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          profile={profile}
+          onUpdateProfile={handleSaveProfile}
+          addNotification={addNotification}
+          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          hubs={hubs}
+        />;
+      case 'analytics':
+        return <StudyPlannerView 
+          initialTab="analytics"
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          profile={profile}
+          onUpdateProfile={handleSaveProfile}
+          addNotification={addNotification}
+          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={toggleTheme}
+          hubs={hubs}
+        />;
+      case 'resources':
+      case 'library':
+        return <ResourcesView 
+          courses={courses}
+          groups={groups}
+          profile={profile}
+          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+        />;
       case 'hub':
         return <StudyHub 
           courses={courses} 
@@ -702,6 +788,7 @@ const App: React.FC = () => {
           addNotification={addNotification}
           onCourseIdChange={setSelectedCourseId}
         />;
+      case 'circles':
       case 'groups':
         return <StudyGroups 
           profile={profile} 
@@ -717,32 +804,9 @@ const App: React.FC = () => {
           setProfile={handleSaveProfile} 
           onNavigateTab={(tab) => setActiveTab(tab as AppState)} 
         />;
-      case 'calculator':
-        return <CGPACalculator 
-          profile={profile} 
-          onUpdateProfile={handleSaveProfile}
-          courses={courses}
-          schedule={schedule}
-          setSchedule={setSchedule}
-          addNotification={addNotification}
-          onOpenHub={(courseId) => {
-            setSelectedCourseId(courseId);
-            setActiveTab('hub');
-          }}
-        />;
       case 'pomodoro':
-      case 'library':
         return <PomodoroTimer />;
-      case 'analytics':
-        return <AnalyticsView 
-          courses={courses} 
-          schedule={schedule} 
-          profile={profile} 
-          hubs={hubs}
-          isDarkMode={isDarkMode}
-          onToggleTheme={toggleTheme}
-          setCourses={setCourses}
-        />;
+      case 'settings':
       case 'profile':
         return <Profile profile={profile} setProfile={handleSaveProfile} onSignOut={handleSignOut} onDelete={deleteAccount} />;
       default:
@@ -756,57 +820,78 @@ const App: React.FC = () => {
     }
   };
 
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: ICONS.Dashboard },
+  // Spec Desktop Sidebar (Exactly 6 destinations)
+  const desktopNavItems = [
+    { id: 'overview', label: 'Overview', icon: ICONS.Dashboard },
+    { id: 'planner', label: 'Study Planner', icon: ICONS.Courses },
     { id: 'studio', label: 'Academic Studio', icon: ICONS.Studio },
-    { id: 'courses', label: 'Courses', icon: ICONS.Courses },
-    { id: 'schedule', label: 'Schedule', icon: ICONS.Schedule },
-    { id: 'hub', label: 'Study Hub', icon: ICONS.StudyHub },
-    { id: 'groups', label: 'Circles', icon: ICONS.Groups },
-    { id: 'calculator', label: 'CGPA & Planner', icon: ICONS.Calculator },
-    { id: 'analytics', label: 'Analytics', icon: ICONS.Analytics },
-    { id: 'pomodoro', label: 'Study Timer', icon: ICONS.Pomodoro },
+    { id: 'circles', label: 'Private Circles', icon: ICONS.Groups },
+    { id: 'resources', label: 'Resources', icon: ICONS.Library },
+    { id: 'settings', label: 'Settings', icon: ICONS.Settings },
   ];
 
-  const currentNavTitle = navItems.find(item => item.id === activeTab)?.label || 'Workspace';
+  // Spec Mobile Bottom Bar (Exactly 5 destinations)
+  const mobileNavItems = [
+    { id: 'overview', label: 'Home', icon: ICONS.Dashboard },
+    { id: 'planner', label: 'Planner', icon: ICONS.Courses },
+    { id: 'studio', label: 'Studio', icon: ICONS.Studio },
+    { id: 'circles', label: 'Circles', icon: ICONS.Groups },
+    { id: 'resources', label: 'Library', icon: ICONS.Library },
+  ];
+
+  const isNavActive = (id: string) => {
+    if (id === 'overview') return activeTab === 'overview' || activeTab === 'dashboard';
+    if (id === 'planner') return ['planner', 'courses', 'schedule', 'timetable', 'calculator', 'analytics'].includes(activeTab);
+    if (id === 'studio') return activeTab === 'studio';
+    if (id === 'circles') return activeTab === 'circles' || activeTab === 'groups';
+    if (id === 'resources') return activeTab === 'resources' || activeTab === 'library' || activeTab === 'hub';
+    if (id === 'settings') return activeTab === 'settings' || activeTab === 'profile';
+    return activeTab === id;
+  };
+
+  const currentNavTitle = desktopNavItems.find(item => isNavActive(item.id))?.label || 'Overview';
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden relative">
-      {/* Mobile Top Header Bar */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-40">
-        <div className="flex items-center gap-2.5">
+    <div className="flex h-screen bg-[#F8FAFC] dark:bg-slate-950 font-sans text-[#111827] dark:text-slate-100 overflow-hidden relative">
+      {/* Mobile Top Header Bar per Spec (Logo, Bell, Initials Avatar) */}
+      <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-slate-900 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between px-3 z-40">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setIsSidebarOpen(true)}
             aria-label="Open navigation menu"
-            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors"
+            className="p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-[#5B6472] dark:text-slate-300 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
           >
-            <Menu size={18} />
+            <Menu size={20} />
           </button>
           <KorsIQLogo variant="full" size={28} />
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Toggle theme"
-          >
-            {isDarkMode ? <Sun size={17} className="text-amber-500" /> : <Moon size={17} className="text-slate-600" />}
-          </button>
-
+        <div className="flex items-center gap-1">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             aria-label="Notifications"
-            className={`p-2 rounded-lg transition-colors relative ${
+            className={`p-2.5 rounded-lg transition-colors relative min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer ${
               showNotifications 
-                ? 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400' 
-                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-400' 
+                : 'text-[#5B6472] dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             {ICONS.Bell}
             {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full" />
+              <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-[#2563EB] rounded-full" />
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('settings')}
+            aria-label="Account Settings"
+            className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+          >
+            <UserAvatar 
+              name={profile?.name || 'User'}
+              size="xs"
+              useInitials
+            />
           </button>
         </div>
       </header>
@@ -819,26 +904,27 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Sidebar Drawer */}
+      {/* Desktop Fixed Sidebar Drawer (Exactly 6 destinations) */}
       <aside className={`
-        fixed inset-y-0 left-0 w-64 bg-white dark:bg-slate-900 z-50 flex flex-col border-r border-slate-200 dark:border-slate-800
+        fixed inset-y-0 left-0 w-64 bg-white dark:bg-slate-900 z-50 flex flex-col border-r border-[#E5E7EB] dark:border-slate-800
         transform transition-transform duration-200 ease-in-out lg:static lg:translate-x-0
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-200 dark:border-slate-800">
+        <div className="h-16 flex items-center justify-between px-5 border-b border-[#E5E7EB] dark:border-slate-800">
           <KorsIQLogo variant="full" size={32} showSubtitle />
           <button 
             onClick={() => setIsSidebarOpen(false)}
             aria-label="Close sidebar"
-            className="lg:hidden p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 transition-colors"
+            className="lg:hidden p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-[#5B6472] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <X size={18} />
           </button>
         </div>
         
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = activeTab === item.id;
+        {/* Navigation Items: Light blue bg with Primary blue text/icon when active */}
+        <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
+          {desktopNavItems.map((item) => {
+            const isActive = isNavActive(item.id);
             return (
               <button
                 key={item.id}
@@ -846,13 +932,13 @@ const App: React.FC = () => {
                   setActiveTab(item.id as AppState);
                   if (window.innerWidth < 1024) setIsSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors min-h-[44px] cursor-pointer ${
                   isActive 
-                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold' 
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                    ? 'bg-[#EFF6FF] text-[#2563EB] font-semibold dark:bg-blue-950/60 dark:text-blue-400' 
+                    : 'text-[#5B6472] dark:text-slate-400 hover:text-[#111827] dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/60'
                 }`}
               >
-                <div className={isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}>
+                <div className={isActive ? 'text-[#2563EB] dark:text-blue-400' : 'text-[#5B6472] dark:text-slate-400'}>
                   {item.icon}
                 </div>
                 <span>{item.label}</span>
@@ -862,13 +948,13 @@ const App: React.FC = () => {
         </nav>
 
         {/* Sidebar Footer */}
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+        <div className="p-3 border-t border-[#E5E7EB] dark:border-slate-800 space-y-2">
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-[#5B6472] dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer min-h-[44px]"
           >
             <span className="flex items-center gap-2">
-              {isDarkMode ? <Sun size={15} className="text-amber-500" /> : <Moon size={15} className="text-slate-600" />}
+              {isDarkMode ? <Sun size={15} className="text-amber-500" /> : <Moon size={15} className="text-[#5B6472]" />}
               <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
             </span>
             <span className="text-[10px] font-mono uppercase text-slate-400">
@@ -879,27 +965,27 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between pt-1">
             <button 
               onClick={() => {
-                setActiveTab('profile');
+                setActiveTab('settings');
                 if (window.innerWidth < 1024) setIsSidebarOpen(false);
               }}
-              className={`flex-1 flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                activeTab === 'profile' 
-                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold' 
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              className={`flex-1 flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors min-h-[44px] cursor-pointer ${
+                isNavActive('settings') 
+                  ? 'bg-[#EFF6FF] text-[#2563EB] font-semibold dark:bg-blue-950/60 dark:text-blue-400' 
+                  : 'text-[#111827] dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               <UserAvatar 
-                avatarIcon={profile?.avatarIcon || 'graduation-cap'} 
                 name={profile?.name || 'Profile'}
                 size="xs"
+                useInitials
                 showStatus
                 isOnline={dbConnected ?? true}
               />
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-slate-900 dark:text-white truncate">
+                <p className="text-xs font-medium text-[#111827] dark:text-white truncate">
                   {profile?.name || 'Profile'}
                 </p>
-                <p className="text-[10px] text-slate-400 truncate">
+                <p className="text-[10px] text-[#5B6472] truncate">
                   {profile?.university || 'Student'}
                 </p>
               </div>
@@ -914,7 +1000,7 @@ const App: React.FC = () => {
               }}
               title="Admin Portal"
               aria-label="Admin Portal"
-              className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer ml-1"
+              className="p-2.5 text-[#5B6472] hover:text-[#111827] dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer ml-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
             >
               <Shield size={16} />
             </button>
@@ -925,56 +1011,58 @@ const App: React.FC = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Desktop Top Header Bar */}
-        <header className="hidden lg:flex h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 items-center justify-between px-8 z-20 shrink-0">
+        <header className="hidden lg:flex h-16 bg-white dark:bg-slate-900 border-b border-[#E5E7EB] dark:border-slate-800 items-center justify-between px-8 z-20 shrink-0">
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400 font-medium">KorsIQ</span>
-            <span className="text-slate-300 dark:text-slate-700">/</span>
-            <span className="text-slate-900 dark:text-slate-100 font-semibold">{currentNavTitle}</span>
+            <span className="text-[#5B6472] font-medium">KorsIQ</span>
+            <span className="text-[#E5E7EB] dark:text-slate-700">/</span>
+            <span className="text-[#111827] dark:text-slate-100 font-semibold">{currentNavTitle}</span>
           </div>
 
           <div className="flex items-center gap-3">
             {/* Notifications Trigger */}
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`p-2 rounded-lg transition-colors relative ${
+              className={`p-2.5 rounded-lg transition-colors relative min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer ${
                 showNotifications 
-                  ? 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400' 
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-400' 
+                  : 'text-[#5B6472] hover:text-[#111827] dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
               title="Notifications"
+              aria-label="Notifications"
             >
               {ICONS.Bell}
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full" />
+                <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-[#2563EB] rounded-full" />
               )}
             </button>
 
             {/* Profile Avatar Pill */}
             <button
-              onClick={() => setActiveTab('profile')}
-              className="flex items-center gap-2 p-1 pl-2 pr-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors cursor-pointer"
+              onClick={() => setActiveTab('settings')}
+              className="flex items-center gap-2 p-1 pl-2 pr-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors cursor-pointer min-h-[44px]"
+              aria-label="Open Settings"
             >
               <UserAvatar 
-                avatarIcon={profile?.avatarIcon || 'graduation-cap'} 
                 name={profile?.name || 'Profile'}
                 size="xs"
+                useInitials
               />
-              <span className="text-xs font-medium text-slate-800 dark:text-slate-200">
-                {profile?.name ? profile.name.split(' ')[0] : 'Profile'}
+              <span className="text-xs font-medium text-[#111827] dark:text-slate-200">
+                {profile?.name ? profile.name.split(' ')[0] : 'Settings'}
               </span>
             </button>
           </div>
         </header>
 
         {/* Scrollable Main Area */}
-        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative pt-14 lg:pt-0 pb-20 lg:pb-8">
+        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-slate-950 text-[#111827] dark:text-slate-100 relative pt-14 lg:pt-0 pb-20 lg:pb-8">
           {showNotifications && (
-            <div className="absolute top-4 right-4 sm:right-8 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-xl z-50 overflow-hidden">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
+            <div className="absolute top-4 right-4 sm:right-8 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 shadow-xl rounded-lg z-50 overflow-hidden">
+              <div className="p-4 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-900 dark:text-slate-100">Notifications</h3>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#111827] dark:text-slate-100">Notifications</h3>
                   {unreadCount > 0 && (
-                    <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded-full border border-blue-200">
+                    <span className="px-2 py-0.5 bg-[#EFF6FF] text-[#2563EB] text-[10px] font-bold rounded-full border border-blue-200">
                       {unreadCount} new
                     </span>
                   )}
@@ -984,14 +1072,18 @@ const App: React.FC = () => {
                     <button 
                       onClick={handleMarkAllAsReadAnimated}
                       disabled={isMarkingAllRead}
-                      className="text-[11px] font-medium text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      className="text-[11px] font-medium text-[#2563EB] hover:text-[#1D4ED8] transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50 min-h-[44px] px-2"
                       title="Mark all notifications as read"
                     >
                       <CheckCheck size={13} />
                       <span>{isMarkingAllRead ? 'Marking...' : 'Mark all read'}</span>
                     </button>
                   )}
-                  <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-md">
+                  <button 
+                    onClick={() => setShowNotifications(false)} 
+                    className="text-[#5B6472] hover:text-[#111827] transition-colors p-2 rounded-md min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                    aria-label="Close notifications"
+                  >
                     <X size={14} />
                   </button>
                 </div>
@@ -999,10 +1091,10 @@ const App: React.FC = () => {
 
               <div 
                 ref={notificationScrollRef}
-                className="max-h-[380px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800"
+                className="max-h-[380px] overflow-y-auto divide-y divide-[#E5E7EB] dark:divide-slate-800"
               >
                 {notifications.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400 font-medium">
+                  <div className="p-8 text-center text-xs text-[#5B6472] font-medium">
                     No notifications yet.
                   </div>
                 ) : (
@@ -1017,20 +1109,20 @@ const App: React.FC = () => {
                           setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, read: true } : notif));
                         }}
                         className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer flex items-start gap-3 ${
-                          isUnread ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''
+                          isUnread ? 'bg-[#EFF6FF]/50 dark:bg-blue-950/20' : ''
                         }`}
                       >
-                        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${isUnread ? 'bg-blue-600' : 'bg-transparent'}`} />
+                        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${isUnread ? 'bg-[#2563EB]' : 'bg-transparent'}`} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
-                            <h4 className={`text-xs ${isUnread ? 'font-semibold text-slate-900 dark:text-slate-100' : 'font-medium text-slate-700 dark:text-slate-300'} truncate`}>
+                            <h4 className={`text-xs ${isUnread ? 'font-semibold text-[#111827] dark:text-slate-100' : 'font-medium text-slate-700 dark:text-slate-300'} truncate`}>
                               {n.title}
                             </h4>
-                            <span className="text-[10px] text-slate-400 shrink-0">
+                            <span className="text-[10px] text-[#5B6472] shrink-0">
                               {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                          <p className="text-xs text-[#5B6472] dark:text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
                             {n.message}
                           </p>
                         </div>
@@ -1044,7 +1136,7 @@ const App: React.FC = () => {
                 <button 
                   onClick={handleClearAllAnimated}
                   disabled={isClearingNotifications}
-                  className="w-full p-2.5 text-xs font-medium text-rose-600 hover:bg-rose-50 border-t border-slate-200 dark:border-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  className="w-full p-2.5 text-xs font-medium text-rose-600 hover:bg-rose-50 border-t border-[#E5E7EB] dark:border-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 min-h-[44px]"
                 >
                   <Trash2 size={12} />
                   <span>{isClearingNotifications ? 'Clearing...' : 'Clear all'}</span>
@@ -1066,22 +1158,16 @@ const App: React.FC = () => {
           )}
         </main>
 
-        {/* Mobile Pinned Bottom Navigation Bar */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 grid grid-cols-5 z-40 px-1">
-          {[
-            { id: 'dashboard', label: 'Dashboard', icon: ICONS.Dashboard },
-            { id: 'studio', label: 'Studio', icon: ICONS.Studio },
-            { id: 'groups', label: 'Circles', icon: ICONS.Groups },
-            { id: 'calculator', label: 'CGPA', icon: ICONS.Calculator },
-            { id: 'profile', label: 'Profile', icon: ICONS.User },
-          ].map((item) => {
-            const isActive = activeTab === item.id;
+        {/* Mobile Pinned Bottom Navigation Bar (Exactly 5 destinations per Spec) */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-[#E5E7EB] dark:border-slate-800 grid grid-cols-5 z-40 px-1">
+          {mobileNavItems.map((item) => {
+            const isActive = isNavActive(item.id);
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as AppState)}
-                className={`flex flex-col items-center justify-center py-1 transition-colors ${
-                  isActive ? 'text-blue-600 dark:text-blue-400 font-semibold' : 'text-slate-500 dark:text-slate-400'
+                className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[44px] cursor-pointer ${
+                  isActive ? 'text-[#2563EB] dark:text-blue-400 font-semibold' : 'text-[#5B6472] dark:text-slate-400'
                 }`}
               >
                 <div className="scale-90">{item.icon}</div>

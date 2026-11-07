@@ -47,3 +47,18 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Decision 3 (Status Colors):** Provisional tokens configured for success, warning, error, marked `TODO(confirm status colours)`. Always paired with icon and words.
 - **Decision 4 (Plans & Payments):** Displaying Free (₦0), Plus (₦7,500/mo), Academic Studio (₦15,000/mo). Selecting paid triggers non-blocking "Available soon" modal and preserves Free. No checkout.
 - **Decision 5 (Plan Limits):** Beta constants placed in `constants.tsx` with `// BETA` marker. No final hardcoding.
+
+---
+
+## Phase 1: Tokens and App Shell
+
+- **Color & Style Tokens:** Defined in `index.html` `tailwind.config` with Primary blue `#2563EB`, Deep blue `#1746A2`, Ink `#111827`, Muted `#5B6472`, Light blue `#EFF6FF`, Border `#E5E7EB`, and provisional status tokens marked `TODO(confirm status colours)`.
+- **BETA Limits:** Added `BETA_PLAN_LIMITS` into `constants.tsx` with `// BETA` comment.
+- **Desktop Sidebar:** Fixed left sidebar featuring exactly six destinations in order: Overview, Study Planner, Academic Studio, Private Circles, Resources, Settings. Active item uses Light blue background (`bg-[#EFF6FF]`) with Primary blue text & icon.
+- **Mobile Navigation:** Bottom navigation bar featuring exactly five destinations: Home, Planner, Studio, Circles, Library.
+- **Headers:** 
+  - Mobile top header bar includes KorsIQ logo, notification bell with unread badge, and student initials avatar (tapping opens Settings).
+  - Desktop top header bar includes breadcrumb path, theme toggle, notification bell with unread badge, and user initials avatar pill.
+- **Touch Targets & Radius:** 44px min touch target on all controls, 8px default corner radius, sans-serif typography (no serif headings).
+- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
