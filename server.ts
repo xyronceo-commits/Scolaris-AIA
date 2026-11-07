@@ -2160,7 +2160,7 @@ You MUST return a JSON object containing structured study assets with this exact
 
   // Advanced Academic AI Companion / tutoring endpoint
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
-    const { messages, courseContext, fileContent } = req.body;
+    const { messages, courseContext, fileContent, academicProfile } = req.body;
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
@@ -2169,12 +2169,39 @@ You MUST return a JSON object containing structured study assets with this exact
         });
       }
 
-      let systemPrompt = `You are KorsIQ Academic Chatbot, an elite, highly supportive personal AI tutor and academic study master.
-Your goal is to guide students to intellectual mastery through deep explanation, clear step-by-step logic, and encouraging dialogue.
-Keep your responses well-structured and easy to read. Let's make learning engaging!`;
+      const dept = academicProfile?.department?.trim() || '';
+      const uni = academicProfile?.university?.trim() || academicProfile?.institution?.trim() || '';
+      const level = academicProfile?.level?.trim() || 'Undergraduate';
+      const registeredCourses = Array.isArray(academicProfile?.registeredCourses) && academicProfile.registeredCourses.length > 0 
+        ? academicProfile.registeredCourses.join(', ')
+        : '';
+
+      let systemPrompt = `You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.`;
+
+      if (dept) {
+        systemPrompt += `\n\nDISCIPLINE & ACADEMIC SPECIALIZATION:
+You are assisting a university student specializing in ${dept}${uni ? ` at ${uni}` : ''} at the ${level} level.
+${registeredCourses ? `Registered Courses: ${registeredCourses}` : ''}
+
+ACADEMIC RIGOR & INSTRUCTIONAL STANDARDS:
+1. Department-Specific Reasoning: Demonstrate deep, subject-specific expertise in ${dept}. Adapt explanations, terminology, methodologies, and technical formulations directly to this discipline (e.g. for Building Technology, ground explanations in structural mechanics, construction management, materials science, and building services; for Computer Science, ground in algorithms, computational complexity, systems architecture, and engineering patterns; for Law, ground in jurisprudence, statutory interpretation, case law, and procedural doctrine; for Medicine/Nursing, ground in pathophysiology, clinical pharmacology, and evidence-based practice).
+2. Intellectual Depth: Never provide shallow, generic, or conversational filler responses. Provide thorough, step-by-step academic analysis with rigorous conceptual foundations.
+3. Practical Application & Case Examples: Illustrate abstract concepts with practical, discipline-specific applications and real-world scenarios relevant to the student's field.
+4. Diagnostic Pedagogical Support: Probe conceptual misunderstandings, highlight common student misconceptions in the subject, and ask incisive clarification questions when an academic question lacks necessary parameters.
+5. Absolute Academic Integrity: Clearly distinguish established empirical facts/laws from theoretical assumptions. Never fabricate citations, data, or experimental results. If a reference or specific campus guideline is unknown, explicitly state what is verifiable.
+6. Contextual Balance: Use the student's discipline as foundational academic context without forcing unrelated general questions into an artificial department framing.`;
+      } else {
+        systemPrompt += `\n\nACADEMIC RIGOR & INSTRUCTIONAL STANDARDS:
+1. Intellectual Depth: Guide university students to intellectual mastery through deep conceptual explanation, clear step-by-step logic, and rigorous academic reasoning.
+2. Subject Precision: Use precise academic terminology and avoid shallow, generic summaries.
+3. Practical Application: Illustrate abstract theories with concrete, structured examples.
+4. Academic Integrity: Always distinguish established facts from assumptions; never invent citations or unverified data.`;
+      }
 
       if (courseContext) {
-        systemPrompt += `\n\nCOURSE DETAILS: You are currently assisting the student in studying for: ${courseContext}. Refer to specific aspects of this class if relevant!`;
+        systemPrompt += `\n\nACTIVE COURSE CONTEXT:
+The student is currently working on: "${courseContext}".
+Focus your analysis, definitions, and problem-solving techniques on the scope and curriculum of this course.`;
       }
 
       if (fileContent && typeof fileContent === 'string' && fileContent.trim().length > 0) {

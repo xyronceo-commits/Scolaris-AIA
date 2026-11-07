@@ -164,7 +164,39 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 
 ---
 
-## Phase 9: Polish and QA
+## Phase 10: Task Management, Notification Persistence, Mobile UX & Department-Specific AI
+
+- **Overview Academic Task Management:**
+  - Created migration `supabase/migrations/20261107_academic_tasks_and_notifications.sql` adding `academic_tasks` with full RLS.
+  - Built [TaskModal.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/components/TaskModal.tsx) supporting Assignments, Revision sessions, Examinations, Academic deadlines, and General study tasks.
+  - Implemented form fields: Title, Description, Category, Due date, Due time, Priority (Low, Medium, High, Urgent), Reminder preference (None, At event time, 15m, 1h, 1d), Course selector.
+  - Integrated into [Dashboard.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/components/Dashboard.tsx) with filtering (Today, Pending, All, Completed), overdue warning tags, instant completion toggles, and edit/delete actions.
+  - Synchronized academic deadlines and exams directly into the Upcoming Deadlines view.
+- **Notification Permissions & Persistent Read/Unread State:**
+  - Added `user_notifications` table in Supabase with RLS to make the database the persistent single source of truth.
+  - Pre-permission explanation banner in [App.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/App.tsx) explaining why notification access is needed for upcoming deadlines and study reminders before prompting browser permission.
+  - Configurable notification preferences in [Profile.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/components/Profile.tsx) including browser push notifications and task reminders.
+  - Persistent read-state: opening/clicking a notification immediately marks it as read in the database via `DBService.markNotificationAsRead`; unread counts and read states survive page refreshes and reloads.
+- **Mobile Navigation — Completely Remove Sidebar:**
+  - Removed the sidebar drawer and hamburger menu completely on mobile viewports (< 768px / `< md`).
+  - Mobile interface exclusively uses the fixed 5-destination bottom navigation bar with `pb-24` padding so no content is obscured.
+  - Desktop and tablet screens (>= 768px / `md:`) retain the fixed, accessible 6-destination sidebar.
+- **Mobile AI Chatbot Widget Positioning:**
+  - Repositioned the floating AI chatbot button in [ScolarisChatWidget.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/components/ScolarisChatWidget.tsx) from `bottom-6 right-6` to `fixed bottom-20 right-4 md:bottom-6 md:right-6`.
+  - Floating chatbot now sits comfortably above the 64px bottom navigation bar on mobile, never obstructing the Library tab.
+  - Chat window opens cleanly with `bottom-20` on mobile, keeping bottom navigation fully visible.
+- **Plan Pages — Back Navigation:**
+  - Added a clearly visible `ArrowLeft` back button in the header of the Choose a Plan modal and Available Soon dialog in [Profile.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/components/Profile.tsx).
+  - Works across desktop, tablet, and mobile, allowing users to return cleanly to their previous context.
+- **Department-Specific Academic AI Expertise:**
+  - Updated [ScolarisChatWidget.tsx](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/components/ScolarisChatWidget.tsx) and [gemini.ts](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/services/gemini.ts) to transmit the student's academic profile (department, institution, academic level, registered courses, active course, and source materials).
+  - Enhanced server-side AI prompt in [server.ts](file:///C:/Users/User/Downloads/Scolaris-AIA-main/SCOLARIS-GIT/server.ts) with specialized discipline reasoning (e.g. Building Technology, Law, Computer Science, Engineering, Medicine) providing deep conceptual foundations, practical examples, and diagnostic academic inquiry.
+- **Dark Mode Global Contrast Fix:**
+  - Fixed low-contrast dim text across the entire application in `index.css`.
+  - Muted text elevates to `#94A3B8` (7.4:1 contrast ratio against dark backgrounds).
+  - Primary text elevates to `#F8FAFC`, borders to `#1E293B`, inputs and dropdowns styled with visible `#334155` borders.
+  - Light mode remains 100% unchanged.
+
 
 - **Real Empty and Loading States across all views:**
   - **Overview / Dashboard:** Dedicated, friendly empty states with action triggers for Today's priorities ("No tasks scheduled for today"), Upcoming deadlines ("No upcoming deadlines recorded"), Study schedule ("No schedule generated yet"), and Recent documents ("No academic papers created yet. Start writing in Studio →").

@@ -17,6 +17,73 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ========================================================= */
+/* KORSIQ ACCESSIBLE DARK MODE SYSTEM TOKENS & CONTRAST FIX  */
+/* ========================================================= */
+html.dark, html.dark body {
+  background-color: #0B0F17 !important;
+  color: #F8FAFC !important;
+}
+
+/* Elevate low-contrast text in dark mode (WCAG AAA compliant) */
+.dark .text-\[\#111827\],
+.dark .text-ink {
+  color: #F8FAFC !important;
+}
+
+.dark .text-\[\#5B6472\],
+.dark .text-muted {
+  color: #94A3B8 !important;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: #94A3B8 !important;
+}
+
+/* Ensure clean, visible borders in dark mode */
+.dark .border-\[\#E5E7EB\],
+.dark .border-border,
+.dark .border-slate-200 {
+  border-color: #1E293B !important;
+}
+
+/* Ensure cards and modals have proper dark slate backgrounds */
+.dark .bg-white {
+  background-color: #0F172A !important;
+}
+
+.dark .bg-\[\#F8FAFC\],
+.dark .bg-slate-50 {
+  background-color: #0B0F17 !important;
+}
+
+.dark .bg-\[\#EFF6FF\] {
+  background-color: rgba(30, 58, 138, 0.35) !important;
+  color: #93C5FD !important;
+}
+
+/* Form inputs and dropdowns high-contrast accessibility */
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark select,
+.dark textarea {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748B !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #2563EB !important;
+  outline: none;
+}
+
 /* Visible keyboard focus for accessibility */
 :focus-visible {
   outline: 2px solid #2563EB !important;

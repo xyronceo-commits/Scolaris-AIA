@@ -25,12 +25,14 @@ export interface NotificationSettings {
   browserPush?: boolean;
   reminderIntervalMinutes?: number;
   examReminders?: boolean;
+  taskReminders?: boolean;
 }
 
-export type NotificationType = 'message' | 'session' | 'content';
+export type NotificationType = 'message' | 'session' | 'content' | 'task';
 
 export interface AppNotification {
   id: string;
+  userId?: string;
   type: NotificationType;
   title: string;
   message: string;
@@ -38,6 +40,28 @@ export interface AppNotification {
   read: boolean;
   link?: AppState;
   metadata?: any;
+  createdAt?: string;
+}
+
+export type TaskCategory = 'assignment' | 'revision' | 'exam' | 'deadline' | 'general';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type TaskReminder = 'none' | 'at_time' | '15_min' | '1_hour' | '1_day';
+
+export interface AcademicTask {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  category: TaskCategory;
+  dueDate: string; // YYYY-MM-DD
+  dueTime?: string; // HH:mm
+  priority: TaskPriority;
+  reminder: TaskReminder;
+  completed: boolean;
+  completedAt?: string;
+  courseId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UserProfile {

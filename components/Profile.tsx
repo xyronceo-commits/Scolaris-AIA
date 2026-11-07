@@ -6,6 +6,7 @@ import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
 import { 
   ArrowRight, 
+  ArrowLeft,
   LogOut, 
   Sparkles, 
   X, 
@@ -13,7 +14,8 @@ import {
   AlertCircle,
   HardDrive,
   CreditCard,
-  Crown
+  Crown,
+  Bell
 } from 'lucide-react';
 
 interface ProfileProps {
@@ -403,11 +405,12 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 { id: 'messages', label: 'Group Messages', desc: 'Alerts for new discussions in study circles', value: profile.notifications?.messages ?? true },
                 { id: 'sessions', label: 'Upcoming Sessions', desc: 'Reminders for your scheduled study times', value: profile.notifications?.sessions ?? true },
                 { id: 'aiContent', label: 'AI Readiness', desc: 'Alerts when generated study materials are ready', value: profile.notifications?.aiContent ?? true },
+                { id: 'taskReminders', label: 'Task & Exam Deadlines', desc: 'Alerts for upcoming assignments, revisions, and exams', value: profile.notifications?.taskReminders ?? true },
               ].map(notif => (
                 <div key={notif.id} className="flex items-center justify-between py-1">
                   <div className="space-y-0.5">
                     <h4 className="text-xs font-semibold text-[#111827] dark:text-white">{notif.label}</h4>
-                    <p className="text-[11px] text-[#5B6472]">{notif.desc}</p>
+                    <p className="text-[11px] text-[#5B6472] dark:text-slate-400">{notif.desc}</p>
                   </div>
                   <button 
                     type="button"
@@ -417,6 +420,9 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                         messages: profile.notifications?.messages ?? true,
                         sessions: profile.notifications?.sessions ?? true,
                         aiContent: profile.notifications?.aiContent ?? true,
+                        examReminders: profile.notifications?.examReminders ?? true,
+                        taskReminders: profile.notifications?.taskReminders ?? true,
+                        browserPush: profile.notifications?.browserPush ?? false,
                         [notif.id]: !notif.value
                       }
                     })}
@@ -427,6 +433,46 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   </button>
                 </div>
               ))}
+
+              {/* Browser Push Permission Setting */}
+              <div className="pt-3 border-t border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <h4 className="text-xs font-semibold text-[#111827] dark:text-white flex items-center gap-1.5">
+                    <Bell size={13} className="text-[#2563EB]" />
+                    <span>Browser Push Notifications</span>
+                  </h4>
+                  <p className="text-[11px] text-[#5B6472] dark:text-slate-400">
+                    {typeof window !== 'undefined' && 'Notification' in window
+                      ? Notification.permission === 'granted'
+                        ? 'Active — Browser notifications are allowed'
+                        : Notification.permission === 'denied'
+                        ? 'Blocked — Enable in browser address bar permissions'
+                        : 'Unconfigured — Request permission for background alerts'
+                      : 'Not supported on this browser'}
+                  </p>
+                </div>
+                {typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const perm = await Notification.requestPermission();
+                        if (perm === 'granted') {
+                          setProfile({
+                            ...profile,
+                            notifications: { ...profile.notifications, browserPush: true }
+                          });
+                        }
+                      } catch (err) {
+                        console.warn('Permission request failed:', err);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-[#EFF6FF] dark:bg-blue-950/60 text-[#2563EB] dark:text-blue-400 font-semibold text-xs rounded-lg border border-blue-200 dark:border-blue-900 min-h-[36px] hover:bg-blue-100 cursor-pointer"
+                  >
+                    Enable browser alerts
+                  </button>
+                )}
+              </div>
             </div>
           </section>
 
@@ -479,14 +525,25 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
         <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-3xl w-full p-6 space-y-5 shadow-xl text-left my-8">
             <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
-              <div>
-                <h3 className="font-bold text-lg text-[#111827] dark:text-white">Choose a plan</h3>
-                <p className="text-xs text-[#5B6472]">Start free or upgrade for more room to write</p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPlansModal(false)}
+                  className="p-2 -ml-2 text-[#5B6472] dark:text-slate-400 hover:text-[#111827] dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer transition-colors"
+                  aria-label="Back to settings"
+                  title="Back to settings"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+                <div>
+                  <h3 className="font-bold text-lg text-[#111827] dark:text-white">Choose a plan</h3>
+                  <p className="text-xs text-[#5B6472] dark:text-slate-400">Start free or upgrade for more room to write</p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowPlansModal(false)}
-                className="p-2 text-[#5B6472] hover:text-[#111827] min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                className="p-2 text-[#5B6472] dark:text-slate-400 hover:text-[#111827] dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
                 aria-label="Close modal"
               >
                 <X size={18} />
@@ -637,9 +694,23 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
         <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-xl text-left">
             <div className="space-y-1.5">
-              <h3 className="font-bold text-base text-[#111827] dark:text-white">
-                Available soon
-              </h3>
+              <div className="flex items-center gap-2 pb-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAvailableSoon(false);
+                    setShowPlansModal(true);
+                  }}
+                  className="p-1 -ml-1 text-[#5B6472] dark:text-slate-400 hover:text-[#111827] dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer transition-colors"
+                  aria-label="Back to plans"
+                  title="Back to plans"
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <h3 className="font-bold text-base text-[#111827] dark:text-white">
+                  Available soon
+                </h3>
+              </div>
               <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
                 Paid plans are available soon. We've kept you on Free so your active studying remains uninterrupted.
               </p>

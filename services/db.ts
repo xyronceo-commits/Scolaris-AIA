@@ -11,6 +11,8 @@ import {
   GroupMember,
   AcademicDocument,
   StudioVersion,
+  AcademicTask,
+  AppNotification,
 } from '../types';
 
 const USER_FILES_BUCKET = 'user-files';
@@ -1460,6 +1462,324 @@ export const DBService = {
       return versions;
     } catch {
       return cached;
+    }
+  },
+
+  // ==========================================
+  // ACADEMIC TASKS MANAGEMENT
+  // ==========================================
+  async getTasks(userId: string): Promise<AcademicTask[]> {
+    const cached = readCache<AcademicTask[]>('academic_tasks', userId, []);
+    if (!userId) return cached;
+
+    try {
+      const { data, error } = await supabase
+        .from('academic_tasks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('due_date', { ascending: true })
+        .order('priority', { ascending: false });
+
+      if (error) {
+        console.warn('getTasks remote fallback:', error.message);
+        return cached;
+      }
+
+      if (data) {
+        const tasks: AcademicTask[] = data.map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          title: r.title,
+          description: r.description || '',
+          category: r.category || 'assignment',
+          dueDate: r.due_date,
+          dueTime: r.due_time ? r.due_time.substring(0, 5) : undefined,
+          priority: r.priority || 'medium',
+          reminder: r.reminder || 'none',
+          completed: !!r.completed,
+          completedAt: r.completed_at || undefined,
+          courseId: r.course_id || undefined,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }));
+        writeCache('academic_tasks', userId, tasks);
+        return tasks;
+      }
+      return cached;
+    } catch (err) {
+      console.warn('getTasks exception fallback:', err);
+      return cached;
+    }
+  },
+
+  async createTask(
+    userId: string,
+    taskData: Omit<AcademicTask, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+  ): Promise<AcademicTask> {
+    const taskId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    const newTask: AcademicTask = {
+      id: taskId,
+      userId,
+      title: taskData.title,
+      description: taskData.description || '',
+      category: taskData.category,
+      dueDate: taskData.dueDate,
+      dueTime: taskData.dueTime,
+      priority: taskData.priority,
+      reminder: taskData.reminder,
+      completed: taskData.completed ?? false,
+      completedAt: taskData.completedAt,
+      courseId: taskData.courseId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Update local cache immediately
+    const cached = readCache<AcademicTask[]>('academic_tasks', userId, []);
+    writeCache('academic_tasks', userId, [newTask, ...cached]);
+
+    try {
+      const { error } = await supabase.from('academic_tasks').insert({
+        id: newTask.id,
+        user_id: userId,
+        title: newTask.title,
+        description: newTask.description,
+        category: newTask.category,
+        due_date: newTask.dueDate,
+        due_time: newTask.dueTime || null,
+        priority: newTask.priority,
+        reminder: newTask.reminder,
+        completed: newTask.completed,
+        completed_at: newTask.completedAt || null,
+        course_id: newTask.courseId || null,
+        created_at: now,
+        updated_at: now,
+      });
+
+      if (error) {
+        console.warn('createTask remote warning:', error.message);
+      }
+    } catch (err) {
+      console.warn('createTask exception:', err);
+    }
+
+    return newTask;
+  },
+
+  async updateTask(
+    userId: string,
+    taskId: string,
+    updates: Partial<AcademicTask>
+  ): Promise<AcademicTask | null> {
+    const cached = readCache<AcademicTask[]>('academic_tasks', userId, []);
+    const existing = cached.find((t) => t.id === taskId);
+    const now = new Date().toISOString();
+
+    const updatedTask: AcademicTask = {
+      ...(existing || ({} as AcademicTask)),
+      ...updates,
+      id: taskId,
+      userId,
+      updatedAt: now,
+    };
+
+    const nextList = cached.map((t) => (t.id === taskId ? updatedTask : t));
+    writeCache('academic_tasks', userId, nextList);
+
+    try {
+      const dbPayload: any = { updated_at: now };
+      if (updates.title !== undefined) dbPayload.title = updates.title;
+      if (updates.description !== undefined) dbPayload.description = updates.description;
+      if (updates.category !== undefined) dbPayload.category = updates.category;
+      if (updates.dueDate !== undefined) dbPayload.due_date = updates.dueDate;
+      if (updates.dueTime !== undefined) dbPayload.due_time = updates.dueTime || null;
+      if (updates.priority !== undefined) dbPayload.priority = updates.priority;
+      if (updates.reminder !== undefined) dbPayload.reminder = updates.reminder;
+      if (updates.completed !== undefined) {
+        dbPayload.completed = updates.completed;
+        dbPayload.completed_at = updates.completed ? (updates.completedAt || now) : null;
+      }
+      if (updates.courseId !== undefined) dbPayload.course_id = updates.courseId || null;
+
+      await supabase
+        .from('academic_tasks')
+        .update(dbPayload)
+        .eq('id', taskId)
+        .eq('user_id', userId);
+    } catch (err) {
+      console.warn('updateTask remote error:', err);
+    }
+
+    return updatedTask;
+  },
+
+  async deleteTask(userId: string, taskId: string): Promise<boolean> {
+    const cached = readCache<AcademicTask[]>('academic_tasks', userId, []);
+    writeCache(
+      'academic_tasks',
+      userId,
+      cached.filter((t) => t.id !== taskId)
+    );
+
+    try {
+      const { error } = await supabase
+        .from('academic_tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('user_id', userId);
+      return !error;
+    } catch {
+      return true;
+    }
+  },
+
+  async toggleTaskCompleted(userId: string, taskId: string): Promise<AcademicTask | null> {
+    const cached = readCache<AcademicTask[]>('academic_tasks', userId, []);
+    const task = cached.find((t) => t.id === taskId);
+    if (!task) return null;
+
+    const nextCompleted = !task.completed;
+    const now = new Date().toISOString();
+
+    return this.updateTask(userId, taskId, {
+      completed: nextCompleted,
+      completedAt: nextCompleted ? now : undefined,
+    });
+  },
+
+  // ==========================================
+  // PERSISTENT NOTIFICATIONS MANAGEMENT
+  // ==========================================
+  async getNotifications(userId: string): Promise<AppNotification[]> {
+    const cached = readCache<AppNotification[]>('user_notifications', userId, []);
+    if (!userId) return cached;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.warn('getNotifications remote fallback:', error.message);
+        return cached;
+      }
+
+      if (data) {
+        const notifs: AppNotification[] = data.map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          type: r.type || 'session',
+          title: r.title,
+          message: r.message,
+          read: !!r.read,
+          link: r.link || undefined,
+          metadata: r.metadata || {},
+          timestamp: new Date(r.created_at).getTime(),
+          createdAt: r.created_at,
+        }));
+        writeCache('user_notifications', userId, notifs);
+        return notifs;
+      }
+      return cached;
+    } catch (err) {
+      console.warn('getNotifications exception fallback:', err);
+      return cached;
+    }
+  },
+
+  async createNotification(
+    userId: string,
+    notif: Omit<AppNotification, 'id' | 'timestamp'>
+  ): Promise<AppNotification> {
+    const notifId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const newNotif: AppNotification = {
+      ...notif,
+      id: notifId,
+      userId,
+      timestamp: Date.now(),
+      createdAt: now,
+      read: notif.read ?? false,
+    };
+
+    const cached = readCache<AppNotification[]>('user_notifications', userId, []);
+    // Prevent strict duplicate messages within recent timeframe
+    const isDuplicate = cached.some(
+      (c) => c.title === notif.title && c.message === notif.message && Date.now() - c.timestamp < 60000
+    );
+    if (isDuplicate) return cached[0];
+
+    writeCache('user_notifications', userId, [newNotif, ...cached]);
+
+    try {
+      await supabase.from('user_notifications').insert({
+        id: notifId,
+        user_id: userId,
+        type: notif.type,
+        title: notif.title,
+        message: notif.message,
+        read: newNotif.read,
+        link: notif.link || null,
+        metadata: notif.metadata || {},
+        created_at: now,
+      });
+    } catch (err) {
+      console.warn('createNotification remote error:', err);
+    }
+
+    return newNotif;
+  },
+
+  async markNotificationAsRead(userId: string, notifId: string): Promise<boolean> {
+    const cached = readCache<AppNotification[]>('user_notifications', userId, []);
+    const updated = cached.map((n) => (n.id === notifId ? { ...n, read: true } : n));
+    writeCache('user_notifications', userId, updated);
+
+    try {
+      const { error } = await supabase
+        .from('user_notifications')
+        .update({ read: true })
+        .eq('id', notifId)
+        .eq('user_id', userId);
+      return !error;
+    } catch {
+      return true;
+    }
+  },
+
+  async markAllNotificationsAsRead(userId: string): Promise<boolean> {
+    const cached = readCache<AppNotification[]>('user_notifications', userId, []);
+    const updated = cached.map((n) => ({ ...n, read: true }));
+    writeCache('user_notifications', userId, updated);
+
+    try {
+      const { error } = await supabase
+        .from('user_notifications')
+        .update({ read: true })
+        .eq('user_id', userId)
+        .eq('read', false);
+      return !error;
+    } catch {
+      return true;
+    }
+  },
+
+  async clearAllNotifications(userId: string): Promise<boolean> {
+    writeCache('user_notifications', userId, []);
+
+    try {
+      const { error } = await supabase
+        .from('user_notifications')
+        .delete()
+        .eq('user_id', userId);
+      return !error;
+    } catch {
+      return true;
     }
   },
 };
