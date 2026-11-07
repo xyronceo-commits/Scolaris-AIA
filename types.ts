@@ -48,6 +48,7 @@ export interface UserProfile {
   age: number;
   semesterEnd: string;
   targetCGPA?: number;
+  gradingScale?: number | string;
   avatarIcon?: string;
   onboarded: boolean;
   tutorialSeen: boolean;

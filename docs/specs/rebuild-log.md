@@ -145,6 +145,23 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Plan Gating:** Free plans can join circles; clicking `Create circle` on a Free plan opens a quiet Plus upgrade prompt ("one card, one primary button").
 - **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 7: Onboarding
+
+- **Email Verification (`components/EmailVerification.tsx`):**
+  - Six single-digit input boxes with auto-advance and complete paste handling.
+  - 60-second countdown formatted as `0:42` ("Resend code in 0:42"), dynamically switching to primary-blue text button "Resend code".
+  - "Use a different email" link to return to registration.
+  - Distinct spec error messages: wrong code (*"That code didn't match. Try again."*), expired code (*"That code has expired. We sent a new one."*), repeated failures (*"Too many attempts. Wait 5 minutes before trying again."*).
+- **Academic Profile Flow (`components/Onboarding.tsx`):**
+  - Three-segment progress bar labelled Profile, Courses, Plan.
+  - KorsIQ logo top left and non-blocking "Skip for now" link top right on steps 1 and 2.
+  - Step 1 (Profile): Full name, Nigerian university autocomplete (UNILAG, UI, OAU, UNN, ABU, FUTA, UNILORIN, Covenant, Babcock, Other), Department, Level dropdown (100L - Postgraduate), Grading scale (5.0, 4.0, 7.0, Other), and Target CGPA.
+  - Step 2 (Courses): Repeating 3-row starting layout (Code, Units, Title, Remove button). "+ Add another course" button and "I'll add courses later" link. Writes courses to real Supabase `courses` table via `DBService.addCourse`.
+  - Step 3 (Plan): Three spec plan cards side by side (Free ₦0, Plus ₦7,500, Academic Studio ₦15,000). Free preselected. Choosing paid triggers non-blocking "Available soon" modal and preserves Free selection. Single primary button "Go to dashboard".
+- **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
+
 
 
 

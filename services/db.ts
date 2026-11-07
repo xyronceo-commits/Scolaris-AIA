@@ -319,7 +319,7 @@ export const DBService = {
   async saveCourse(userId: string, course: Course) {
     try {
       const list = readCache<Course[]>('courses', userId, []);
-      const courseId = course.id || `course_${Date.now()}`;
+      const courseId = course.id || `course_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const merged = { ...course, id: courseId };
       const idx = list.findIndex((c) => c.id === courseId);
       if (idx >= 0) list[idx] = merged;
@@ -344,6 +344,10 @@ export const DBService = {
       console.error('saveCourse error:', err);
       return { error: err };
     }
+  },
+
+  async addCourse(userId: string, course: Course) {
+    return this.saveCourse(userId, course);
   },
 
   async saveCourses(userId: string, courses: Course[]) {

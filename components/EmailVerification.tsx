@@ -19,11 +19,19 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
+  const [failedAttempts, setFailedAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const isVerifyingRef = useRef(false);
+
+  // Format countdown like 0:42 per spec
+  const formatCountdown = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const remSecs = secs % 60;
+    return `${mins}:${remSecs.toString().padStart(2, '0')}`;
+  };
 
   // Focus the first input field on initial render
   useEffect(() => {
@@ -46,6 +54,11 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
     if (isVerifyingRef.current) return;
     if (token.length !== OTP_LENGTH) {
       setError(`Please enter all ${OTP_LENGTH} digits of your verification code.`);
+      return;
+    }
+
+    if (failedAttempts >= 3) {
+      setError('Too many attempts. Wait 5 minutes before trying again.');
       return;
     }
 
@@ -78,13 +91,15 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
       }
 
       if (verifyError) {
+        setFailedAttempts((prev) => prev + 1);
         const msg = verifyError.message.toLowerCase();
-        if (msg.includes('expired') || msg.includes('invalid') || msg.includes('token has expired') || msg.includes('bad code')) {
-          setError('The 6-digit code entered is incorrect or has expired. Please check your email or request a new code.');
-        } else if (verifyError.status === 429 || msg.includes('rate') || msg.includes('too many')) {
-          setError('Too many verification attempts. Please wait a moment before trying again.');
+        if (failedAttempts + 1 >= 3) {
+          setError('Too many attempts. Wait 5 minutes before trying again.');
+        } else if (msg.includes('expired') || msg.includes('token has expired')) {
+          setError('That code has expired. We sent a new one.');
+          supabase.auth.resend({ type: 'signup', email }).catch(() => {});
         } else {
-          setError(verifyError.message || 'Verification failed. Please check the code and try again.');
+          setError("That code didn't match. Try again.");
         }
         return;
       }
@@ -98,7 +113,7 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
       setIsVerifying(false);
       isVerifyingRef.current = false;
     }
-  }, [email, onVerified]);
+  }, [email, failedAttempts, onVerified]);
 
   const handleInputChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const rawVal = e.target.value;
@@ -229,53 +244,37 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
   const isComplete = digits.every((d) => d.length === 1);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-hidden font-sans text-slate-900">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full relative z-10">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3 bg-slate-900 text-white rounded-xl shadow-xs mb-3">
-            <KorsIQLogo variant="icon" size={40} onDark />
-          </div>
-          <h1 className="text-2xl font-serif font-bold text-slate-900 tracking-tight mb-1">Verify Your Email</h1>
-          <p className="text-slate-400 font-semibold text-xs">6-Digit Security Token</p>
-        </div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 relative font-sans text-[#111827] dark:text-white">
+      {/* KorsIQ Logo top left per Spec */}
+      <div className="absolute top-6 left-6">
+        <KorsIQLogo size={28} />
+      </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-md p-6 sm:p-8 text-center space-y-5">
-          <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto ring-4 ring-blue-50">
-            <Mail size={24} />
-          </div>
-
-          <div className="space-y-1">
-            <h2 className="text-base font-serif font-bold text-slate-900">Enter Verification Code</h2>
-            <p className="text-xs text-slate-500 font-normal leading-relaxed">
-              We sent a 6-digit confirmation code to{' '}
-              <span className="font-semibold text-slate-900 break-all">{email}</span>. Enter it below to activate your KorsIQ account.
+      <div className="max-w-md w-full space-y-4">
+        <div className="bg-white dark:bg-slate-900 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-sm p-6 sm:p-8 text-center space-y-5">
+          <div className="space-y-1.5">
+            <h1 className="text-xl font-bold text-[#111827] dark:text-white">Verify your email</h1>
+            <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+              We sent a 6-digit code to <strong className="text-[#111827] dark:text-white break-all">{email}</strong>.
             </p>
           </div>
 
           {error && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5 text-left"
-            >
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5 text-left">
               <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
               <p className="text-xs font-medium text-rose-700 leading-snug">{error}</p>
-            </motion.div>
+            </div>
           )}
 
           {message && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2.5 text-left"
-            >
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2.5 text-left">
               <Check size={16} className="text-emerald-600 shrink-0 mt-0.5" />
               <p className="text-xs font-medium text-emerald-800 leading-snug">{message}</p>
-            </motion.div>
+            </div>
           )}
 
           <form onSubmit={handleManualSubmit} className="space-y-4 pt-1">
-            {/* 6 Separate Digit Input Boxes */}
+            {/* Six single-digit input boxes */}
             <div className="flex items-center justify-center gap-2 sm:gap-2.5">
               {digits.map((digit, idx) => (
                 <input
@@ -295,60 +294,65 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
                   aria-label={`Digit ${idx + 1}`}
                   className={`w-10 h-12 sm:w-11 sm:h-12 text-center text-xl font-bold font-mono rounded-lg border outline-none transition-all ${
                     digit
-                      ? 'border-blue-600 bg-blue-50/20 text-slate-900 ring-2 ring-blue-100'
-                      : 'border-slate-200 bg-white text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
+                      ? 'border-[#2563EB] bg-[#EFF6FF] text-[#111827] ring-2 ring-[#2563EB]/20'
+                      : 'border-[#E5E7EB] bg-white text-[#111827] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20'
                   }`}
                 />
               ))}
             </div>
 
+            {/* Single Primary Action Button per Spec */}
             <button
               type="submit"
               disabled={isVerifying || !isComplete}
-              className="w-full h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-semibold text-xs transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              className="w-full h-11 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-lg font-semibold text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed min-h-[44px]"
             >
               {isVerifying ? (
                 <div className="flex items-center gap-2">
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Verifying Token...</span>
+                  <span>Verifying...</span>
                 </div>
               ) : (
                 <>
-                  <span>Verify &amp; Continue</span>
+                  <span>Verify and continue</span>
                   <ArrowRight size={14} />
                 </>
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={isResending || cooldown > 0}
-              className="w-full h-10 bg-slate-50 hover:bg-slate-100 disabled:opacity-60 border border-slate-200 text-slate-700 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
-            >
-              {isResending ? (
-                <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
+            {/* Resend: Resend code in 0:42 / Resend code */}
+            <div className="flex items-center justify-center min-h-[36px]">
+              {cooldown > 0 ? (
+                <span className="text-xs text-[#5B6472]">
+                  Resend code in {formatCountdown(cooldown)}
+                </span>
               ) : (
-                <>
-                  <RefreshCw size={12} className={cooldown === 0 ? 'text-blue-600' : ''} />
-                  <span>{cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend 6-Digit Code'}</span>
-                </>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={isResending}
+                  className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer min-h-[44px] flex items-center gap-1.5"
+                >
+                  <RefreshCw size={12} className={isResending ? 'animate-spin' : ''} />
+                  <span>{isResending ? 'Sending...' : 'Resend code'}</span>
+                </button>
               )}
-            </button>
+            </div>
           </form>
 
-          <div className="pt-2 border-t border-slate-100">
+          {/* Back: Use a different email */}
+          <div className="pt-2 border-t border-[#E5E7EB] dark:border-slate-800 flex justify-center">
             <button
               type="button"
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors py-1 cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5B6472] hover:text-[#111827] dark:hover:text-white transition-colors min-h-[44px] cursor-pointer"
             >
-              <ArrowLeft size={12} />
-              <span>Use a different email or sign in</span>
+              <ArrowLeft size={13} />
+              <span>Use a different email</span>
             </button>
           </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
