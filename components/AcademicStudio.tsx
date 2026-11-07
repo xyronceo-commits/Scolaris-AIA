@@ -51,12 +51,15 @@ import {
   StudioReference,
   StudioReviewSuggestion,
   StudioVersion,
-  UserProfile
+  UserProfile,
+  hasStudioPrivileges,
+  hasFullStudioPrivileges
 } from '../types';
 import { DBService } from '../services/db';
 import { GeminiService } from '../services/gemini';
 import { generateDocxBlob, downloadDocx } from '../utils/docxExport';
 import KorsIQLogo from './KorsIQLogo';
+import SubscriptionCheckoutModal from './SubscriptionCheckoutModal';
 
 interface AcademicStudioProps {
   userId: string;
@@ -91,8 +94,10 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
   onNavigateTab
 }) => {
   // Subscription Entitlement Check
-  const isPremium = profile.isPro || profile.tier === 'scholar' || profile.tier === 'sage';
+  const isPremium = hasStudioPrivileges(profile);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [checkoutPlan, setCheckoutPlan] = useState<'plus' | 'studio'>('studio');
 
   // Studio Document State
   const [documents, setDocuments] = useState<AcademicDocument[]>([]);
@@ -156,8 +161,8 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
   const [editorHistory, setEditorHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
-  const isExportAllowed = profile?.tier === 'scholar' || profile?.tier === 'sage' || profile?.isPro;
-  const isVersionsAllowed = profile?.tier === 'sage';
+  const isExportAllowed = hasStudioPrivileges(profile);
+  const isVersionsAllowed = hasFullStudioPrivileges(profile);
 
   const handleEditorChangeWithHistory = (newVal: string) => {
     handleEditorChange(newVal);
@@ -2360,21 +2365,14 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             <div className="space-y-2 pt-2">
               <button
                 type="button"
-                onClick={async () => {
-                  const updatedProfile: UserProfile = {
-                    ...profile,
-                    isPro: true,
-                    tier: 'scholar',
-                  };
-                  if (setProfile) setProfile(updatedProfile);
-                  await DBService.saveProfile(userId, updatedProfile);
+                onClick={() => {
+                  setCheckoutPlan('studio');
+                  setShowCheckoutModal(true);
                   setShowUpgradeModal(false);
-                  showToast('Upgraded to Scholar Tier! Academic Studio unlocked.');
-                  handleStartCreation();
                 }}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs transition-colors"
+                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs transition-colors min-h-[44px]"
               >
-                Upgrade to Scholar Plan
+                Upgrade to Academic Studio
               </button>
 
               <button
@@ -2409,10 +2407,14 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
             <div className="space-y-2 pt-2">
               <button
                 type="button"
-                onClick={() => setShowQuietUpgrade(null)}
+                onClick={() => {
+                  setCheckoutPlan(showQuietUpgrade.feature.includes('Version') ? 'studio' : 'plus');
+                  setShowQuietUpgrade(null);
+                  setShowCheckoutModal(true);
+                }}
                 className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm min-h-[44px]"
               >
-                See plans
+                See plans &amp; Upgrade
               </button>
               <button
                 type="button"
@@ -2425,6 +2427,20 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
           </div>
         </div>
       )}
+
+      {/* Subscription Checkout Modal */}
+      <SubscriptionCheckoutModal
+        isOpen={showCheckoutModal}
+        onClose={() => setShowCheckoutModal(false)}
+        initialPlan={checkoutPlan}
+        currentProfile={profile}
+        onSubscriptionUpdated={(upd) => {
+          if (setProfile) setProfile(upd);
+          setShowCheckoutModal(false);
+          showToast(`Upgraded to ${upd.tier === 'studio' ? 'Academic Studio' : 'Plus'}! Workspace unlocked.`);
+          handleStartCreation();
+        }}
+      />
     </div>
   );
 };

@@ -5,7 +5,52 @@ export enum Difficulty {
   HARD = 'Hard'
 }
 
-export type SubscriptionTier = 'free' | 'scholar' | 'sage';
+export type SubscriptionTier = 'free' | 'scholar' | 'sage' | 'plus' | 'studio';
+export type SubscriptionPlanType = 'free' | 'plus' | 'studio';
+export type PaymentStatus = 'none' | 'pending' | 'paid' | 'failed' | 'abandoned' | 'cancelled' | 'refunded';
+export type SubscriptionStatus = 'active' | 'inactive' | 'pending' | 'past_due' | 'cancelled' | 'expired';
+
+export interface UserSubscription {
+  id?: string;
+  userId: string;
+  planTier: SubscriptionPlanType | SubscriptionTier;
+  billingCycle: 'monthly' | 'annual';
+  status: SubscriptionStatus;
+  paymentProvider: 'paystack' | 'manual' | 'test';
+  paymentReference?: string;
+  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  currency: string;
+  currentPeriodStart: string;
+  currentPeriodEnd?: string;
+  metadata?: Record<string, any>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Check if user has an active paid plan (Plus or Studio / Scholar or Sage) */
+export function isPaidUser(profile?: { tier?: string; isPro?: boolean } | null): boolean {
+  if (!profile) return false;
+  if (!profile.isPro) return false;
+  const t = (profile.tier || '').toLowerCase();
+  return t === 'plus' || t === 'studio' || t === 'scholar' || t === 'sage';
+}
+
+/** Check if user is entitled to Academic Studio workspace */
+export function hasStudioPrivileges(profile?: { tier?: string; isPro?: boolean } | null): boolean {
+  if (!profile) return false;
+  if (!profile.isPro) return false;
+  const t = (profile.tier || '').toLowerCase();
+  return t === 'studio' || t === 'sage' || t === 'plus' || t === 'scholar';
+}
+
+/** Check if user is entitled to full Studio export and version history (Academic Studio plan) */
+export function hasFullStudioPrivileges(profile?: { tier?: string; isPro?: boolean } | null): boolean {
+  if (!profile) return false;
+  if (!profile.isPro) return false;
+  const t = (profile.tier || '').toLowerCase();
+  return t === 'studio' || t === 'sage';
+}
 
 export interface Course {
   id: string;
@@ -78,6 +123,10 @@ export interface UserProfile {
   tutorialSeen: boolean;
   isPro: boolean;
   tier: SubscriptionTier;
+  subscriptionTier?: SubscriptionTier;
+  subscriptionStatus?: SubscriptionStatus;
+  paymentStatus?: PaymentStatus;
+  subscriptionEnd?: string;
   notifications: NotificationSettings;
   department?: string;
   major?: string;

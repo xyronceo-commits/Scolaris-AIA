@@ -86,18 +86,50 @@ const App: React.FC = () => {
   });
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
 
-  // Admin System State
-  const [adminToken, setAdminToken] = useState<string | null>(() => sessionStorage.getItem('scolaris_admin_token'));
-  const [adminUser, setAdminUser] = useState<{ email: string; role: string } | null>(() => {
+  // Admin System State with 12-Hour Session Persistence
+  const [adminToken, setAdminToken] = useState<string | null>(() => {
     try {
-      const stored = sessionStorage.getItem('scolaris_admin_user');
-      return stored ? JSON.parse(stored) : null;
+      const stored = localStorage.getItem('korsiq_admin_session');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.expiresAt && Date.now() < parsed.expiresAt) {
+          return parsed.token;
+        }
+      }
+    } catch {}
+    return sessionStorage.getItem('scolaris_admin_token');
+  });
+  const [adminUser, setAdminUser] = useState<{ email: string; role: string; fullName?: string } | null>(() => {
+    try {
+      const stored = localStorage.getItem('korsiq_admin_session');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.expiresAt && Date.now() < parsed.expiresAt) {
+          return parsed.user;
+        }
+      }
+      const sessionStored = sessionStorage.getItem('scolaris_admin_user');
+      return sessionStored ? JSON.parse(sessionStored) : null;
     } catch {
       return null;
     }
   });
   const [isClaimAdmin, setIsClaimAdmin] = useState(false);
   const [showAdminLoginForm, setShowAdminLoginForm] = useState(false);
+
+  // Verify Admin Session validity against server
+  useEffect(() => {
+    if (!adminToken) return;
+    fetch('/api/admin/verify', {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    })
+      .then(res => {
+        if (res.status === 401 || res.status === 403) {
+          handleAdminSignOut();
+        }
+      })
+      .catch(() => {});
+  }, [adminToken]);
 
   // URL Path Listener for /admin
   useEffect(() => {
@@ -169,8 +201,11 @@ const App: React.FC = () => {
           age: 20,
           onboarded: false,
           tutorialSeen: false,
-          tier: 'scholar',
-          isPro: true,
+          tier: 'free',
+          isPro: false,
+          subscriptionTier: 'free',
+          subscriptionStatus: 'inactive',
+          paymentStatus: 'none',
           targetCGPA: 0.00,
           notifications: { messages: true, sessions: true, aiContent: true },
           semesterEnd: ''
@@ -374,6 +409,9 @@ const App: React.FC = () => {
   };
 
   const handleAdminSignOut = () => {
+    try {
+      localStorage.removeItem('korsiq_admin_session');
+    } catch {}
     sessionStorage.removeItem('scolaris_admin_token');
     sessionStorage.removeItem('scolaris_admin_user');
     setAdminToken(null);
@@ -608,7 +646,7 @@ const App: React.FC = () => {
         return (
           <AdminDashboard
             adminToken={adminToken || ''}
-            adminEmail={adminUser?.email || authUser?.email || 'admin@scolaris.ai'}
+            adminEmail={adminUser?.email || authUser?.email || 'buildsafe247@gmail.com'}
             onSignOut={handleAdminSignOut}
             onBackToStudentWorkspace={() => {
               window.history.pushState({}, '', '/');
@@ -618,52 +656,19 @@ const App: React.FC = () => {
         );
       }
 
-      if (showAdminLoginForm || !authUser) {
-        return (
-          <AdminLogin
-            onLoginSuccess={(token, user) => {
-              setAdminToken(token);
-              setAdminUser(user);
-              setShowAdminLoginForm(false);
-              setActiveTab('admin');
-            }}
-            onBackToStudentPortal={() => {
-              window.history.pushState({}, '', '/');
-              setActiveTab('dashboard');
-            }}
-          />
-        );
-      }
-
       return (
-        <div className="min-h-[75vh] flex flex-col items-center justify-center p-6 text-center max-w-md mx-auto space-y-6">
-          <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center border border-rose-500/20 shadow-xl">
-            <ShieldAlert size={32} />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-2xl font-serif font-bold text-slate-900">Access Denied</h2>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              You do not have administrator privileges. Only authorized KorsIQ administrative accounts can access this panel.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3 w-full">
-            <button
-              onClick={() => {
-                window.history.pushState({}, '', '/');
-                setActiveTab('dashboard');
-              }}
-              className="flex-1 py-3 px-4 bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-md hover:bg-slate-800 cursor-pointer"
-            >
-              Return to Student Portal
-            </button>
-            <button
-              onClick={() => setShowAdminLoginForm(true)}
-              className="flex-1 py-3 px-4 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold transition-all border border-blue-200 hover:bg-blue-100 cursor-pointer"
-            >
-              Admin Sign In
-            </button>
-          </div>
-        </div>
+        <AdminLogin
+          onLoginSuccess={(token, user) => {
+            setAdminToken(token);
+            setAdminUser(user);
+            setShowAdminLoginForm(false);
+            setActiveTab('admin');
+          }}
+          onBackToStudentPortal={() => {
+            window.history.pushState({}, '', '/');
+            setActiveTab('dashboard');
+          }}
+        />
       );
     }
 

@@ -236,7 +236,11 @@ export const DBService = {
         onboarded: data.onboarded ?? false,
         tutorialSeen: data.tutorial_seen ?? false,
         isPro: data.is_pro ?? false,
-        tier: (data.tier || 'free') as SubscriptionTier,
+        tier: (data.subscription_tier || data.tier || 'free') as SubscriptionTier,
+        subscriptionTier: (data.subscription_tier || data.tier || 'free') as SubscriptionTier,
+        subscriptionStatus: data.subscription_status || (data.is_pro ? 'active' : 'inactive'),
+        paymentStatus: data.payment_status || 'none',
+        subscriptionEnd: data.subscription_end || '',
         notifications: data.notifications || { messages: true, sessions: true, aiContent: true },
         department: data.department || '',
         major: data.major || '',
@@ -293,6 +297,26 @@ export const DBService = {
     } catch (err) {
       console.error('saveProfile error:', err);
       return { error: err };
+    }
+  },
+
+  async getSubscription(userId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') {
+        console.warn('getSubscription warning:', error.message);
+      }
+      return data || null;
+    } catch (err) {
+      console.warn('getSubscription error:', err);
+      return null;
     }
   },
 

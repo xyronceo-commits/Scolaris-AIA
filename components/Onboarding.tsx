@@ -7,29 +7,18 @@ import {
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';
-import { UserProfile, Course, Difficulty } from '../types';
+import { UserProfile, Course, Difficulty, SubscriptionTier } from '../types';
 import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
 import KorsIQLogo from './KorsIQLogo';
+import UniversitySelector from './UniversitySelector';
+import SubscriptionCheckoutModal from './SubscriptionCheckoutModal';
 
 interface OnboardingProps {
   userEmail: string;
   initialProfile?: UserProfile | null;
   onComplete: (profile: UserProfile) => void;
 }
-
-const NIGERIAN_UNIVERSITIES = [
-  'University of Lagos (UNILAG)',
-  'University of Ibadan (UI)',
-  'Obafemi Awolowo University (OAU)',
-  'University of Nigeria, Nsukka (UNN)',
-  'Ahmadu Bello University (ABU)',
-  'Federal University of Technology, Akure (FUTA)',
-  'University of Ilorin (UNILORIN)',
-  'Covenant University',
-  'Babcock University',
-  'Other'
-];
 
 const ACADEMIC_LEVELS = [
   '100L / Year 1',
@@ -74,6 +63,12 @@ export const Onboarding: React.FC<OnboardingProps> = ({
   const [targetCGPA, setTargetCGPA] = useState<string>(
     initialProfile?.targetCGPA ? String(initialProfile.targetCGPA) : '4.50'
   );
+
+  // Subscription Checkout Modal State
+  const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
+  const [checkoutPlan, setCheckoutPlan] = useState<'plus' | 'studio'>('plus');
+  const [userTier, setUserTier] = useState<SubscriptionTier>(initialProfile?.tier || 'free');
+  const [isPro, setIsPro] = useState<boolean>(initialProfile?.isPro || false);
 
   // Courses State: Starts with 3 rows per spec
   const [courses, setCourses] = useState<CourseRow[]>([
@@ -157,8 +152,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({
       avatarIcon: initialProfile?.avatarIcon || 'graduation-cap',
       onboarded: true,
       tutorialSeen: true,
-      isPro: initialProfile?.isPro || false,
-      tier: initialProfile?.tier || 'free',
+      isPro: isPro,
+      tier: userTier,
       notifications: initialProfile?.notifications || {
         messages: true,
         sessions: true,
@@ -240,21 +235,14 @@ export const Onboarding: React.FC<OnboardingProps> = ({
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-[#111827] dark:text-white">
-                  University or institution
+                  University or institution *
                 </label>
-                <input
-                  type="text"
-                  list="university-options"
+                <UniversitySelector
                   value={university}
-                  onChange={(e) => setUniversity(e.target.value)}
-                  placeholder="Select or type your institution"
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-xs outline-none focus:border-[#2563EB] min-h-[44px]"
+                  onChange={(val) => setUniversity(val)}
+                  placeholder="Select or search your institution..."
+                  required
                 />
-                <datalist id="university-options">
-                  {NIGERIAN_UNIVERSITIES.map((u) => (
-                    <option key={u} value={u} />
-                  ))}
-                </datalist>
               </div>
 
               <div className="space-y-1">
@@ -532,11 +520,12 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setShowPaidPlanNotice(true);
+                    setCheckoutPlan('plus');
+                    setCheckoutModalOpen(true);
                   }}
                   className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
                 >
-                  Choose Plus
+                  {userTier === 'plus' ? 'Plus Plan Active' : 'Choose Plus'}
                 </button>
               </div>
 
@@ -584,11 +573,12 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setShowPaidPlanNotice(true);
+                    setCheckoutPlan('studio');
+                    setCheckoutModalOpen(true);
                   }}
                   className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
                 >
-                  Choose Academic Studio
+                  {userTier === 'studio' ? 'Academic Studio Active' : 'Choose Academic Studio'}
                 </button>
               </div>
             </div>
@@ -600,7 +590,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                 onClick={handleFinishOnboarding}
                 className="w-full py-3 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer shadow-sm"
               >
-                <span>Go to dashboard</span>
+                <span>{userTier === 'free' ? 'Continue with Free' : `Go to dashboard (${userTier === 'studio' ? 'Academic Studio' : 'Plus'})`}</span>
                 <ArrowRight size={14} />
               </button>
             </div>
@@ -608,31 +598,31 @@ export const Onboarding: React.FC<OnboardingProps> = ({
         )}
       </div>
 
-      {/* Non-blocking Notice Modal per Open Decision 3 */}
-      {showPaidPlanNotice && (
-        <div className="fixed inset-0 bg-[#111827]/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg max-w-sm w-full p-6 space-y-4 shadow-xl text-left">
-            <div className="space-y-1.5">
-              <h3 className="font-bold text-base text-[#111827] dark:text-white">
-                Available soon
-              </h3>
-              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
-                Paid plans are available soon. We've started you on Free so you can begin studying today.
-              </p>
-            </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setShowPaidPlanNotice(false)}
-                className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
-              >
-                Got it
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Subscription Checkout & Verification Modal */}
+      <SubscriptionCheckoutModal
+        isOpen={checkoutModalOpen}
+        onClose={() => setCheckoutModalOpen(false)}
+        initialPlan={checkoutPlan}
+        currentProfile={{
+          name,
+          email: userEmail,
+          university,
+          department,
+          level,
+          age: 20,
+          semesterEnd: '',
+          onboarded: false,
+          tutorialSeen: false,
+          isPro: isPro,
+          tier: userTier,
+          notifications: { messages: true, sessions: true, aiContent: true }
+        }}
+        onSubscriptionUpdated={(upd) => {
+          setUserTier(upd.tier);
+          setIsPro(upd.isPro);
+          setSelectedPlan(upd.tier === 'studio' ? 'studio' : 'plus');
+        }}
+      />
     </div>
   );
 };
