@@ -62,3 +62,20 @@ The following existing features do not have a dedicated slot in the 6 main deskt
 - **Touch Targets & Radius:** 44px min touch target on all controls, 8px default corner radius, sans-serif typography (no serif headings).
 - **Verification:** Verified at 390px, 768px, and 1280px. `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 2: Dashboard (Overview)
+
+- **Header Structure:** Rebuilt with dynamic time-of-day greeting ("Good morning / afternoon / evening, {name}"), formatted date underneath, and desktop quick action buttons (`+ Task`, `+ Course`).
+- **Two-Column Desktop & Single-Column Mobile Layout:**
+  - Left column:
+    - *Today's priorities:* Interactive checkbox task list with course code, revision mode, and duration/time. Toggling checks task off. Clean calm empty state when clear.
+    - *Upcoming deadlines:* Title, course code, and formatted deadline date.
+  - Right column:
+    - *Study schedule:* Today's and upcoming scheduled sessions with duration and direct link to open study hub.
+    - *Course snapshot:* Desktop displays Current CGPA and Target CGPA side by side, plus semester course count and total credit units. Mobile collapses to a single concise line (`Current CGPA 4.12 · Target 4.50`).
+    - *Recent documents:* List of academic studio drafts showing title, doc type tag, and relative edit time (`Edited X days ago`).
+- **Data Integrity & Rules:** Only CGPA (from calculated records) and course count are shown as metrics, both from real data. No vanity metrics or invented placeholders. AI credits completely excluded from dashboard.
+- **Verification:** Responsive testing across 390px, 768px, and 1280px. `npm run lint` and `npm run build` passed.
+
+
