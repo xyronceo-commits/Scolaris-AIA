@@ -881,8 +881,8 @@ async function startServer() {
     }
   });
 
-  // Paystack Webhook Handler
-  app.post('/api/subscription/webhook', async (req: AuthenticatedRequest, res) => {
+  // Paystack Webhook Handler (Supports both canonical /api/subscription/webhook and /api/paystack/webhook)
+  app.post(['/api/subscription/webhook', '/api/paystack/webhook'], async (req: AuthenticatedRequest, res) => {
     const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
     if (!paystackKey) {
       return res.status(400).json({ error: 'Paystack secret is not configured' });

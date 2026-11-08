@@ -224,7 +224,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
               </div>
             </div>
           </div>
-          <p className="text-xs text-[#5B6472] dark:text-slate-400 mt-2 text-center">Sample screen</p>
         </div>
       </section>
 
@@ -461,24 +460,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
         </div>
       </section>
 
-      {/* 7. Footer (Responsive multi-column on mobile, sleek on desktop) */}
-      <footer className="border-t border-[#E5E7EB] dark:border-slate-800 py-12 px-4 sm:px-6 bg-slate-50/50 dark:bg-slate-950">
+      {/* 7. Footer (Responsive: multi-column on mobile, sleek one-line on desktop matching v5 spec) */}
+      <footer className="border-t border-[#E5E7EB] dark:border-slate-800 py-8 sm:py-10 px-4 sm:px-6 bg-slate-50/50 dark:bg-slate-950">
         <div className="max-w-5xl mx-auto">
-          {/* Top Footer Area */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8 pb-8 border-b border-[#E5E7EB] dark:border-slate-800">
+          {/* Mobile Footer Section (Matches Page 2 of v5 spec) */}
+          <div className="md:hidden space-y-6 mb-8 pb-8 border-b border-[#E5E7EB] dark:border-slate-800">
             {/* Brand column */}
-            <div className="md:col-span-1 space-y-3">
-              <KorsIQLogo variant="full" size={28} />
-              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed">
+            <div className="space-y-2">
+              <KorsIQLogo variant="full" size={26} />
+              <p className="text-xs text-[#5B6472] dark:text-slate-400 leading-relaxed max-w-sm">
                 Your academic workspace: organise, learn and produce better work.
               </p>
             </div>
 
             {/* Links Columns */}
-            <div className="grid grid-cols-3 gap-6 md:col-span-3">
+            <div className="grid grid-cols-3 gap-4 pt-2">
               {/* Product */}
               <div>
-                <h4 className="text-xs font-semibold text-[#111827] dark:text-white uppercase tracking-wider mb-3">Product</h4>
+                <h4 className="text-xs font-semibold text-[#111827] dark:text-white uppercase tracking-wider mb-2.5">Product</h4>
                 <ul className="space-y-2 text-xs text-[#5B6472] dark:text-slate-400">
                   <li>
                     <button 
@@ -503,7 +502,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
 
               {/* Company */}
               <div>
-                <h4 className="text-xs font-semibold text-[#111827] dark:text-white uppercase tracking-wider mb-3">Company</h4>
+                <h4 className="text-xs font-semibold text-[#111827] dark:text-white uppercase tracking-wider mb-2.5">Company</h4>
                 <ul className="space-y-2 text-xs text-[#5B6472] dark:text-slate-400">
                   <li>
                     <button 
@@ -528,7 +527,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
 
               {/* Legal */}
               <div>
-                <h4 className="text-xs font-semibold text-[#111827] dark:text-white uppercase tracking-wider mb-3">Legal</h4>
+                <h4 className="text-xs font-semibold text-[#111827] dark:text-white uppercase tracking-wider mb-2.5">Legal</h4>
                 <ul className="space-y-2 text-xs text-[#5B6472] dark:text-slate-400">
                   <li>
                     <button 
@@ -553,10 +552,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
             </div>
           </div>
 
-          {/* Bottom Footer Line */}
+          {/* Sleek Footer Line (Matches Page 1 of v5 spec on desktop & copyright on mobile) */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#5B6472] dark:text-slate-400">
             <p>© 2026 KorsIQ</p>
-            <div className="flex items-center gap-6">
+            <div className="hidden md:flex items-center gap-6">
               <button 
                 type="button" 
                 onClick={() => setActiveModal('privacy')}
