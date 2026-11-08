@@ -38,7 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigate,
   onTasksUpdated
 }) => {
-  const userId = getCurrentUserId() || '';
+  const userId = getCurrentUserId() || (profile as any)?.id || (profile as any)?.userId || '';
   const dayIndex = new Date().getDay();
   const today = DAYS[dayIndex === 0 ? 6 : dayIndex - 1] || 'Monday';
   const todayIso = new Date().toISOString().split('T')[0];
@@ -90,30 +90,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
     loadTasks();
   }, [userId]);
 
+  const effectiveUid = userId || (profile as any)?.id || (profile as any)?.userId || '';
+
   const handleSaveTask = async (taskData: Omit<AcademicTask, 'id' | 'userId' | 'createdAt' | 'updatedAt'>) => {
-    if (!userId) return;
+    if (!effectiveUid) {
+      console.warn('Cannot save task: User ID is unavailable.');
+      return;
+    }
     if (taskToEdit) {
-      await DBService.updateTask(userId, taskToEdit.id, taskData);
+      await DBService.updateTask(effectiveUid, taskToEdit.id, taskData);
     } else {
-      await DBService.createTask(userId, taskData);
+      await DBService.createTask(effectiveUid, taskData);
     }
     await loadTasks();
   };
 
   const handleToggleTask = async (taskId: string) => {
-    if (!userId) return;
+    if (!effectiveUid) return;
     // Optimistic toggle
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: !t.completed, completedAt: !t.completed ? new Date().toISOString() : undefined } : t));
-    await DBService.toggleTaskCompleted(userId, taskId);
+    await DBService.toggleTaskCompleted(effectiveUid, taskId);
     await loadTasks();
   };
 
   const handleDeleteTask = async (taskId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm('Delete this academic task?')) return;
-    if (!userId) return;
+    if (!effectiveUid) return;
     setTasks(prev => prev.filter(t => t.id !== taskId));
-    await DBService.deleteTask(userId, taskId);
+    await DBService.deleteTask(effectiveUid, taskId);
     await loadTasks();
   };
 
