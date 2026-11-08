@@ -881,8 +881,8 @@ async function startServer() {
     }
   });
 
-  // Paystack Webhook Handler
-  app.post('/api/subscription/webhook', async (req: AuthenticatedRequest, res) => {
+  // Paystack Webhook Handler (Supports both canonical /api/subscription/webhook and /api/paystack/webhook)
+  app.post(['/api/subscription/webhook', '/api/paystack/webhook'], async (req: AuthenticatedRequest, res) => {
     const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
     if (!paystackKey) {
       return res.status(400).json({ error: 'Paystack secret is not configured' });
@@ -913,17 +913,19 @@ async function startServer() {
           .eq('event_id', eventId)
           .maybeSingle();
 
-        if (existingEvent) {
+        if (existingEvent && existingEvent.status === 'processed') {
           return res.status(200).json({ received: true, message: 'Event already processed' });
         }
 
-        await client.from('webhook_events').insert({
-          event_id: eventId,
-          event_type: event.event,
-          reference: event.data?.reference || null,
-          payload: event,
-          status: 'processed'
-        });
+        if (!existingEvent) {
+          await client.from('webhook_events').insert({
+            event_id: eventId,
+            event_type: event.event,
+            reference: event.data?.reference || null,
+            payload: event,
+            status: 'received'
+          });
+        }
       }
 
       // 1. Initial Charge or Renewal Success
@@ -1054,9 +1056,75 @@ async function startServer() {
         }
       }
 
+      // 6. Charge Refunded or Reversed
+      else if ((event.event === 'refund.processed' || event.event === 'charge.reversed') && event.data) {
+        const tx = event.data;
+        const ref = tx.reference || tx.transaction_reference;
+        const subCode = tx.subscription_code;
+        const custCode = tx.customer?.customer_code;
+
+        if (client) {
+          if (ref) {
+            await client.from('payment_transactions').update({
+              status: 'refunded',
+              gateway_response: event.event
+            }).eq('reference', ref);
+
+            const { data: sub } = await client.from('subscriptions').select('user_id').eq('payment_reference', ref).maybeSingle();
+            const targetUid = sub?.user_id;
+
+            await client.from('subscriptions').update({
+              status: 'cancelled',
+              payment_status: 'refunded'
+            }).eq('payment_reference', ref);
+
+            if (targetUid) {
+              await client.from('profiles').update({
+                tier: 'free',
+                is_pro: false,
+                subscription_tier: 'free',
+                subscription_status: 'cancelled',
+                payment_status: 'none'
+              }).eq('id', targetUid);
+            }
+          } else if (subCode || custCode) {
+            const query = subCode 
+              ? client.from('subscriptions').update({ status: 'cancelled', payment_status: 'refunded' }).eq('paystack_subscription_code', subCode)
+              : client.from('subscriptions').update({ status: 'cancelled', payment_status: 'refunded' }).eq('paystack_customer_code', custCode);
+            await query;
+
+            if (custCode) {
+              await client.from('profiles').update({
+                tier: 'free',
+                is_pro: false,
+                subscription_tier: 'free',
+                subscription_status: 'cancelled',
+                payment_status: 'none'
+              }).eq('paystack_customer_code', custCode);
+            }
+          }
+        }
+      }
+
+      // Mark webhook event as processed successfully
+      if (client) {
+        await client.from('webhook_events').update({
+          status: 'processed',
+          processed_at: new Date().toISOString()
+        }).eq('event_id', eventId);
+      }
+
       return res.status(200).json({ received: true });
     } catch (err: any) {
       console.error('Webhook error:', err);
+      // Record failure on webhook event if client exists
+      const client = supabaseAdmin || supabaseAuthClient;
+      if (client && req.body?.id) {
+        await client.from('webhook_events').update({
+          status: 'failed',
+          error_message: err.message
+        }).eq('event_id', String(req.body.id));
+      }
       return res.status(500).json({ error: 'Webhook processing error' });
     }
   });
