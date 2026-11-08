@@ -91,8 +91,13 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }).length;
 
-  // Plan limits (Beta placeholder from constants.tsx)
-  const planKey = (profile.tier === 'sage' ? 'studio' : profile.tier === 'scholar' ? 'plus' : 'free') as keyof typeof BETA_PLAN_LIMITS;
+  // Plan limits mapping with full plus, studio, scholar, sage support
+  const rawTier = (profile.subscriptionTier || profile.tier || 'free').toLowerCase();
+  const planKey = (rawTier === 'studio' || rawTier === 'sage') 
+    ? 'studio' 
+    : (rawTier === 'plus' || rawTier === 'scholar') 
+    ? 'plus' 
+    : 'free';
   const currentPlan = BETA_PLAN_LIMITS[planKey] || BETA_PLAN_LIMITS.free;
   const storageLimitMB = (currentPlan.storageLimitBytes / (1024 * 1024)).toFixed(0);
   const storagePercent = Math.min(100, Math.round((totalStorageBytes / currentPlan.storageLimitBytes) * 100));

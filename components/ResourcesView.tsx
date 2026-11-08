@@ -62,8 +62,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     fetchFiles();
   }, [userId]);
 
-  // Beta plan quota calculations
-  const userPlanKey = (profile?.tier === 'sage' ? 'studio' : profile?.tier === 'scholar' ? 'plus' : 'free') as keyof typeof BETA_PLAN_LIMITS;
+  // Beta plan quota calculations with full plus, studio, scholar, sage support
+  const rawPlan = (profile?.subscriptionTier || profile?.tier || 'free').toLowerCase();
+  const userPlanKey = (rawPlan === 'studio' || rawPlan === 'sage') 
+    ? 'studio' 
+    : (rawPlan === 'plus' || rawPlan === 'scholar') 
+    ? 'plus' 
+    : 'free';
   const planLimits = BETA_PLAN_LIMITS[userPlanKey] || BETA_PLAN_LIMITS.free;
 
   // Calculate storage usage from real files

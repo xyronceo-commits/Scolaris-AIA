@@ -8,7 +8,7 @@ export enum Difficulty {
 export type SubscriptionTier = 'free' | 'scholar' | 'sage' | 'plus' | 'studio';
 export type SubscriptionPlanType = 'free' | 'plus' | 'studio';
 export type PaymentStatus = 'none' | 'pending' | 'paid' | 'failed' | 'abandoned' | 'cancelled' | 'refunded';
-export type SubscriptionStatus = 'active' | 'inactive' | 'pending' | 'past_due' | 'cancelled' | 'expired';
+export type SubscriptionStatus = 'active' | 'inactive' | 'pending' | 'past_due' | 'cancelled' | 'expired' | 'manual_active';
 
 export interface UserSubscription {
   id?: string;
@@ -16,13 +16,18 @@ export interface UserSubscription {
   planTier: SubscriptionPlanType | SubscriptionTier;
   billingCycle: 'monthly' | 'annual';
   status: SubscriptionStatus;
-  paymentProvider: 'paystack' | 'manual' | 'test';
+  paymentProvider: 'paystack' | 'manual_admin' | 'manual' | 'test';
   paymentReference?: string;
   paymentStatus: PaymentStatus;
   amountPaid: number;
   currency: string;
   currentPeriodStart: string;
   currentPeriodEnd?: string;
+  cancelledAt?: string;
+  paystackSubscriptionCode?: string;
+  paystackCustomerCode?: string;
+  paystackPlanCode?: string;
+  paystackAuthorizationCode?: string;
   metadata?: Record<string, any>;
   createdAt?: string;
   updatedAt?: string;
