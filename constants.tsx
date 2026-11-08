@@ -105,6 +105,15 @@ export const DIFFICULTY_COLORS = {
 };
 
 // ==========================================
+// Official Paystack Direct Payment Links
+// ==========================================
+export const PAYSTACK_PAYMENT_LINKS = {
+  plus: 'https://paystack.shop/pay/c-mcwwacc8',
+  premium: 'https://paystack.shop/pay/asaup43dpk',
+  studio: 'https://paystack.shop/pay/asaup43dpk'
+} as const;
+
+// ==========================================
 // BETA: Plan limits & feature allowances
 // All values below are provisional beta limits pending 30-day review.
 // ==========================================
@@ -124,9 +133,10 @@ export const BETA_PLAN_LIMITS = {
     hasVersionHistory: false
   },
   plus: {
-    name: 'Plus',
+    name: 'KorsIQ Plus',
     price: '₦7,500 / month',
     priceNumeric: 7500,
+    paymentLink: PAYSTACK_PAYMENT_LINKS.plus,
     tagline: 'Study smarter. More AI help, storage and Lite Studio.',
     storageLimitBytes: 2 * 1024 * 1024 * 1024, // 2 GB (beta)
     storageLimitDisplay: '2 GB',
@@ -138,9 +148,10 @@ export const BETA_PLAN_LIMITS = {
     hasVersionHistory: false
   },
   studio: {
-    name: 'Academic Studio',
+    name: 'KorsIQ Premium',
     price: '₦15,000 / month',
     priceNumeric: 15000,
+    paymentLink: PAYSTACK_PAYMENT_LINKS.premium,
     tagline: 'Research, write and produce. Full Studio workspace.',
     storageLimitBytes: 10 * 1024 * 1024 * 1024, // 10 GB (beta)
     storageLimitDisplay: '10 GB',

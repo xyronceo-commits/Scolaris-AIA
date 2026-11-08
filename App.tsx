@@ -86,7 +86,7 @@ const App: React.FC = () => {
   });
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
 
-  // Admin System State with 12-Hour Session Persistence
+  // Admin System State with 12-Hour Session Persistence (Requires OTP renewal after 12 hours)
   const [adminToken, setAdminToken] = useState<string | null>(() => {
     try {
       const stored = localStorage.getItem('korsiq_admin_session');
@@ -94,10 +94,15 @@ const App: React.FC = () => {
         const parsed = JSON.parse(stored);
         if (parsed?.expiresAt && Date.now() < parsed.expiresAt) {
           return parsed.token;
+        } else {
+          // Expired after 12 hours: clear stored session
+          localStorage.removeItem('korsiq_admin_session');
+          sessionStorage.removeItem('scolaris_admin_token');
+          sessionStorage.removeItem('scolaris_admin_user');
         }
       }
     } catch {}
-    return sessionStorage.getItem('scolaris_admin_token');
+    return null;
   });
   const [adminUser, setAdminUser] = useState<{ email: string; role: string; fullName?: string } | null>(() => {
     try {
@@ -108,11 +113,8 @@ const App: React.FC = () => {
           return parsed.user;
         }
       }
-      const sessionStored = sessionStorage.getItem('scolaris_admin_user');
-      return sessionStored ? JSON.parse(sessionStored) : null;
-    } catch {
-      return null;
-    }
+    } catch {}
+    return null;
   });
   const [isClaimAdmin, setIsClaimAdmin] = useState(false);
   const [showAdminLoginForm, setShowAdminLoginForm] = useState(false);
@@ -654,13 +656,13 @@ const App: React.FC = () => {
 
   // 6. Main Protected Application View & Admin Router
   const renderContent = () => {
-    // Admin Route Handler
+    // Admin Route Handler (Strict OTP requirement: Only active adminToken grants entry)
     if (activeTab === 'admin' || window.location.pathname === '/admin') {
-      if (adminToken || isClaimAdmin) {
+      if (adminToken) {
         return (
           <AdminDashboard
-            adminToken={adminToken || ''}
-            adminEmail={adminUser?.email || authUser?.email || 'buildsafe247@gmail.com'}
+            adminToken={adminToken}
+            adminEmail={adminUser?.email || 'buildsafe247@gmail.com'}
             onSignOut={handleAdminSignOut}
             onBackToStudentWorkspace={() => {
               window.history.pushState({}, '', '/');

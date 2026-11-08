@@ -115,7 +115,7 @@ function verifyAdminToken(token: string): { email: string; role: string; fullNam
   }
 }
 
-const OCR_MODEL = 'gemini-2.0-flash';
+const OCR_MODEL = 'gemini-3.5-flash';
 const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
 
 function pickGeminiKey(): string | null {
@@ -405,7 +405,7 @@ async function startServer() {
       config.responseMimeType = "application/json";
     }
 
-    const geminiCandidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+    const geminiCandidateModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
     let lastError: any = null;
 
     for (const model of geminiCandidateModels) {
@@ -505,7 +505,7 @@ async function startServer() {
   app.post('/api/subscription/initialize', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { plan, billingCycle = 'monthly' } = req.body;
-      const normalizedPlan = (plan === 'studio' || plan === 'sage') ? 'studio' : 'plus';
+      const normalizedPlan = (plan === 'studio' || plan === 'sage' || plan === 'premium') ? 'studio' : 'plus';
       const targetPlan = PAYSTACK_PLANS[normalizedPlan];
       const uid = req.user!.uid;
       const email = req.user?.email?.trim();
@@ -2823,7 +2823,7 @@ You MUST return a JSON object containing structured study assets with this exact
         };
 
         const response = await aiGen.models.generateContent({
-          model: 'gemini-2.0-flash',
+          model: 'gemini-3.5-flash',
           contents: [
             mediaInput,
             "Scan and transcribe this document, then synthesize structured study assets matching the JSON schema."
