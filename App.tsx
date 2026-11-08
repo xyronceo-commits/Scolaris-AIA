@@ -143,20 +143,34 @@ const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  // Update Page Title Metadata based on Active State
+  // Update Page Title and Robots Metadata based on Active State
   useEffect(() => {
+    let robotsMeta = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!robotsMeta) {
+      robotsMeta = document.createElement('meta');
+      robotsMeta.name = 'robots';
+      document.head.appendChild(robotsMeta);
+    }
+
     if (showAdminLoginForm) {
       document.title = 'Admin | KorsIQ';
+      robotsMeta.content = 'noindex, nofollow';
       return;
     }
     if (!authUser && showAuth) {
       document.title = authMode === 'signup' ? 'Create Account | KorsIQ' : 'Sign In | KorsIQ';
+      robotsMeta.content = 'noindex, nofollow';
       return;
     }
     if (!authUser) {
-      document.title = 'KorsIQ — AI-Powered Study Platform';
+      document.title = 'KorsIQ — AI-Powered Study & Academic Workspace';
+      robotsMeta.content = 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
       return;
     }
+
+    // Authenticated private workspace views are strictly marked noindex
+    robotsMeta.content = 'noindex, nofollow';
+
     const tabTitles: Record<string, string> = {
       dashboard: 'Dashboard | KorsIQ',
       courses: 'My Courses | KorsIQ',
