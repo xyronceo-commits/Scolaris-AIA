@@ -198,7 +198,12 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({
+    limit: '50mb',
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    }
+  }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Enforce server-side AI security: reject and completely strip any client-supplied provider credentials
@@ -216,6 +221,7 @@ async function startServer() {
 
   interface AuthenticatedRequest extends express.Request {
     user?: any;
+    rawBody?: Buffer;
   }
 
   const userApiRequests = new Map<string, number[]>();
@@ -268,7 +274,7 @@ async function startServer() {
 
         const { data: profile, error } = await client
           .from('profiles')
-          .select('tier, is_pro, subscription_tier, subscription_status')
+          .select('tier, is_pro, subscription_tier, subscription_status, subscription_end')
           .eq('id', uid)
           .maybeSingle();
 
@@ -279,6 +285,33 @@ async function startServer() {
         const userTier = (profile?.subscription_tier || profile?.tier || 'free').toLowerCase();
         const isPro = profile?.is_pro === true;
         const normalizedAllowed = allowedTiers.map(t => t.toLowerCase());
+
+        // Check if subscription has expired
+        if (profile?.subscription_end) {
+          const expiryTime = new Date(profile.subscription_end).getTime();
+          if (!isNaN(expiryTime) && Date.now() > expiryTime) {
+            return res.status(403).json({
+              success: false,
+              error: 'Subscription expired: Your billing period has ended. Please renew to continue using premium features.',
+              code: 'SUBSCRIPTION_EXPIRED',
+              requiredTiers: allowedTiers,
+              currentTier: userTier,
+              isPro: false,
+              subscriptionEnd: profile.subscription_end
+            });
+          }
+        }
+
+        const subStatus = (profile?.subscription_status || '').toLowerCase();
+        if (subStatus === 'expired' || subStatus === 'failed') {
+          return res.status(403).json({
+            success: false,
+            error: 'Subscription inactive: Your subscription is currently expired or past due. Please update payment.',
+            code: 'SUBSCRIPTION_INACTIVE',
+            requiredTiers: allowedTiers,
+            currentTier: userTier
+          });
+        }
 
         const hasAccess = isPro && normalizedAllowed.includes(userTier);
 
@@ -447,17 +480,57 @@ async function startServer() {
   // KORSIQ SUBSCRIPTION & PAYMENT MANAGEMENT (PAYSTACK & VERIFICATION)
   // =============================================================
 
+  const PAYSTACK_PLANS = {
+    plus: {
+      tier: 'plus' as const,
+      name: 'KorsIQ Plus',
+      amountNaira: 7500,
+      amountKobo: 750000,
+      planCode: cleanEnvKey('PAYSTACK_PLUS_PLAN_CODE') || 'PLN_2s5jpok47fzrpp3'
+    },
+    studio: {
+      tier: 'studio' as const,
+      name: 'KorsIQ Studio',
+      amountNaira: 15000,
+      amountKobo: 1500000,
+      planCode: cleanEnvKey('PAYSTACK_STUDIO_PLAN_CODE') || 'PLN_z34ejcjcs5od3mf'
+    }
+  };
+
   // Initialize checkout transaction
   app.post('/api/subscription/initialize', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { plan, billingCycle = 'monthly' } = req.body;
       const normalizedPlan = (plan === 'studio' || plan === 'sage') ? 'studio' : 'plus';
-      const amountNaira = normalizedPlan === 'studio' ? 15000 : 7500;
-      const amountKobo = amountNaira * 100;
+      const targetPlan = PAYSTACK_PLANS[normalizedPlan];
       const uid = req.user!.uid;
-      const email = req.user!.email || 'student@korsiq.app';
+      const email = req.user?.email?.trim();
 
-      const reference = `KORSIQ_${uid.slice(0, 8)}_${normalizedPlan}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+      if (!email || !email.includes('@')) {
+        return res.status(400).json({
+          success: false,
+          error: 'A valid email address associated with your account is required to initiate subscription.'
+        });
+      }
+
+      const reference = `KQ_${normalizedPlan.toUpperCase()}_${uid.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const client = supabaseAdmin || supabaseAuthClient;
+
+      // Store pending transaction in payment_transactions ledger before calling gateway
+      if (client) {
+        await client.from('payment_transactions').insert({
+          user_id: uid,
+          reference,
+          plan_tier: normalizedPlan,
+          amount_kobo: targetPlan.amountKobo,
+          amount_naira: targetPlan.amountNaira,
+          currency: 'NGN',
+          status: 'pending',
+          customer_email: email,
+          paystack_plan_code: targetPlan.planCode,
+          metadata: { billingCycle, initiatedAt: new Date().toISOString() }
+        });
+      }
 
       const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
       if (paystackKey) {
@@ -469,13 +542,15 @@ async function startServer() {
           },
           body: JSON.stringify({
             email,
-            amount: amountKobo,
+            amount: targetPlan.amountKobo,
+            plan: targetPlan.planCode,
             reference,
             currency: 'NGN',
             callback_url: `${req.headers.origin || 'http://localhost:3000'}/#/settings`,
             metadata: {
               userId: uid,
               planTier: normalizedPlan,
+              planCode: targetPlan.planCode,
               billingCycle
             }
           })
@@ -483,29 +558,43 @@ async function startServer() {
 
         const paystackData = await paystackRes.json();
         if (!paystackRes.ok || !paystackData.status) {
+          if (client) {
+            await client.from('payment_transactions').update({
+              status: 'failed',
+              gateway_response: paystackData.message || 'Initialization failed'
+            }).eq('reference', reference);
+          }
           return res.status(400).json({
             success: false,
             error: paystackData.message || 'Failed to initialize Paystack checkout'
           });
         }
 
+        if (client) {
+          await client.from('payment_transactions').update({
+            paystack_reference: paystackData.data?.reference || reference,
+            authorization_url: paystackData.data?.authorization_url,
+            access_code: paystackData.data?.access_code
+          }).eq('reference', reference);
+        }
+
         return res.json({
           success: true,
           authorizationUrl: paystackData.data.authorization_url,
           accessCode: paystackData.data.access_code,
-          reference: paystackData.data.reference,
+          reference: paystackData.data.reference || reference,
           plan: normalizedPlan,
-          amount: amountNaira,
+          amount: targetPlan.amountNaira,
           currency: 'NGN'
         });
       }
 
-      // If no PAYSTACK_SECRET_KEY is configured (e.g. testing mode), return standard reference
+      // If no PAYSTACK_SECRET_KEY is configured (e.g. testing mode)
       return res.json({
         success: true,
         reference,
         plan: normalizedPlan,
-        amount: amountNaira,
+        amount: targetPlan.amountNaira,
         currency: 'NGN',
         testMode: true,
         authorizationUrl: null,
@@ -520,8 +609,9 @@ async function startServer() {
   // Verify transaction status securely on the backend
   app.post('/api/subscription/verify', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { reference, testAction } = req.body;
+      const { reference } = req.body;
       const uid = req.user!.uid;
+      const userEmail = req.user!.email?.toLowerCase().trim();
 
       if (!reference || typeof reference !== 'string') {
         return res.status(400).json({ success: false, error: 'A valid payment reference is required.' });
@@ -537,7 +627,10 @@ async function startServer() {
           .eq('payment_reference', reference.trim())
           .maybeSingle();
 
-        if (existingSub && existingSub.payment_status === 'paid' && existingSub.status === 'active') {
+        if (existingSub && existingSub.payment_status === 'paid' && (existingSub.status === 'active' || existingSub.status === 'manual_active')) {
+          if (existingSub.user_id !== uid) {
+            return res.status(403).json({ success: false, error: 'Access denied: Payment reference was credited to a different account.' });
+          }
           return res.json({
             success: true,
             tier: existingSub.plan_tier,
@@ -549,12 +642,28 @@ async function startServer() {
         }
       }
 
+      // Load pending transaction record
+      let localTx: any = null;
+      if (client) {
+        const { data } = await client
+          .from('payment_transactions')
+          .select('*')
+          .eq('reference', reference.trim())
+          .maybeSingle();
+        localTx = data;
+      }
+
       const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
       let isVerified = false;
-      let planTier: 'plus' | 'studio' = reference.includes('_studio_') ? 'studio' : 'plus';
-      let amountPaid = planTier === 'studio' ? 15000 : 7500;
+      let planTier: 'plus' | 'studio' = localTx?.plan_tier || (reference.includes('_STUDIO_') || reference.includes('_studio_') ? 'studio' : 'plus');
+      let targetPlanConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
+      let amountPaid = targetPlanConfig.amountNaira;
       let paymentStatus: 'paid' | 'failed' | 'abandoned' | 'pending' | 'cancelled' = 'paid';
       let gatewayMessage = '';
+      let paystackSubCode: string | null = null;
+      let paystackCustCode: string | null = null;
+      let paystackAuthCode: string | null = null;
+      let paystackPlanCode: string | null = targetPlanConfig.planCode;
 
       if (paystackKey) {
         // Query Paystack verify endpoint securely on the backend
@@ -577,14 +686,37 @@ async function startServer() {
         gatewayMessage = tx.gateway_response || tx.status;
 
         if (tx.status === 'success') {
+          // STRICT SECURITY CHECKS:
+          // 1. Currency must be NGN
+          if (tx.currency !== 'NGN') {
+            return res.status(400).json({ success: false, error: 'Invalid currency: Only NGN transactions are accepted.' });
+          }
+
+          // 2. Customer ownership verification (cross-user replay protection)
+          const customerEmail = tx.customer?.email?.toLowerCase().trim();
+          const metaUserId = tx.metadata?.userId;
+          if (customerEmail && userEmail && customerEmail !== userEmail && metaUserId && metaUserId !== uid) {
+            return res.status(403).json({ success: false, error: 'Payment verification failed: Transaction customer does not match authenticated user.' });
+          }
+
+          // 3. Amount verification: reject underpaid transactions
+          const expectedKobo = targetPlanConfig.amountKobo;
+          if (tx.amount < expectedKobo) {
+            return res.status(400).json({
+              success: false,
+              error: `Underpaid transaction: Received ₦${(tx.amount / 100).toLocaleString()}, expected ₦${targetPlanConfig.amountNaira.toLocaleString()}. Paid access was not granted.`
+            });
+          }
+
           isVerified = true;
           paymentStatus = 'paid';
-          if (tx.metadata?.planTier === 'studio' || tx.amount >= 1500000) {
-            planTier = 'studio';
-          } else {
-            planTier = 'plus';
-          }
+          planTier = tx.amount >= PAYSTACK_PLANS.studio.amountKobo ? 'studio' : 'plus';
+          targetPlanConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
           amountPaid = tx.amount / 100;
+          paystackSubCode = tx.subscription_code || tx.customer?.subscription_code || null;
+          paystackCustCode = tx.customer?.customer_code || null;
+          paystackAuthCode = tx.authorization?.authorization_code || null;
+          paystackPlanCode = tx.plan || targetPlanConfig.planCode;
         } else if (tx.status === 'abandoned' || tx.status === 'failed' || tx.status === 'reversed') {
           paymentStatus = tx.status === 'abandoned' ? 'abandoned' : 'failed';
           isVerified = false;
@@ -593,34 +725,24 @@ async function startServer() {
           isVerified = false;
         }
       } else {
-        // Test / Development mode simulation
-        if (testAction === 'failed' || testAction === 'abandoned' || testAction === 'cancelled') {
-          paymentStatus = testAction;
-          isVerified = false;
-          gatewayMessage = `Payment was simulated as ${testAction}`;
-        } else if (testAction === 'pending') {
-          paymentStatus = 'pending';
-          isVerified = false;
-          gatewayMessage = 'Payment is currently pending bank authorization';
-        } else {
-          // Default test success
-          isVerified = true;
-          paymentStatus = 'paid';
-          if (reference.includes('_studio_') || req.body.plan === 'studio') {
-            planTier = 'studio';
-            amountPaid = 15000;
-          } else {
-            planTier = 'plus';
-            amountPaid = 7500;
-          }
-          gatewayMessage = 'Test payment verified successfully';
+        // Non-production test environment simulation (only when PAYSTACK_SECRET_KEY is not set)
+        if (process.env.NODE_ENV === 'production') {
+          return res.status(503).json({ success: false, error: 'Payment gateway configuration is missing in production.' });
         }
+        isVerified = true;
+        paymentStatus = 'paid';
+        amountPaid = targetPlanConfig.amountNaira;
+        gatewayMessage = 'Test environment payment simulation';
       }
 
       // If payment failed, abandoned, or pending: RECORD failure without granting paid access
       if (!isVerified || paymentStatus !== 'paid') {
         if (client) {
-          // Audit log the unverified attempt
+          await client.from('payment_transactions').update({
+            status: paymentStatus === 'pending' ? 'pending' : 'failed',
+            gateway_response: gatewayMessage
+          }).eq('reference', reference.trim());
+
           await client.from('subscriptions').upsert({
             user_id: uid,
             plan_tier: planTier,
@@ -649,7 +771,24 @@ async function startServer() {
       const endDate = new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
       if (client) {
-        // 1. Insert record into subscriptions table
+        // 1. Update payment_transactions ledger
+        await client.from('payment_transactions').upsert({
+          user_id: uid,
+          reference: reference.trim(),
+          paystack_reference: reference.trim(),
+          plan_tier: planTier,
+          amount_kobo: amountPaid * 100,
+          amount_naira: amountPaid,
+          currency: 'NGN',
+          status: 'success',
+          customer_email: userEmail || 'user@korsiq.app',
+          paystack_plan_code: paystackPlanCode,
+          paid_at: startDate.toISOString(),
+          gateway_response: gatewayMessage || 'Successful',
+          metadata: { verifiedAt: new Date().toISOString() }
+        }, { onConflict: 'reference' });
+
+        // 2. Insert record into subscriptions table
         await client.from('subscriptions').upsert({
           user_id: uid,
           plan_tier: planTier,
@@ -662,17 +801,22 @@ async function startServer() {
           currency: 'NGN',
           current_period_start: startDate.toISOString(),
           current_period_end: endDate.toISOString(),
+          paystack_subscription_code: paystackSubCode,
+          paystack_customer_code: paystackCustCode,
+          paystack_plan_code: paystackPlanCode,
+          paystack_authorization_code: paystackAuthCode,
           metadata: { gatewayMessage, verifiedAt: new Date().toISOString() }
         }, { onConflict: 'payment_reference' });
 
-        // 2. Update user profile to paid tier with Pro enabled
+        // 3. Update user profile to paid tier with Pro enabled
         await client.from('profiles').update({
           tier: planTier,
           is_pro: true,
           subscription_tier: planTier,
           subscription_status: 'active',
           payment_status: 'paid',
-          subscription_end: endDate.toISOString()
+          subscription_end: endDate.toISOString(),
+          paystack_customer_code: paystackCustCode
         }).eq('id', uid);
       }
 
@@ -701,18 +845,30 @@ async function startServer() {
       }
 
       const [profileRes, subRes] = await Promise.all([
-        client.from('profiles').select('tier, is_pro, subscription_tier, subscription_status, subscription_end').eq('id', uid).maybeSingle(),
+        client.from('profiles').select('tier, is_pro, subscription_tier, subscription_status, subscription_end, paystack_customer_code').eq('id', uid).maybeSingle(),
         client.from('subscriptions').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(1)
       ]);
 
       const profile = profileRes.data;
       const latestSub = subRes.data?.[0];
 
+      let isPro = profile?.is_pro ?? false;
+      let subscriptionStatus = profile?.subscription_status || (isPro ? 'active' : 'inactive');
+
+      // Check if period has ended
+      if (profile?.subscription_end) {
+        const expiry = new Date(profile.subscription_end).getTime();
+        if (!isNaN(expiry) && Date.now() > expiry) {
+          isPro = false;
+          subscriptionStatus = 'expired';
+        }
+      }
+
       return res.json({
         success: true,
         tier: profile?.subscription_tier || profile?.tier || 'free',
-        isPro: profile?.is_pro ?? false,
-        subscriptionStatus: profile?.subscription_status || (profile?.is_pro ? 'active' : 'inactive'),
+        isPro,
+        subscriptionStatus,
         subscriptionEnd: profile?.subscription_end || latestSub?.current_period_end || null,
         latestSubscription: latestSub || null
       });
@@ -722,7 +878,7 @@ async function startServer() {
   });
 
   // Paystack Webhook Handler
-  app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  app.post('/api/subscription/webhook', async (req: AuthenticatedRequest, res) => {
     const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
     if (!paystackKey) {
       return res.status(400).json({ error: 'Paystack secret is not configured' });
@@ -730,49 +886,167 @@ async function startServer() {
 
     try {
       const signature = req.headers['x-paystack-signature'] as string;
-      const rawBody = (req as any).rawBody || req.body;
-      const hash = crypto.createHmac('sha512', paystackKey).update(typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody)).digest('hex');
+      const rawBody = req.rawBody;
 
-      if (hash !== signature) {
+      if (!signature || !rawBody) {
+        return res.status(401).json({ error: 'Missing webhook signature or raw payload' });
+      }
+
+      const expectedSig = crypto.createHmac('sha512', paystackKey).update(rawBody).digest('hex');
+      if (!safeCompareStrings(signature, expectedSig)) {
         return res.status(401).json({ error: 'Invalid signature' });
       }
 
-      const event = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      const event = JSON.parse(rawBody.toString('utf8'));
+      const client = supabaseAdmin || supabaseAuthClient;
 
+      // Deduplicate webhook events
+      const eventId = event.id ? String(event.id) : `${event.event}_${event.data?.reference || event.data?.id || Date.now()}`;
+      if (client) {
+        const { data: existingEvent } = await client
+          .from('webhook_events')
+          .select('id, status')
+          .eq('event_id', eventId)
+          .maybeSingle();
+
+        if (existingEvent) {
+          return res.status(200).json({ received: true, message: 'Event already processed' });
+        }
+
+        await client.from('webhook_events').insert({
+          event_id: eventId,
+          event_type: event.event,
+          reference: event.data?.reference || null,
+          payload: event,
+          status: 'processed'
+        });
+      }
+
+      // 1. Initial Charge or Renewal Success
       if (event.event === 'charge.success' && event.data) {
         const tx = event.data;
         const ref = tx.reference;
         const uid = tx.metadata?.userId;
         const planTier = tx.metadata?.planTier || (tx.amount >= 1500000 ? 'studio' : 'plus');
-        const client = supabaseAdmin || supabaseAuthClient;
+        const planConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
 
-        if (client && uid && ref) {
-          const startDate = new Date();
-          const endDate = new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+        if (client && (uid || tx.customer?.email)) {
+          let resolvedUid = uid;
+          if (!resolvedUid && tx.customer?.email) {
+            const { data: userProfile } = await client.from('profiles').select('id').eq('email', tx.customer.email.toLowerCase().trim()).maybeSingle();
+            resolvedUid = userProfile?.id;
+          }
 
-          await client.from('subscriptions').upsert({
-            user_id: uid,
-            plan_tier: planTier,
-            billing_cycle: 'monthly',
-            status: 'active',
-            payment_provider: 'paystack',
-            payment_reference: ref,
-            payment_status: 'paid',
-            amount_paid: tx.amount / 100,
-            currency: tx.currency || 'NGN',
-            current_period_start: startDate.toISOString(),
-            current_period_end: endDate.toISOString(),
-            metadata: { event: event.event, receivedAt: new Date().toISOString() }
-          }, { onConflict: 'payment_reference' });
+          if (resolvedUid && ref) {
+            const startDate = tx.paid_at ? new Date(tx.paid_at) : new Date();
+            const endDate = new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-          await client.from('profiles').update({
-            tier: planTier,
-            is_pro: true,
-            subscription_tier: planTier,
-            subscription_status: 'active',
-            payment_status: 'paid',
-            subscription_end: endDate.toISOString()
-          }).eq('id', uid);
+            // Record transaction in ledger
+            await client.from('payment_transactions').upsert({
+              user_id: resolvedUid,
+              reference: ref,
+              paystack_reference: ref,
+              plan_tier: planTier,
+              amount_kobo: tx.amount,
+              amount_naira: tx.amount / 100,
+              currency: tx.currency || 'NGN',
+              status: 'success',
+              customer_email: tx.customer?.email || 'student@korsiq.app',
+              paystack_plan_code: tx.plan || planConfig.planCode,
+              paid_at: startDate.toISOString(),
+              gateway_response: tx.gateway_response || 'charge.success',
+              metadata: { event: event.event, receivedAt: new Date().toISOString() }
+            }, { onConflict: 'reference' });
+
+            // Upsert subscription
+            await client.from('subscriptions').upsert({
+              user_id: resolvedUid,
+              plan_tier: planTier,
+              billing_cycle: 'monthly',
+              status: 'active',
+              payment_provider: 'paystack',
+              payment_reference: ref,
+              payment_status: 'paid',
+              amount_paid: tx.amount / 100,
+              currency: tx.currency || 'NGN',
+              current_period_start: startDate.toISOString(),
+              current_period_end: endDate.toISOString(),
+              paystack_subscription_code: tx.subscription_code || tx.customer?.subscription_code || null,
+              paystack_customer_code: tx.customer?.customer_code || null,
+              paystack_plan_code: tx.plan || planConfig.planCode,
+              paystack_authorization_code: tx.authorization?.authorization_code || null,
+              metadata: { event: event.event, receivedAt: new Date().toISOString() }
+            }, { onConflict: 'payment_reference' });
+
+            // Update user profile
+            await client.from('profiles').update({
+              tier: planTier,
+              is_pro: true,
+              subscription_tier: planTier,
+              subscription_status: 'active',
+              payment_status: 'paid',
+              subscription_end: endDate.toISOString(),
+              paystack_customer_code: tx.customer?.customer_code || null
+            }).eq('id', resolvedUid);
+          }
+        }
+      }
+
+      // 2. Subscription Created
+      else if (event.event === 'subscription.create' && event.data) {
+        const sub = event.data;
+        const subCode = sub.subscription_code;
+        const custCode = sub.customer?.customer_code;
+        const planCode = sub.plan?.plan_code;
+
+        if (client && (subCode || custCode)) {
+          if (custCode) {
+            await client.from('subscriptions').update({
+              paystack_subscription_code: subCode,
+              paystack_plan_code: planCode
+            }).eq('paystack_customer_code', custCode);
+          }
+        }
+      }
+
+      // 3. Invoice Create: Never activate subscription on invoice creation
+      else if (event.event === 'invoice.create') {
+        // Explicitly ignore activation on invoice.create per Rule 1
+      }
+
+      // 4. Invoice Payment Failed (Failed Renewal)
+      else if (event.event === 'invoice.payment_failed' && event.data) {
+        const inv = event.data;
+        const subCode = inv.subscription?.subscription_code;
+        const custCode = inv.customer?.customer_code;
+
+        if (client && (subCode || custCode)) {
+          const query = subCode 
+            ? client.from('subscriptions').update({ status: 'past_due', payment_status: 'failed' }).eq('paystack_subscription_code', subCode)
+            : client.from('subscriptions').update({ status: 'past_due', payment_status: 'failed' }).eq('paystack_customer_code', custCode);
+          await query;
+        }
+      }
+
+      // 5. Subscription Disabled / Non-Renewal (Cancelled)
+      else if ((event.event === 'subscription.disable' || event.event === 'subscription.not_renew') && event.data) {
+        const sub = event.data;
+        const subCode = sub.subscription_code;
+        const custCode = sub.customer?.customer_code;
+
+        if (client && (subCode || custCode)) {
+          const nowIso = new Date().toISOString();
+          const subQuery = subCode
+            ? client.from('subscriptions').update({ status: 'cancelled', cancelled_at: nowIso }).eq('paystack_subscription_code', subCode)
+            : client.from('subscriptions').update({ status: 'cancelled', cancelled_at: nowIso }).eq('paystack_customer_code', custCode);
+          await subQuery;
+
+          // Preserve access until paid period ends where applicable
+          if (custCode) {
+            await client.from('profiles').update({
+              subscription_status: 'cancelled'
+            }).eq('paystack_customer_code', custCode);
+          }
         }
       }
 
@@ -3516,23 +3790,29 @@ CRITICAL WRITING RULES:
           .update({
             tier: cleanTier,
             is_pro: isPro,
+            subscription_tier: cleanTier,
+            subscription_status: isPro ? 'manual_active' : 'inactive',
+            payment_status: isPro ? 'paid' : 'none',
+            subscription_end: isPro ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null,
             updated_at: new Date().toISOString()
           })
           .eq('id', userId);
 
         if (profileErr) throw profileErr;
 
-        // Record override subscription record
+        // Record override subscription record with unified schema
         await supabaseAdmin.from('subscriptions').insert({
           user_id: userId,
-          plan: cleanTier,
-          status: 'verified',
-          amount: 0,
+          plan_tier: cleanTier,
+          status: isPro ? 'manual_active' : 'inactive',
+          amount_paid: 0,
           currency: 'NGN',
-          reference: `ADMIN_OVERRIDE_${Date.now()}`,
-          channel: 'admin_override',
-          paid_at: new Date().toISOString(),
-          metadata: { reason: reason || 'Administrative tier adjustment' }
+          payment_reference: `ADMIN_OVERRIDE_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+          payment_provider: 'manual_admin',
+          payment_status: isPro ? 'paid' : 'none',
+          current_period_start: new Date().toISOString(),
+          current_period_end: isPro ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null,
+          metadata: { reason: reason || 'Administrative tier adjustment', adminEmail: (req as any).adminUser?.email }
         });
       }
 
@@ -3573,13 +3853,13 @@ CRITICAL WRITING RULES:
           userId: s.user_id,
           userEmail: user.email,
           userName: user.name,
-          plan: s.plan || 'free',
+          plan: s.plan_tier || s.plan || 'free',
           status: s.status || 'pending',
-          amount: Number(s.amount) || 0,
+          amount: Number(s.amount_paid ?? s.amount) || 0,
           currency: s.currency || 'NGN',
-          reference: s.reference || 'N/A',
-          channel: s.channel || 'paystack',
-          paidAt: s.paid_at || s.created_at,
+          reference: s.payment_reference || s.reference || 'N/A',
+          channel: s.payment_provider || s.channel || 'paystack',
+          paidAt: s.current_period_start || s.paid_at || s.created_at,
           createdAt: s.created_at
         };
       }).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
@@ -3603,22 +3883,29 @@ CRITICAL WRITING RULES:
 
       if (supabaseAdmin) {
         const isPro = plan !== 'free';
+        const endDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         await supabaseAdmin.from('profiles').update({
           tier: plan,
           is_pro: isPro,
+          subscription_tier: plan,
+          subscription_status: 'manual_active',
+          payment_status: 'paid',
+          subscription_end: endDate,
           updated_at: new Date().toISOString()
         }).eq('id', userId);
 
         await supabaseAdmin.from('subscriptions').insert({
           user_id: userId,
-          plan,
-          status: 'verified',
-          amount: amount || 0,
+          plan_tier: plan,
+          status: 'manual_active',
+          amount_paid: Number(amount) || 0,
           currency: 'NGN',
-          reference: reference || `MANUAL_VERIFY_${Date.now()}`,
-          channel: 'admin_manual_verification',
-          paid_at: new Date().toISOString(),
-          metadata: { verifiedBy: (req as any).adminUser?.email, reason }
+          payment_reference: reference || `MANUAL_VERIFY_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+          payment_provider: 'manual_admin',
+          payment_status: 'paid',
+          current_period_start: new Date().toISOString(),
+          current_period_end: endDate,
+          metadata: { verifiedBy: (req as any).adminUser?.email, reason: reason || 'Manual administrative override' }
         });
       }
 

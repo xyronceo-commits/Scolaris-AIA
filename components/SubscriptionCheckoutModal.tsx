@@ -89,7 +89,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
   };
 
   // Step 2: Verify payment on backend securely
-  const handleVerifyPayment = async (testAction?: 'success' | 'failed' | 'abandoned' | 'cancelled' | 'pending') => {
+  const handleVerifyPayment = async () => {
     if (!paymentRef) return;
     setIsProcessing(true);
     setStatusMessage(null);
@@ -101,20 +101,19 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         headers,
         body: JSON.stringify({
           reference: paymentRef,
-          plan: selectedPlan,
-          testAction: testAction || 'success'
+          plan: selectedPlan
         })
       });
 
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        // Payment failed or abandoned
-        const reason = data.status || testAction || 'unverified';
+        // Payment failed, pending, or underpaid
+        const reason = data.status || 'unverified';
         setStatusMessage({
           type: reason === 'pending' ? 'warning' : 'error',
           title: reason === 'pending' ? 'Payment Pending' : 'Payment Not Successful',
-          description: data.error || data.message || `The payment status is ${reason}. No paid access has been granted.`
+          description: data.error || data.message || `Payment could not be verified. No paid access has been granted.`
         });
         setStep('status');
         return;
@@ -302,49 +301,21 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               </a>
             )}
 
-            <div className="space-y-2 pt-1">
+            <div className="space-y-3 pt-1">
               <p className="text-xs text-[#5B6472] dark:text-slate-400">
-                Click below once you have completed the payment, or test various gateway transaction outcomes:
+                Click below once you have completed your payment on Paystack to verify and unlock your subscription.
               </p>
 
               {/* Primary: Verify Successful Payment */}
               <button
                 type="button"
                 disabled={isProcessing}
-                onClick={() => handleVerifyPayment('success')}
+                onClick={() => handleVerifyPayment()}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[44px]"
               >
                 <Check size={14} />
                 <span>{isProcessing ? 'Verifying payment status...' : 'Verify Successful Payment'}</span>
               </button>
-
-              {/* Testing Controls: Allow testing failed, pending, cancelled per Requirement 4 */}
-              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => handleVerifyPayment('failed')}
-                  className="py-1.5 px-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900 rounded-md text-[11px] font-medium cursor-pointer"
-                >
-                  Test Failed
-                </button>
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => handleVerifyPayment('cancelled')}
-                  className="py-1.5 px-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900 rounded-md text-[11px] font-medium cursor-pointer"
-                >
-                  Test Cancelled
-                </button>
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => handleVerifyPayment('pending')}
-                  className="py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-md text-[11px] font-medium cursor-pointer"
-                >
-                  Test Pending
-                </button>
-              </div>
             </div>
 
             <button

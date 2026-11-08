@@ -219,6 +219,49 @@ The following existing features do not have a dedicated slot in the 6 main deskt
   - Deep blue `#1746A2` on Light blue `#EFF6FF` (8.4:1 AAA)
 - **Verification:** `npm run lint` (`tsc --noEmit`) and `npm run build` (`vite build` + `esbuild`) pass with zero errors.
 
+---
+
+## Phase 11: Server-Side Paystack Payment & Subscription Hardening
+
+- **Migration & Ledger Schema Reconciliation:**
+  - Created `supabase/migrations/20261107_paystack_security_remediation.sql` and `20261107_paystack_verification.sql`.
+  - Reconciled `public.subscriptions`, `public.payment_transactions`, and `public.webhook_events` with full RLS policies and idempotent execution.
+- **Strict Server Verification (`server.ts`):**
+  - Removed insecure client test parameter overrides (`testAction`).
+  - Added strict server-to-server transaction verification against Paystack's official endpoint (`https://api.paystack.co/transaction/verify/:reference`).
+  - Enforced verification of transaction status (`success`), exact expected amounts (₦7,500 = 750,000 / ₦15,000 = 1,500,000 kobo), currency (`NGN`), and replay attack protection using database reference checks.
+- **Frontend Backward Compatibility:**
+  - Streamlined `components/SubscriptionCheckoutModal.tsx` to remove dummy test actions and provide clean, single-action payment verification.
+  - Added unified plan tier mapping in `components/Profile.tsx`, `components/ResourcesView.tsx`, and `types.ts` for backward/forward compatibility (`plus`/`scholar`, `studio`/`sage`).
+
+---
+
+## Phase 12: Landing Page Rebuild (Desktop & Mobile)
+
+- **Source Specification:** `docs/specs/source/KorsIQ_Landing_Page_v5.pdf` and `docs/specs/source/KorsIQ_Landing_Page_Minimal.pdf`.
+- **Top Navigation Bar:** KorsIQ logo left, clean `Sign in` and `Get started` CTA controls with 44px min touch targets.
+- **Hero Section:**
+  - Heading: "Study smarter. Stay organised. Produce better academic work." with Primary Blue `#2563EB` accent.
+  - Subtitle: "Your courses, CGPA, study plan and coursework in one calm workspace."
+  - Two buttons: `Get started` (filled Primary Blue `#2563EB`) and `Sign in` (clean secondary white/dark card).
+  - High-fidelity interactive Sample Screen preview depicting Overview/Dashboard with priorities, upcoming deadlines, study schedule, CGPA snapshot (`4.12` / `4.50`), and recent documents.
+- **"What's inside" Section:**
+  - Five distinct cards:
+    1. *A CGPA you can trust* (BarChart)
+    2. *A plan you approve* (Clock)
+    3. *Academic Studio* (FileText)
+    4. *Private circles* (Users)
+    5. *Your resource library* (Folder)
+- **Callout Banner:**
+  - Soft light blue `#EFF6FF` container with spec copy: *"AI helps inside each task. You stay in control. You approve every outline and plan, and you are responsible for what you submit."*
+- **"Simple pricing" Section:**
+  - Three plan tiers matching spec: Free (₦0/mo), Plus (₦7,500/mo - highlighted), Academic Studio (₦15,000/mo) with full spec feature checklists and responsive buttons.
+- **Bottom Call-to-Action & Footer:**
+  - "Ready to get organised?" callout with "Get started free" primary action.
+  - Responsive multi-column footer with KorsIQ brand tagline, Product, Company, and Legal links, plus accessible modal dialogs for Terms, Privacy, About, and Contact.
+- **Verification:** Both `npm run lint` and `npm run build` pass cleanly.
+
+
 
 
 
