@@ -1,21 +1,34 @@
 # KorsIQ Robots Configuration
+# Technical SEO: https://korsiq.com.ng
 User-agent: *
+
+# Allow public discovery of homepage, assets, and branding
 Allow: /
+Allow: /assets/
 Allow: /favicon.ico
 Allow: /favicon.svg
 Allow: /favicon.png
 Allow: /favicon-48x48.png
 Allow: /apple-touch-icon.png
+Allow: /korsiq-logo.png
+Allow: /korsiq-logo-light.png
 Allow: /korsiq-logo-192.png
 Allow: /korsiq-logo-512.png
 Allow: /og-image.png
 Allow: /manifest.json
 Allow: /sitemap.xml
-Allow: /assets/
+Allow: /robots.txt
 
-# Disallow private user workspace, dashboard, and internal APIs
+# Disallow private user workspace, dashboard, auth, admin, and backend APIs
 Disallow: /api/
-Disallow: /dashboard/
+Disallow: /admin
 Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /workspace/
+Disallow: /auth/
+Disallow: /*?*token=*
+Disallow: /*?*code=*
+Disallow: /*?*access_token=*
 
-Sitemap: https://ais-dev-yahxa4uuxs5gx2wzqqd3t5-417290327349.europe-west2.run.app/sitemap.xml
+# Canonical XML Sitemap Location
+Sitemap: https://korsiq.com.ng/sitemap.xml

@@ -457,12 +457,16 @@ async function startServer() {
 
   // SEO Static Deliverables
   app.get('/robots.txt', (req, res) => {
-    res.type('text/plain');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.sendFile(path.join(process.cwd(), 'public', 'robots.txt'));
   });
 
   app.get('/sitemap.xml', (req, res) => {
-    res.type('application/xml');
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.sendFile(path.join(process.cwd(), 'public', 'sitemap.xml'));
   });
 
