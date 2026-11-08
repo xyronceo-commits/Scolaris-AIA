@@ -97,10 +97,12 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 
-    FROM information_schema.table_constraints 
-    WHERE table_schema = 'public' 
-      AND table_name = 'subscriptions' 
-      AND constraint_type = 'PRIMARY KEY'
+    FROM pg_constraint c
+    JOIN pg_class conrel ON c.conrelid = conrel.oid
+    JOIN pg_namespace conns ON conrel.relnamespace = conns.oid
+    WHERE conns.nspname = 'public' 
+      AND conrel.relname = 'subscriptions' 
+      AND c.contype = 'p'
   ) THEN
     UPDATE public.subscriptions SET id = gen_random_uuid() WHERE id IS NULL;
     ALTER TABLE public.subscriptions ALTER COLUMN id SET NOT NULL;
@@ -157,26 +159,25 @@ DO $$
 DECLARE
   v_fk_exists BOOLEAN;
 BEGIN
-  -- Verify by actual foreign key column relationship, not constraint name alone
+  -- Verify by actual foreign key column relationship
   SELECT EXISTS (
     SELECT 1
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name
-      AND tc.table_schema = kcu.table_schema
-    JOIN information_schema.constraint_column_usage ccu
-      ON ccu.constraint_name = tc.constraint_name
-      AND ccu.table_schema = tc.table_schema
-    WHERE tc.constraint_type = 'FOREIGN KEY'
-      AND tc.table_schema = 'public'
-      AND tc.table_name = 'subscriptions'
-      AND kcu.column_name = 'user_id'
-      AND ccu.table_schema = 'auth'
-      AND ccu.table_name = 'users'
-      AND ccu.column_name = 'id'
+    FROM pg_constraint c
+    JOIN pg_class conrel ON c.conrelid = conrel.oid
+    JOIN pg_namespace conns ON conrel.relnamespace = conns.oid
+    JOIN pg_class confrel ON c.confrelid = confrel.oid
+    JOIN pg_namespace confns ON confrel.relnamespace = confns.oid
+    JOIN pg_attribute conatt ON conatt.attrelid = conrel.oid AND conatt.attnum = ANY(c.conkey)
+    WHERE c.contype = 'f'
+      AND conns.nspname = 'public'
+      AND conrel.relname = 'subscriptions'
+      AND confns.nspname = 'auth'
+      AND confrel.relname = 'users'
+      AND conatt.attname = 'user_id'
   ) INTO v_fk_exists;
 
   IF NOT v_fk_exists THEN
+    ALTER TABLE public.subscriptions DROP CONSTRAINT IF EXISTS subscriptions_user_id_fkey;
     ALTER TABLE public.subscriptions
       ADD CONSTRAINT subscriptions_user_id_fkey
       FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -373,10 +374,12 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 
-    FROM information_schema.table_constraints 
-    WHERE table_schema = 'public' 
-      AND table_name = 'payment_transactions' 
-      AND constraint_type = 'PRIMARY KEY'
+    FROM pg_constraint c
+    JOIN pg_class conrel ON c.conrelid = conrel.oid
+    JOIN pg_namespace conns ON conrel.relnamespace = conns.oid
+    WHERE conns.nspname = 'public' 
+      AND conrel.relname = 'payment_transactions' 
+      AND c.contype = 'p'
   ) THEN
     UPDATE public.payment_transactions SET id = gen_random_uuid() WHERE id IS NULL;
     ALTER TABLE public.payment_transactions ALTER COLUMN id SET NOT NULL;
@@ -435,23 +438,22 @@ DECLARE
 BEGIN
   SELECT EXISTS (
     SELECT 1
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name
-      AND tc.table_schema = kcu.table_schema
-    JOIN information_schema.constraint_column_usage ccu
-      ON ccu.constraint_name = tc.constraint_name
-      AND ccu.table_schema = tc.table_schema
-    WHERE tc.constraint_type = 'FOREIGN KEY'
-      AND tc.table_schema = 'public'
-      AND tc.table_name = 'payment_transactions'
-      AND kcu.column_name = 'user_id'
-      AND ccu.table_schema = 'auth'
-      AND ccu.table_name = 'users'
-      AND ccu.column_name = 'id'
+    FROM pg_constraint c
+    JOIN pg_class conrel ON c.conrelid = conrel.oid
+    JOIN pg_namespace conns ON conrel.relnamespace = conns.oid
+    JOIN pg_class confrel ON c.confrelid = confrel.oid
+    JOIN pg_namespace confns ON confrel.relnamespace = confns.oid
+    JOIN pg_attribute conatt ON conatt.attrelid = conrel.oid AND conatt.attnum = ANY(c.conkey)
+    WHERE c.contype = 'f'
+      AND conns.nspname = 'public'
+      AND conrel.relname = 'payment_transactions'
+      AND confns.nspname = 'auth'
+      AND confrel.relname = 'users'
+      AND conatt.attname = 'user_id'
   ) INTO v_fk_exists;
 
   IF NOT v_fk_exists THEN
+    ALTER TABLE public.payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_user_id_fkey;
     ALTER TABLE public.payment_transactions
       ADD CONSTRAINT payment_transactions_user_id_fkey
       FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -569,10 +571,12 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 
-    FROM information_schema.table_constraints 
-    WHERE table_schema = 'public' 
-      AND table_name = 'webhook_events' 
-      AND constraint_type = 'PRIMARY KEY'
+    FROM pg_constraint c
+    JOIN pg_class conrel ON c.conrelid = conrel.oid
+    JOIN pg_namespace conns ON conrel.relnamespace = conns.oid
+    WHERE conns.nspname = 'public' 
+      AND conrel.relname = 'webhook_events' 
+      AND c.contype = 'p'
   ) THEN
     UPDATE public.webhook_events SET id = gen_random_uuid() WHERE id IS NULL;
     ALTER TABLE public.webhook_events ALTER COLUMN id SET NOT NULL;

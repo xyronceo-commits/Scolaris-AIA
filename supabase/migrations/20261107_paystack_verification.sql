@@ -38,24 +38,30 @@ ORDER BY table_name, ordinal_position;
 
 -- 3. VERIFY FOREIGN KEY DEFINITIONS (Verifies relation to auth.users.id)
 SELECT
-  tc.table_name, 
-  kcu.column_name, 
-  ccu.table_schema AS foreign_table_schema,
-  ccu.table_name AS foreign_table_name,
-  ccu.column_name AS foreign_column_name,
-  rc.delete_rule
-FROM information_schema.table_constraints AS tc 
-JOIN information_schema.key_column_usage AS kcu
-  ON tc.constraint_name = kcu.constraint_name
-  AND tc.table_schema = kcu.table_schema
-JOIN information_schema.constraint_column_usage AS ccu
-  ON ccu.constraint_name = tc.constraint_name
-  AND ccu.table_schema = tc.table_schema
-JOIN information_schema.referential_constraints AS rc
-  ON tc.constraint_name = rc.constraint_name
-WHERE tc.constraint_type = 'FOREIGN KEY' 
-  AND tc.table_schema = 'public'
-  AND tc.table_name IN ('subscriptions', 'payment_transactions');
+  conrel.relname AS table_name,
+  conatt.attname AS column_name,
+  confns.nspname AS foreign_table_schema,
+  confrel.relname AS foreign_table_name,
+  confatt.attname AS foreign_column_name,
+  c.conname AS constraint_name,
+  CASE c.confdeltype
+    WHEN 'c' THEN 'CASCADE'
+    WHEN 'n' THEN 'SET NULL'
+    WHEN 'd' THEN 'SET DEFAULT'
+    WHEN 'r' THEN 'RESTRICT'
+    WHEN 'a' THEN 'NO ACTION'
+    ELSE c.confdeltype::text
+  END AS delete_rule
+FROM pg_constraint c
+JOIN pg_class conrel ON c.conrelid = conrel.oid
+JOIN pg_namespace conns ON conrel.relnamespace = conns.oid
+JOIN pg_class confrel ON c.confrelid = confrel.oid
+JOIN pg_namespace confns ON confrel.relnamespace = confns.oid
+JOIN pg_attribute conatt ON conatt.attrelid = conrel.oid AND conatt.attnum = ANY(c.conkey)
+JOIN pg_attribute confatt ON confatt.attrelid = confrel.oid AND confatt.attnum = ANY(c.confkey)
+WHERE c.contype = 'f'
+  AND conns.nspname = 'public'
+  AND conrel.relname IN ('subscriptions', 'payment_transactions');
 
 -- 4. VERIFY CHECK CONSTRAINTS
 SELECT 
@@ -138,10 +144,10 @@ SELECT
   p.email,
   p.tier,
   p.is_pro,
-  p.subscription_tier,
-  p.subscription_status,
-  p.payment_status,
-  p.subscription_end,
+  to_jsonb(p)->>'subscription_tier' AS subscription_tier,
+  to_jsonb(p)->>'subscription_status' AS subscription_status,
+  to_jsonb(p)->>'payment_status' AS payment_status,
+  to_jsonb(p)->>'subscription_end' AS subscription_end,
   'Unverified or expired profile with paid/pro privileges' AS diagnostic_issue
 FROM public.profiles p
 WHERE (p.tier IN ('scholar', 'sage', 'plus', 'studio') OR p.is_pro = true)
@@ -304,12 +310,12 @@ WHERE p.tier <> s.plan_tier OR p.is_pro <> true;
 -- PART 3: SUMMARY PROFILE DISTRIBUTION
 -- ==============================================================================
 SELECT 
-  tier, 
-  is_pro, 
-  subscription_tier, 
-  subscription_status, 
-  payment_status,
+  p.tier, 
+  p.is_pro, 
+  to_jsonb(p)->>'subscription_tier' AS subscription_tier, 
+  to_jsonb(p)->>'subscription_status' AS subscription_status, 
+  to_jsonb(p)->>'payment_status' AS payment_status,
   COUNT(*) AS profile_count
-FROM public.profiles
-GROUP BY tier, is_pro, subscription_tier, subscription_status, payment_status
+FROM public.profiles p
+GROUP BY p.tier, p.is_pro, to_jsonb(p)->>'subscription_tier', to_jsonb(p)->>'subscription_status', to_jsonb(p)->>'payment_status'
 ORDER BY profile_count DESC;
