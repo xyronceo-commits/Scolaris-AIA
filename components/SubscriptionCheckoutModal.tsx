@@ -9,7 +9,8 @@ import {
   Sparkles, 
   Lock,
   ExternalLink,
-  RotateCcw
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
 import { UserProfile, SubscriptionPlanType } from '../types';
 import { getAccessToken } from '../lib/supabase';
@@ -88,10 +89,11 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
   };
 
   // Step 2: Verify payment on backend securely
-  const handleVerifyPayment = async () => {
-    if (!paymentRef) return;
+  const handleVerifyPayment = async (overrideRef?: string) => {
     setIsProcessing(true);
     setStatusMessage(null);
+
+    const ref = (overrideRef !== undefined ? overrideRef : (paymentRef || '')).trim();
 
     try {
       const headers = await getHeaders();
@@ -99,20 +101,21 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         method: 'POST',
         headers,
         body: JSON.stringify({
-          reference: paymentRef,
+          reference: ref || undefined,
+          email: currentProfile?.email,
           plan: selectedPlan
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
         // Payment failed, pending, or underpaid
         const reason = data.status || 'unverified';
         setStatusMessage({
           type: reason === 'pending' ? 'warning' : 'error',
-          title: reason === 'pending' ? 'Payment Pending' : 'Payment Not Successful',
-          description: data.error || data.message || `Payment could not be verified. No paid access has been granted.`
+          title: reason === 'pending' ? 'Payment Pending' : 'Payment Not Verified',
+          description: data.error || data.message || 'Payment could not be verified yet. If you recently paid on Paystack, please paste your Transaction Reference from your Paystack receipt/email and retry.'
         });
         setStep('status');
         return;
@@ -133,8 +136,8 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
 
       setStatusMessage({
         type: 'success',
-        title: 'Subscription Activated',
-        description: `Your account is now upgraded to ${selectedPlan === 'studio' ? 'KorsIQ Premium' : 'Plus'}. All features are unlocked!`
+        title: 'Subscription Activated!',
+        description: `Your account is now upgraded to ${data.tier === 'studio' ? 'KorsIQ Premium' : 'Plus'}. All features and limits are unlocked!`
       });
       setStep('status');
     } catch (err: any) {
@@ -142,7 +145,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
       setStatusMessage({
         type: 'error',
         title: 'Verification Error',
-        description: err.message || 'Unable to verify payment with the server. Please check your network and retry.'
+        description: err.message || 'Unable to connect to verification service. Please check your network and retry.'
       });
       setStep('status');
     } finally {
@@ -276,15 +279,31 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         {/* STEP 2: Confirm & Verify Payment */}
         {step === 'confirm' && (
           <div className="space-y-4">
-            <div className="p-3.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg space-y-1">
-              <span className="text-[10px] font-bold uppercase text-[#2563EB] tracking-wider">
-                Transaction Reference
-              </span>
-              <p className="font-mono text-xs font-semibold text-[#111827] dark:text-white break-all">
-                {paymentRef}
-              </p>
-              <p className="text-[11px] text-[#5B6472] dark:text-slate-400 pt-1">
-                Plan: <strong className="text-[#111827] dark:text-white uppercase">{selectedPlan}</strong> · Amount: <strong>{planInfo.price}</strong>
+            <div className="p-3.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase text-[#2563EB] tracking-wider">
+                  Payment Verification
+                </span>
+                <span className="text-[11px] font-bold text-[#111827] dark:text-white uppercase">
+                  {selectedPlan === 'studio' ? 'KorsIQ Premium (₦15,000)' : 'Plus (₦7,500)'}
+                </span>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-[#5B6472] dark:text-slate-300 block mb-1">
+                  Paystack Reference / Transaction ID:
+                </label>
+                <input
+                  type="text"
+                  value={paymentRef || ''}
+                  onChange={(e) => setPaymentRef(e.target.value.trim())}
+                  placeholder="Paste reference from Paystack receipt or email"
+                  className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-md text-[#111827] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                />
+              </div>
+
+              <p className="text-[11px] text-[#5B6472] dark:text-slate-400">
+                Account email: <strong className="text-[#111827] dark:text-white">{currentProfile?.email}</strong>
               </p>
             </div>
 
@@ -298,20 +317,33 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               <ExternalLink size={13} />
             </a>
 
-            <div className="space-y-3 pt-1">
-              <p className="text-xs text-[#5B6472] dark:text-slate-400">
-                Click below once you have completed your payment on Paystack to verify and unlock your subscription.
-              </p>
-
-              {/* Primary: Verify Successful Payment */}
+            <div className="space-y-2 pt-1">
               <button
                 type="button"
                 disabled={isProcessing}
                 onClick={() => handleVerifyPayment()}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs min-h-[44px]"
               >
-                <Check size={14} />
-                <span>{isProcessing ? 'Verifying payment status...' : 'Verify Successful Payment'}</span>
+                {isProcessing ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Verifying with Paystack gateway...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={14} />
+                    <span>Verify Successful Payment</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={() => handleVerifyPayment('')}
+                className="w-full py-2 text-xs font-semibold text-[#2563EB] dark:text-blue-400 hover:underline cursor-pointer"
+              >
+                Don't have reference? Check by Account Email
               </button>
             </div>
 

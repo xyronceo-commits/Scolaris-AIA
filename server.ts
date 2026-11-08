@@ -614,52 +614,74 @@ async function startServer() {
   app.post('/api/subscription/verify', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { reference } = req.body;
+      let cleanRef = (typeof reference === 'string' ? reference.trim() : '');
       const uid = req.user!.uid;
-      const userEmail = req.user!.email?.toLowerCase().trim();
-
-      if (!reference || typeof reference !== 'string') {
-        return res.status(400).json({ success: false, error: 'A valid payment reference is required.' });
-      }
-
+      const userEmail = (req.body?.email || req.user!.email || '').toLowerCase().trim();
       const client = supabaseAdmin || supabaseAuthClient;
 
-      // 1. Idempotency check: check if this reference was already verified and credited
+      // 1. Idempotency & existing active check in database
       if (client) {
-        const { data: existingSub } = await client
+        if (cleanRef) {
+          const { data: existingSub } = await client
+            .from('subscriptions')
+            .select('*')
+            .eq('payment_reference', cleanRef)
+            .maybeSingle();
+
+          if (existingSub && existingSub.payment_status === 'paid' && (existingSub.status === 'active' || existingSub.status === 'manual_active')) {
+            if (existingSub.user_id !== uid) {
+              return res.status(403).json({ success: false, error: 'Access denied: Payment reference was credited to a different account.' });
+            }
+            return res.json({
+              success: true,
+              tier: existingSub.plan_tier,
+              isPro: true,
+              subscriptionStatus: 'active',
+              message: 'Subscription is already verified and active.',
+              subscription: existingSub,
+              alreadyProcessed: true
+            });
+          }
+        }
+
+        // Check if user already has an active subscription recorded (e.g. from a webhook)
+        const { data: userActiveSub } = await client
           .from('subscriptions')
           .select('*')
-          .eq('payment_reference', reference.trim())
+          .eq('user_id', uid)
+          .eq('status', 'active')
+          .order('current_period_end', { ascending: false })
+          .limit(1)
           .maybeSingle();
 
-        if (existingSub && existingSub.payment_status === 'paid' && (existingSub.status === 'active' || existingSub.status === 'manual_active')) {
-          if (existingSub.user_id !== uid) {
-            return res.status(403).json({ success: false, error: 'Access denied: Payment reference was credited to a different account.' });
-          }
+        if (userActiveSub && userActiveSub.payment_status === 'paid') {
           return res.json({
             success: true,
-            tier: existingSub.plan_tier,
+            tier: userActiveSub.plan_tier,
             isPro: true,
-            message: 'Subscription is already verified and active.',
-            subscription: existingSub,
+            subscriptionStatus: 'active',
+            currentPeriodEnd: userActiveSub.current_period_end,
+            message: 'Your account subscription is verified and active.',
+            subscription: userActiveSub,
             alreadyProcessed: true
           });
         }
       }
 
-      // Load pending transaction record
+      // Load pending transaction record if exists
       let localTx: any = null;
-      if (client) {
+      if (client && cleanRef) {
         const { data } = await client
           .from('payment_transactions')
           .select('*')
-          .eq('reference', reference.trim())
+          .eq('reference', cleanRef)
           .maybeSingle();
         localTx = data;
       }
 
       const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
       let isVerified = false;
-      let planTier: 'plus' | 'studio' = localTx?.plan_tier || (reference.includes('_STUDIO_') || reference.includes('_studio_') ? 'studio' : 'plus');
+      let planTier: 'plus' | 'studio' = localTx?.plan_tier || ((cleanRef.includes('_STUDIO_') || cleanRef.includes('_studio_') || req.body?.plan === 'studio' || req.body?.plan === 'premium') ? 'studio' : 'plus');
       let targetPlanConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
       let amountPaid = targetPlanConfig.amountNaira;
       let paymentStatus: 'paid' | 'failed' | 'abandoned' | 'pending' | 'cancelled' = 'paid';
@@ -670,24 +692,61 @@ async function startServer() {
       let paystackPlanCode: string | null = targetPlanConfig.planCode;
 
       if (paystackKey) {
-        // Query Paystack verify endpoint securely on the backend
-        const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference.trim())}`, {
-          headers: {
-            Authorization: `Bearer ${paystackKey}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        let tx: any = null;
 
-        const verifyData = await verifyRes.json();
-        if (!verifyRes.ok || !verifyData.status) {
-          return res.status(400).json({
-            success: false,
-            error: verifyData.message || 'Payment verification failed at gateway'
-          });
+        // Try direct reference verification if reference was supplied
+        if (cleanRef) {
+          try {
+            const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(cleanRef)}`, {
+              headers: {
+                Authorization: `Bearer ${paystackKey}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyRes.ok && verifyData.status && verifyData.data) {
+              tx = verifyData.data;
+            }
+          } catch (vErr) {
+            console.warn('Paystack direct verify lookup warning:', vErr);
+          }
         }
 
-        const tx = verifyData.data;
-        gatewayMessage = tx.gateway_response || tx.status;
+        // Fallback: If not found by reference (or reference was blank), query Paystack for customer transactions by account email
+        if (!tx && userEmail) {
+          try {
+            const custRes = await fetch(`https://api.paystack.co/transaction?customer=${encodeURIComponent(userEmail)}&perPage=5`, {
+              headers: {
+                Authorization: `Bearer ${paystackKey}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            const custData = await custRes.json();
+            if (custRes.ok && custData.status && Array.isArray(custData.data)) {
+              // Find the latest successful transaction for this customer
+              const successfulTx = custData.data.find((t: any) => t.status === 'success');
+              if (successfulTx) {
+                tx = successfulTx;
+                cleanRef = tx.reference || cleanRef;
+              }
+            }
+          } catch (cErr) {
+            console.warn('Paystack customer transaction search warning:', cErr);
+          }
+        }
+
+        if (!tx) {
+          if (!cleanRef) {
+            return res.status(400).json({
+              success: false,
+              error: 'A valid payment reference is required. Please paste the reference from your Paystack receipt.'
+            });
+          }
+          return res.status(400).json({
+            success: false,
+            error: `Payment reference '${cleanRef}' could not be verified on Paystack. If you recently paid, please verify the reference or retry in a few moments.`
+          });
+        }
 
         if (tx.status === 'success') {
           // STRICT SECURITY CHECKS:
