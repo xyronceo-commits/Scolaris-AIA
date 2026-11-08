@@ -616,31 +616,44 @@ export const DBService = {
 
     // 2. Direct Supabase insert fallback
     try {
-      const { data, error } = await supabase
+      const payload: any = {
+        id: groupId,
+        name: groupData.name,
+        description: groupData.description,
+        course: groupData.course,
+        type: groupData.type,
+        visibility: groupData.type === 'general' ? 'public' : 'private',
+        invite_code: inviteCode,
+        invite_code_active: true,
+        department: groupData.department || '',
+        level: groupData.level || '',
+        university: groupData.university || '',
+        academic_session: groupData.academicSession || '',
+        group_image: groupData.groupImage || '',
+        owner_id: userId,
+        members: [initialMember],
+        member_count: 1,
+        messages: [welcomeMessage],
+        discussions: [],
+        activity_feed: [initialActivity],
+      };
+
+      let { data, error } = await supabase
         .from('study_groups')
-        .insert({
-          id: groupId,
-          name: groupData.name,
-          description: groupData.description,
-          course: groupData.course,
-          type: groupData.type,
-          visibility: groupData.type === 'general' ? 'public' : 'private',
-          invite_code: inviteCode,
-          invite_code_active: true,
-          department: groupData.department || '',
-          level: groupData.level || '',
-          university: groupData.university || '',
-          academic_session: groupData.academicSession || '',
-          group_image: groupData.groupImage || '',
-          owner_id: userId,
-          members: [initialMember],
-          member_count: 1,
-          messages: [welcomeMessage],
-          discussions: [],
-          activity_feed: [initialActivity],
-        })
+        .insert(payload)
         .select('*')
         .maybeSingle();
+
+      if (error && (error.message?.includes('invite_code_active') || error.code === 'PGRST204')) {
+        delete payload.invite_code_active;
+        const retry = await supabase
+          .from('study_groups')
+          .insert(payload)
+          .select('*')
+          .maybeSingle();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (!error && data) {
         const newGroup = rowToGroup(data, []);
@@ -1075,10 +1088,18 @@ export const DBService = {
         throw new Error('Unauthorized to regenerate circle invite code.');
       }
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('study_groups')
         .update({ invite_code: newCode, invite_code_active: true })
         .eq('id', groupId);
+
+      if (error && (error.message?.includes('invite_code_active') || error.code === 'PGRST204')) {
+        const retry = await supabase
+          .from('study_groups')
+          .update({ invite_code: newCode })
+          .eq('id', groupId);
+        error = retry.error;
+      }
       if (error) throw error;
 
       const list = readCache<StudyGroup[]>('groups', userId, []);
@@ -1097,10 +1118,18 @@ export const DBService = {
         throw new Error('Unauthorized to revoke circle invite code.');
       }
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('study_groups')
         .update({ invite_code_active: false })
         .eq('id', groupId);
+
+      if (error && (error.message?.includes('invite_code_active') || error.code === 'PGRST204')) {
+        const retry = await supabase
+          .from('study_groups')
+          .update({ invite_code: 'REVOKED_' + Date.now().toString(36) })
+          .eq('id', groupId);
+        error = retry.error;
+      }
       if (error) throw error;
 
       const list = readCache<StudyGroup[]>('groups', userId, []);

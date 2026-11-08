@@ -193,11 +193,19 @@ async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   return '';
 }
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
   const PORT = 3000;
 
   app.use(cors());
+
+  // URL normalizer: ensure incoming paths match Express /api routes on all hosting providers
+  app.use((req, _res, next) => {
+    if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/assets') && req.url !== '/' && req.url !== '/index.html' && !req.url.startsWith('/vite')) {
+      req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
+    }
+    next();
+  });
   app.use(express.json({
     limit: '50mb',
     verify: (req: any, _res, buf) => {
@@ -4926,20 +4934,22 @@ CRITICAL WRITING RULES:
     }
   });
 
-  // Vite integration
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  // Vite / static file serving only when NOT running as serverless function
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*all', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   // Ensure default storage buckets exist if service role client is active
@@ -4955,9 +4965,19 @@ CRITICAL WRITING RULES:
     }
   }
 
+  return app;
+}
+
+export async function startServer() {
+  const app = await createExpressApp();
+  const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+  return app;
 }
 
-startServer();
+// Auto-start only in standalone / local development (not when imported as a serverless module)
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
+  startServer();
+}
