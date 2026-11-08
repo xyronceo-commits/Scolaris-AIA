@@ -393,20 +393,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
             </div>
 
             <div className="mt-8 pt-4">
-              <button
-                type="button"
-                onClick={onStart}
-                className="w-full py-2.5 px-4 text-sm font-medium text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors min-h-[44px] flex items-center justify-center shadow-xs cursor-pointer"
+              <a
+                href="https://paystack.shop/pay/c-mcwwacc8"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 px-4 text-sm font-medium text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors min-h-[44px] flex items-center justify-center shadow-xs cursor-pointer text-center"
               >
                 Choose Plus
-              </button>
+              </a>
             </div>
           </div>
 
-          {/* Card 3: Academic Studio */}
+          {/* Card 3: KorsIQ Premium (Renamed from Academic Studio) */}
           <div className="bg-white dark:bg-slate-900 rounded-lg border border-[#E5E7EB] dark:border-slate-800 p-6 flex flex-col justify-between">
             <div>
-              <h3 className="text-lg font-bold text-[#111827] dark:text-white">Academic Studio</h3>
+              <h3 className="text-lg font-bold text-[#111827] dark:text-white">KorsIQ Premium</h3>
               <p className="text-xs text-[#5B6472] dark:text-slate-400 mt-0.5">Research, write and produce.</p>
 
               <div className="mt-4 mb-6">
@@ -431,13 +432,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
             </div>
 
             <div className="mt-8 pt-4">
-              <button
-                type="button"
-                onClick={onStart}
-                className="w-full py-2.5 px-4 text-sm font-medium text-[#111827] dark:text-white bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-lg transition-colors min-h-[44px] flex items-center justify-center cursor-pointer"
+              <a
+                href="https://paystack.shop/pay/asaup43dpk"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 px-4 text-sm font-medium text-[#111827] dark:text-white bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-lg transition-colors min-h-[44px] flex items-center justify-center cursor-pointer text-center"
               >
-                Choose Academic Studio
-              </button>
+                Choose Premium
+              </a>
             </div>
           </div>
         </div>

@@ -247,7 +247,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     Need more room to write?
                   </h3>
                   <p className="text-xs text-[#5B6472] leading-relaxed">
-                    Upgrade to Plus or Academic Studio for dissertation tools, larger file allowances, real citation chips, and formatted Word (.docx) export.
+                    Upgrade to Plus or KorsIQ Premium for dissertation tools, larger file allowances, real citation chips, and formatted Word (.docx) export.
                   </p>
                 </div>
 
@@ -649,11 +649,11 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 </button>
               </div>
 
-              {/* Academic Studio Card */}
+              {/* KorsIQ Premium Card (Renamed from Academic Studio) */}
               <div className="border border-[#E5E7EB] dark:border-slate-800 bg-white dark:bg-slate-900 rounded-lg p-5 flex flex-col justify-between space-y-4">
                 <div className="space-y-3">
                   <div>
-                    <h4 className="font-bold text-base text-[#111827] dark:text-white">Academic Studio</h4>
+                    <h4 className="font-bold text-base text-[#111827] dark:text-white">KorsIQ Premium</h4>
                     <p className="text-xs text-[#5B6472] mt-0.5">Full Studio workspace.</p>
                   </div>
                   <div>
@@ -692,7 +692,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  {profile.tier === 'studio' ? 'Current Plan' : 'Upgrade to Academic Studio'}
+                  {profile.tier === 'studio' ? 'Current Plan' : 'Upgrade to KorsIQ Premium'}
                 </button>
               </div>
             </div>

@@ -505,7 +505,7 @@ async function startServer() {
   app.post('/api/subscription/initialize', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { plan, billingCycle = 'monthly' } = req.body;
-      const normalizedPlan = (plan === 'studio' || plan === 'sage') ? 'studio' : 'plus';
+      const normalizedPlan = (plan === 'studio' || plan === 'sage' || plan === 'premium') ? 'studio' : 'plus';
       const targetPlan = PAYSTACK_PLANS[normalizedPlan];
       const uid = req.user!.uid;
       const email = req.user?.email?.trim();

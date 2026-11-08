@@ -52,10 +52,18 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
     return headers;
   };
 
-  // Step 1: Initialize transaction with backend
+  // Step 1: Initialize transaction with backend and open direct Paystack checkout
   const handleInitiatePayment = async () => {
     setIsProcessing(true);
     setStatusMessage(null);
+
+    const directUrl = selectedPlan === 'studio' 
+      ? 'https://paystack.shop/pay/asaup43dpk' 
+      : 'https://paystack.shop/pay/c-mcwwacc8';
+
+    // Open Paystack checkout page directly in a new tab immediately
+    window.open(directUrl, '_blank', 'noopener,noreferrer');
+
     try {
       const headers = await getHeaders();
       const res = await fetch('/api/subscription/initialize', {
@@ -65,26 +73,17 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
       });
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to initialize checkout transaction');
+      if (res.ok && data.success) {
+        setPaymentRef(data.reference);
+        if (data.authorizationUrl) {
+          setAuthUrl(data.authorizationUrl);
+        }
       }
-
-      setPaymentRef(data.reference);
-      if (data.authorizationUrl) {
-        setAuthUrl(data.authorizationUrl);
-        // Open Paystack hosted checkout in a new window/tab
-        window.open(data.authorizationUrl, '_blank', 'noopener,noreferrer');
-      }
-      setStep('confirm');
     } catch (err: any) {
-      console.error('Checkout error:', err);
-      setStatusMessage({
-        type: 'error',
-        title: 'Checkout Initialization Failed',
-        description: err.message || 'Could not connect to payment gateway. Please try again.'
-      });
+      console.warn('Backend pre-init notification:', err);
     } finally {
       setIsProcessing(false);
+      setStep('confirm');
     }
   };
 
@@ -135,7 +134,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
       setStatusMessage({
         type: 'success',
         title: 'Subscription Activated',
-        description: `Your account is now upgraded to ${selectedPlan === 'studio' ? 'Academic Studio' : 'Plus'}. All features are unlocked!`
+        description: `Your account is now upgraded to ${selectedPlan === 'studio' ? 'KorsIQ Premium' : 'Plus'}. All features are unlocked!`
       });
       setStep('status');
     } catch (err: any) {
@@ -222,7 +221,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
                 </div>
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#111827] dark:text-white">Academic Studio</span>
+                    <span className="text-xs font-bold text-[#111827] dark:text-white">KorsIQ Premium</span>
                     {selectedPlan === 'studio' && <Check size={14} className="text-[#2563EB]" />}
                   </div>
                   <p className="text-[11px] text-[#5B6472] dark:text-slate-400 mt-1">Full research &amp; writing suite.</p>
@@ -237,7 +236,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
             {/* Plan Highlights */}
             <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg space-y-2 border border-[#E5E7EB] dark:border-slate-800">
               <span className="text-[11px] font-bold text-[#111827] dark:text-white uppercase tracking-wider block">
-                {selectedPlan === 'studio' ? 'Academic Studio Package Includes' : 'Plus Package Includes'}
+                {selectedPlan === 'studio' ? 'KorsIQ Premium Package Includes' : 'Plus Package Includes'}
               </span>
               <ul className="space-y-1.5 text-xs text-[#5B6472] dark:text-slate-300">
                 <li className="flex items-center gap-2">
@@ -289,17 +288,15 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               </p>
             </div>
 
-            {authUrl && (
-              <a
-                href={authUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-[#111827] dark:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
-              >
-                <span>Re-open Paystack Gateway</span>
-                <ExternalLink size={13} />
-              </a>
-            )}
+            <a
+              href={authUrl || (selectedPlan === 'studio' ? 'https://paystack.shop/pay/asaup43dpk' : 'https://paystack.shop/pay/c-mcwwacc8')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-[#111827] dark:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
+            >
+              <span>Open Paystack Payment Gateway</span>
+              <ExternalLink size={13} />
+            </a>
 
             <div className="space-y-3 pt-1">
               <p className="text-xs text-[#5B6472] dark:text-slate-400">

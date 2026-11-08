@@ -529,7 +529,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                 </button>
               </div>
 
-              {/* Card 3: Academic Studio */}
+              {/* Card 3: KorsIQ Premium (Renamed from Academic Studio) */}
               <div
                 className={`bg-white dark:bg-slate-900 rounded-lg p-5 border flex flex-col justify-between space-y-4 transition-all shadow-xs ${
                   selectedPlan === 'studio'
@@ -539,7 +539,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({
               >
                 <div className="space-y-3">
                   <div>
-                    <h3 className="font-bold text-base text-[#111827] dark:text-white">Academic Studio</h3>
+                    <h3 className="font-bold text-base text-[#111827] dark:text-white">KorsIQ Premium</h3>
                     <p className="text-xs text-[#5B6472] mt-0.5">Research, write and produce. Full Studio.</p>
                   </div>
                   <div>
@@ -578,7 +578,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                   }}
                   className="w-full py-2.5 border border-[#E5E7EB] hover:bg-slate-50 text-[#111827] dark:text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
                 >
-                  {userTier === 'studio' ? 'Academic Studio Active' : 'Choose Academic Studio'}
+                  {userTier === 'studio' ? 'KorsIQ Premium Active' : 'Choose Premium'}
                 </button>
               </div>
             </div>
