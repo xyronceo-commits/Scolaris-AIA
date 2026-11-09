@@ -39,6 +39,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     message: null
   });
   const [isUploading, setIsUploading] = useState(false);
+  const [retryingFileId, setRetryingFileId] = useState<string | null>(null);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -148,7 +149,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         courseId,
         file,
         courseCode,
-        courseTitle
+        courseTitle,
+        'processing'
       );
 
       if (!uploaded) {
@@ -157,7 +159,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           message: 'Details not saved: file transferred but record creation failed. Please retry.'
         });
       } else {
-        setUploadSuccessMsg(`"${file.name}" uploaded successfully.`);
+        fetchFiles();
+        const extractRes = await DBService.retryUserFileExtraction(uploaded);
+        if (extractRes.success) {
+          setUploadSuccessMsg(`"${file.name}" uploaded and text extracted.`);
+        } else {
+          setUploadError({
+            type: 'storage',
+            message: `Uploaded "${file.name}", could not read text: ${extractRes.error || 'Use Retry on the file row.'}`
+          });
+        }
         fetchFiles();
       }
     } catch (err: any) {
@@ -169,6 +180,25 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRetryExtraction = async (file: UserFile) => {
+    setRetryingFileId(file.id);
+    setUploadError({ type: null, message: null });
+    try {
+      const res = await DBService.retryUserFileExtraction(file);
+      if (res.success) {
+        setUploadSuccessMsg(`Successfully read text from "${file.fileName}".`);
+      } else {
+        setUploadError({
+          type: 'storage',
+          message: res.error || `Uploaded "${file.fileName}", could not read text.`
+        });
+      }
+      await fetchFiles();
+    } finally {
+      setRetryingFileId(null);
     }
   };
 
@@ -408,15 +438,32 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       {new Date(file.timestamp || file.uploadedAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3">
-                      {/* Status uses icon-free text tags per spec only if real status exists */}
                       {file.status && (
-                        <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${
-                          file.status === 'processing'
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                            : 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300'
-                        }`}>
-                          {file.status === 'processing' ? 'Processing' : 'Ready'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                            file.status === 'processing'
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                              : file.status === 'failed'
+                              ? 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                              : 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300'
+                          }`}>
+                            {file.status === 'processing'
+                              ? 'Processing'
+                              : file.status === 'failed'
+                              ? 'Uploaded, could not read text'
+                              : 'Ready'}
+                          </span>
+                          {file.status === 'failed' && (
+                            <button
+                              type="button"
+                              disabled={retryingFileId === file.id}
+                              onClick={() => handleRetryExtraction(file)}
+                              className="px-2.5 py-1 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded text-[11px] font-semibold cursor-pointer"
+                            >
+                              {retryingFileId === file.id ? 'Retrying...' : 'Retry'}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -468,13 +515,31 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     </span>
                   </div>
                   {file.status && (
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 ${
-                      file.status === 'processing'
-                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                        : 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300'
-                    }`}>
-                      {file.status === 'processing' ? 'Processing' : 'Ready'}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                        file.status === 'processing'
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                          : file.status === 'failed'
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                          : 'bg-[#EFF6FF] text-[#2563EB] dark:bg-blue-950 dark:text-blue-300'
+                      }`}>
+                        {file.status === 'processing'
+                          ? 'Processing'
+                          : file.status === 'failed'
+                          ? 'Uploaded, could not read text'
+                          : 'Ready'}
+                      </span>
+                      {file.status === 'failed' && (
+                        <button
+                          type="button"
+                          disabled={retryingFileId === file.id}
+                          onClick={() => handleRetryExtraction(file)}
+                          className="px-2 py-1 bg-[#2563EB] text-white rounded text-[10px] font-semibold cursor-pointer"
+                        >
+                          {retryingFileId === file.id ? 'Retrying...' : 'Retry'}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-[#5B6472] dark:text-slate-400">

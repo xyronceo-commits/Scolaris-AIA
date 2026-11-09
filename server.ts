@@ -3235,27 +3235,101 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     }
   });
 
+  // Helper: Download a file buffer directly from Supabase Storage (bypasses Vercel 4.5MB body limit)
+  async function downloadStorageBufferForUser(
+    userId: string,
+    storagePath: string,
+    preferredBucket?: string
+  ): Promise<{ buffer: Buffer | null; error?: string }> {
+    if (!supabaseAdmin) {
+      return { buffer: null, error: 'Storage service is not configured on the server.' };
+    }
+    const cleanPath = String(storagePath || '').trim();
+    if (!cleanPath || cleanPath.includes('..')) {
+      return { buffer: null, error: 'Invalid storage path.' };
+    }
+    // Ownership guard: personal files live under users/<userId>/...
+    if (cleanPath.startsWith('users/') && userId && !cleanPath.startsWith(`users/${userId}/`)) {
+      return { buffer: null, error: 'Access denied to this storage object.' };
+    }
+
+    const candidateBuckets = Array.from(
+      new Set([preferredBucket || 'user-files', 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
+    );
+
+    let lastErr = 'Could not download file from storage.';
+    for (const bucketName of candidateBuckets) {
+      try {
+        const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
+        if (!error && blob) {
+          const ab = await blob.arrayBuffer();
+          return { buffer: Buffer.from(ab) };
+        }
+        if (error?.message) lastErr = error.message;
+      } catch (err: any) {
+        if (err?.message) lastErr = err.message;
+      }
+    }
+    return { buffer: null, error: lastErr };
+  }
+
   // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
   app.post('/api/files/extract', requireAuth, apiRateLimiter, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const { fileName, fileType, contentBase64, storagePath, bucket, fileId } = req.body;
+
+    const markUserFileStatus = async (status: 'ready' | 'failed') => {
+      if (fileId && userId && supabaseAdmin) {
+        try {
+          await supabaseAdmin
+            .from('user_files')
+            .update({ status })
+            .eq('id', fileId)
+            .eq('user_id', userId);
+        } catch {}
+      }
+    };
+
     try {
-      const { fileName, fileType, contentBase64 } = req.body;
-      
-      if (!contentBase64) {
-        return res.status(400).json({ success: false, error: 'contentBase64 parameter is required' });
+      let buffer: Buffer | null = null;
+
+      if (storagePath && typeof storagePath === 'string' && storagePath.trim()) {
+        const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
+        if (dl.buffer) {
+          buffer = dl.buffer;
+        } else if (!contentBase64) {
+          console.error('[Extract Error] Failed to download from storage:', storagePath, dl.error);
+          await markUserFileStatus('failed');
+          return res.status(200).json({
+            success: false,
+            error: dl.error || 'Uploaded, could not read text from cloud storage. Please retry.',
+            fileName
+          });
+        }
       }
 
-      const buffer = Buffer.from(contentBase64, 'base64');
+      if (!buffer && contentBase64 && typeof contentBase64 === 'string') {
+        buffer = Buffer.from(contentBase64, 'base64');
+      }
+
+      if (!buffer) {
+        return res.status(400).json({ success: false, error: 'Either storagePath or contentBase64 is required.' });
+      }
+
       const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '');
 
       if (!result.success) {
+        console.error('[Extract Error] Extraction/OCR failed for', fileName, ':', result.error);
+        await markUserFileStatus('failed');
         return res.status(200).json({
           success: false,
-          error: result.error || "We couldn't read this document correctly. Please try uploading another copy.",
+          error: result.error || "Uploaded, could not read text. Please try again or use Retry.",
           isScannedPdf: result.isScannedPdf,
           fileName
         });
       }
 
+      await markUserFileStatus('ready');
       res.json({
         success: true,
         fileName,
@@ -3265,7 +3339,8 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         usedOcr: result.usedOcr
       });
     } catch (error: any) {
-      console.error('File extraction backend failed:', error);
+      console.error('[Extract Error] Backend exception for', fileName, ':', error?.message || error);
+      await markUserFileStatus('failed');
       res.status(500).json({ success: false, error: error?.message || 'File extraction failed' });
     }
   });
@@ -3462,11 +3537,25 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
 
   // Vision Document Scanner Endpoint: Parses handwritten notes & PDFs into structured study content
   app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
     try {
-      const { fileName, fileType, contentBase64 } = req.body;
+      const { fileName, fileType, contentBase64, storagePath, bucket } = req.body;
 
-      if (!contentBase64) {
-        return res.status(400).json({ error: 'contentBase64 parameter is required' });
+      let resolvedBase64 = typeof contentBase64 === 'string' && contentBase64.trim() ? contentBase64.trim() : '';
+      if (!resolvedBase64 && storagePath && typeof storagePath === 'string') {
+        const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
+        if (!dl.buffer) {
+          console.error('[Vision Scan Error] Could not download storagePath:', storagePath, dl.error);
+          return res.status(200).json({
+            success: false,
+            error: dl.error || 'Could not download file from storage for OCR scanning.'
+          });
+        }
+        resolvedBase64 = dl.buffer.toString('base64');
+      }
+
+      if (!resolvedBase64) {
+        return res.status(400).json({ error: 'Either storagePath or contentBase64 parameter is required' });
       }
 
       let mime = fileType || 'image/jpeg';
@@ -3513,7 +3602,7 @@ You MUST return a JSON object containing structured study assets with this exact
 
         const mediaInput = {
           inlineData: {
-            data: contentBase64,
+            data: resolvedBase64,
             mimeType: mime
           }
         };
@@ -3537,12 +3626,11 @@ You MUST return a JSON object containing structured study assets with this exact
       } else {
         // Fallback for non-Gemini: extract text first then generate JSON assets
         let textContent = '';
-        const buffer = Buffer.from(contentBase64, 'base64');
+        const buffer = Buffer.from(resolvedBase64, 'base64');
         const isPdf = mime === 'application/pdf' || fileName?.toLowerCase().endsWith('.pdf');
         if (isPdf) {
           textContent = await parsePdfBuffer(buffer);
         } else {
-          // Do not decode raw image binary as utf-8; only decode text-like files
           if (!mime.startsWith('image/')) {
             textContent = buffer.toString('utf-8');
           } else {
@@ -3551,6 +3639,13 @@ You MUST return a JSON object containing structured study assets with this exact
               error: 'Image scanning requires GEMINI_API_KEY to be configured in your hosting environment variables.'
             });
           }
+        }
+
+        if (!textContent || textContent.trim().length < 20) {
+          return res.json({
+            success: false,
+            error: 'Uploaded, could not read text from this scanned PDF. Ensure GEMINI_API_KEY is configured for Vision OCR.'
+          });
         }
 
         const rawContent = await runAICall({
@@ -3564,29 +3659,10 @@ You MUST return a JSON object containing structured study assets with this exact
         return res.json({ success: true, data: resultJson });
       }
     } catch (error: any) {
-      console.warn('Vision document scan backend warning:', error?.message || error);
-      // Resilient fallback return
-      return res.json({
-        success: true,
-        data: {
-          transcription: "Handwritten notes & course document scanned successfully. Core concepts extracted.",
-          summary: "# Document Overview\n\n- Key concepts identified from scanned document.\n- Formulas and definitions parsed for active recall.",
-          keyTerms: [
-            { term: "Document Subject", definition: "Scanned academic course note material" }
-          ],
-          flashcards: [
-            { id: 1, front: "What is the primary topic of this scanned material?", back: "The core course modules and definitions extracted from your notes." }
-          ],
-          quiz: [
-            {
-              id: 1,
-              question: "Which approach best reinforces memory when reviewing scanned handwritten notes?",
-              options: ["Active recall and spaced repetition", "Passive re-reading", "Cramming before exam", "Skipping practice questions"],
-              answer: "Active recall and spaced repetition",
-              explanation: "Active recall with flashcards and self-testing optimizes long-term memory retention."
-            }
-          ]
-        }
+      console.error('[Vision Scan Error] Failed for', req.body?.fileName, ':', error?.message || error);
+      return res.status(200).json({
+        success: false,
+        error: error?.message || 'Uploaded, could not read text during OCR scan. Please try again.'
       });
     }
   });

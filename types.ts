@@ -179,7 +179,7 @@ export interface UserFile {
   timestamp: number;
   courseCode?: string;
   courseTitle?: string;
-  status?: 'ready' | 'processing';
+  status?: 'ready' | 'processing' | 'failed';
 }
 
 export interface LibraryFile {

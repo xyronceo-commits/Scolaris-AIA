@@ -1899,27 +1899,20 @@ export const DBService = {
     fileType: string
   ): Promise<{ success: boolean; extractedText?: string; error?: string }> {
     try {
-      const { data: blob, error: dlError } = await supabase.storage.from(GROUP_MATERIALS_BUCKET).download(storagePath);
-      if (dlError || !blob) {
-        throw dlError || new Error('Could not download file from storage.');
-      }
-
-      const buffer = await blob.arrayBuffer();
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
-
       const token = await getAccessToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
+      // Pass storagePath directly to bypass Vercel 4.5MB payload limit
       const resp = await fetch('/api/files/extract', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ fileName, fileType, contentBase64: base64 }),
+        body: JSON.stringify({
+          fileName,
+          fileType,
+          storagePath,
+          bucket: GROUP_MATERIALS_BUCKET,
+        }),
       });
 
       if (!resp.ok) {
@@ -1932,10 +1925,10 @@ export const DBService = {
           .from('group_materials')
           .update({
             status: 'failed',
-            error_message: resJson.error || 'Text extraction unsuccessful.',
+            error_message: resJson.error || 'Uploaded, could not read text.',
           })
           .eq('id', materialId);
-        return { success: false, error: resJson.error || 'Extraction failed' };
+        return { success: false, error: resJson.error || 'Uploaded, could not read text.' };
       }
 
       await supabase
@@ -1955,7 +1948,7 @@ export const DBService = {
         .from('group_materials')
         .update({
           status: 'failed',
-          error_message: err?.message || 'Extraction retry failed.',
+          error_message: err?.message || 'Uploaded, could not read text.',
         })
         .eq('id', materialId);
       return { success: false, error: err?.message || 'Extraction retry failed.' };
@@ -2002,7 +1995,8 @@ export const DBService = {
     courseId: string,
     file: File,
     courseCode?: string,
-    courseTitle?: string
+    courseTitle?: string,
+    initialStatus: 'ready' | 'processing' | 'failed' = 'ready'
   ): Promise<UserFile> {
     if (!userId) throw new Error('User must be authenticated to upload files');
 
@@ -2033,21 +2027,32 @@ export const DBService = {
       throw new Error(uploadError.message || 'File upload failed.');
     }
 
-    const { data: row, error: insertError } = await supabase
+    const baseRowPayload: any = {
+      id: fileId,
+      user_id: userId,
+      course_id: courseId,
+      file_name: file.name,
+      file_type: file.type || 'application/octet-stream',
+      file_size: formatSize(file.size),
+      storage_path: storagePath,
+      course_code: courseCode || '',
+      course_title: courseTitle || '',
+      status: initialStatus,
+    };
+
+    let { data: row, error: insertError } = await supabase
       .from('user_files')
-      .insert({
-        id: fileId,
-        user_id: userId,
-        course_id: courseId,
-        file_name: file.name,
-        file_type: file.type || 'application/octet-stream',
-        file_size: formatSize(file.size),
-        storage_path: storagePath,
-        course_code: courseCode || '',
-        course_title: courseTitle || '',
-      })
+      .insert(baseRowPayload)
       .select('*')
       .single();
+
+    if (insertError && insertError.message?.includes('status')) {
+      const { status: _drop, ...withoutStatus } = baseRowPayload;
+      const retry = await supabase.from('user_files').insert(withoutStatus).select('*').single();
+      row = retry.data;
+      insertError = retry.error;
+    }
+
     if (insertError || !row) {
       await supabase.storage.from(usedBucket).remove([storagePath]).catch(() => {});
       console.error('Save user_files error:', insertError);
@@ -2055,11 +2060,66 @@ export const DBService = {
     }
 
     const urls = await signedUrlMap(usedBucket, [storagePath]);
-    const userFile = rowToUserFile(row, urls);
+    const userFile = rowToUserFile({ ...row, status: row.status || initialStatus }, urls);
 
     const cached = readCache<UserFile[]>('files', userId, []);
     writeCache('files', userId, [userFile, ...cached.filter((f) => f.id !== fileId)]);
     return userFile;
+  },
+
+  async updateUserFileStatus(fileId: string, userId: string, status: 'ready' | 'processing' | 'failed'): Promise<void> {
+    try {
+      await supabase.from('user_files').update({ status }).eq('id', fileId).eq('user_id', userId);
+      const cached = readCache<UserFile[]>('files', userId, []);
+      writeCache(
+        'files',
+        userId,
+        cached.map((f) => (f.id === fileId ? { ...f, status } : f))
+      );
+    } catch (err) {
+      console.warn('updateUserFileStatus warning:', err);
+    }
+  },
+
+  async retryUserFileExtraction(
+    file: UserFile
+  ): Promise<{ success: boolean; extractedText?: string; error?: string }> {
+    const uid = file.userId || getCurrentUserId() || '';
+    if (uid && file.id) {
+      await DBService.updateUserFileStatus(file.id, uid, 'processing');
+    }
+    try {
+      const token = await getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const resp = await fetch('/api/files/extract', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          fileName: file.fileName,
+          fileType: file.fileType,
+          storagePath: file.storagePath,
+          bucket: file.storagePath?.startsWith('groups/') ? GROUP_MATERIALS_BUCKET : USER_FILES_BUCKET,
+          fileId: file.id,
+        }),
+      });
+
+      const resJson = await resp.json().catch(() => ({}));
+      if (!resp.ok || !resJson.success || !resJson.extractedText) {
+        if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
+        return {
+          success: false,
+          error: resJson.error || 'Uploaded, could not read text. Please try again.',
+        };
+      }
+
+      if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'ready');
+      return { success: true, extractedText: resJson.extractedText };
+    } catch (err: any) {
+      if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
+      return { success: false, error: err?.message || 'Uploaded, could not read text.' };
+    }
   },
 
   async saveUserFileRecord(fileRecord: UserFile): Promise<{ error: any }> {

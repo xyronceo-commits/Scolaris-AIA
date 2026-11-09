@@ -294,12 +294,24 @@ export const GeminiService = {
     }
   },
 
-  async extractFileText(fileName: string, fileType: string, contentBase64: string): Promise<{ success: boolean; extractedText?: string; error?: string; isScannedPdf?: boolean; fileName?: string; fileTypeDetected?: string; pageCount?: number }> {
+  async extractFileText(
+    fileName: string,
+    fileType: string,
+    contentBase64?: string,
+    options?: { storagePath?: string; bucket?: string; fileId?: string }
+  ): Promise<{ success: boolean; extractedText?: string; error?: string; isScannedPdf?: boolean; fileName?: string; fileTypeDetected?: string; pageCount?: number }> {
     try {
       const response = await fetch('/api/files/extract', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify({ fileName, fileType, contentBase64 })
+        body: JSON.stringify({
+          fileName,
+          fileType,
+          contentBase64: contentBase64 || undefined,
+          storagePath: options?.storagePath || undefined,
+          bucket: options?.bucket || undefined,
+          fileId: options?.fileId || undefined,
+        })
       });
       const data = await response.json().catch(() => ({}));
       if (data && typeof data.success === 'boolean') {
@@ -323,12 +335,23 @@ export const GeminiService = {
     }
   },
 
-  async scanDocumentWithVision(fileName: string, fileType: string, contentBase64: string): Promise<{ success: boolean; data?: any; error?: string }> {
+  async scanDocumentWithVision(
+    fileName: string,
+    fileType: string,
+    contentBase64?: string,
+    options?: { storagePath?: string; bucket?: string }
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
       const response = await fetch('/api/vision/scan', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify({ fileName, fileType, contentBase64 })
+        body: JSON.stringify({
+          fileName,
+          fileType,
+          contentBase64: contentBase64 || undefined,
+          storagePath: options?.storagePath || undefined,
+          bucket: options?.bucket || undefined,
+        })
       });
       const data = await response.json().catch(() => ({}));
       if (data && typeof data.success === 'boolean') {
