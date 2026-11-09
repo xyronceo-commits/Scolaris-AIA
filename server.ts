@@ -2068,6 +2068,92 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     reason: "KorsIQ Academic Integrity Validation passed in preview mode."
   });
 
+  // =============================================================
+  // AI CREDITS USAGE METERING & PERIOD SUMMARY ENDPOINT
+  // =============================================================
+  async function recordAiUsage(userId: string | undefined, feature: string, credits = 1): Promise<void> {
+    if (!supabaseAdmin || !userId) return;
+    try {
+      await supabaseAdmin.from('ai_usage').insert({
+        user_id: userId,
+        credits: Math.max(1, Math.round(credits)),
+        feature
+      });
+    } catch (err: any) {
+      console.warn('[AI Metering] Failed to record ai_usage:', err?.message || err);
+    }
+  }
+
+  app.get('/api/usage/ai-credits', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const now = new Date();
+    const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
+    const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString();
+
+    if (!supabaseAdmin || !userId) {
+      return res.json({
+        used: 0,
+        allowance: 0,
+        tier: 'free',
+        periodStart,
+        periodEnd
+      });
+    }
+
+    try {
+      const [profileRes, usageRes] = await Promise.all([
+        supabaseAdmin
+          .from('profiles')
+          .select('tier, subscription_tier')
+          .eq('id', userId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('ai_usage')
+          .select('credits')
+          .eq('user_id', userId)
+          .gte('created_at', periodStart)
+      ]);
+
+      const rawTier = String(
+        profileRes.data?.subscription_tier ||
+        profileRes.data?.tier ||
+        (req as any).user?.tier ||
+        'free'
+      ).toLowerCase();
+
+      const normalizedTier =
+        rawTier === 'studio' || rawTier === 'sage'
+          ? 'studio'
+          : rawTier === 'plus' || rawTier === 'scholar'
+          ? 'plus'
+          : 'free';
+
+      const allowance =
+        normalizedTier === 'studio' ? 1000 : normalizedTier === 'plus' ? 250 : 0;
+
+      const used = Array.isArray(usageRes.data)
+        ? usageRes.data.reduce((sum: number, r: any) => sum + (Number(r.credits) || 1), 0)
+        : 0;
+
+      return res.json({
+        used,
+        allowance,
+        tier: normalizedTier,
+        periodStart,
+        periodEnd
+      });
+    } catch (err: any) {
+      console.warn('[AI Metering] /api/usage/ai-credits fallback:', err?.message || err);
+      return res.json({
+        used: 0,
+        allowance: 0,
+        tier: 'free',
+        periodStart,
+        periodEnd
+      });
+    }
+  });
+
   // Magic Import
   app.post('/api/ai/import', requireAuth, apiRateLimiter, async (req, res) => {
     const { text } = req.body;
@@ -2440,6 +2526,8 @@ Output JSON format:
         temperature: 0.3
       });
 
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_plan', 1);
+
       const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
       return res.json(parsed);
@@ -2533,6 +2621,8 @@ Return your response in clean Markdown formatting ready for direct insertion int
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.35
       });
+
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_generate_section', 2);
 
       return res.json({
         content: aiResponse || '',
@@ -3346,6 +3436,8 @@ Always refer to this context when answering questions about the material, explai
         temperature: 0.5
       });
 
+      await recordAiUsage(userId, 'study_hub_chat', 1);
+
       // Persist both the user message and the AI response to the database
       let savedUserMsg: any = null;
       let savedAssistantMsg: any = null;
@@ -3504,6 +3596,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         messages: [{ role: 'user', content: userContent }],
         jsonMode: type !== 'summary'
       });
+
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, `materials_${type || 'summary'}`, 1);
       
       if (type === 'summary') {
         res.json(text);
@@ -3562,6 +3656,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       }
 
       const audioBase64 = wavBuffer.toString('base64');
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'podcast_generate', 1);
       res.json({ script, audioBase64, durationSec: validation.durationSec });
     } catch (error: any) {
       console.error('Podcast generation server error:', error?.message || error);
