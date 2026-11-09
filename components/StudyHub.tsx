@@ -120,6 +120,108 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const [libraryFilter, setLibraryFilter] = useState<'recent' | 'all'>('recent');
   const [userFiles, setUserFiles] = useState<UserFile[]>([]);
 
+  // 3-Source Upload Sheet State (From device, From my Library, From a link)
+  const [showUploadSheet, setShowUploadSheet] = useState(false);
+  const [uploadSheetTab, setUploadSheetTab] = useState<'options' | 'library' | 'link'>('options');
+  const [linkUrlInput, setLinkUrlInput] = useState('');
+  const [linkErrorMsg, setLinkErrorMsg] = useState<string | null>(null);
+  const deviceFileInputRef = useRef<HTMLInputElement>(null);
+
+  const openUploadSheet = () => {
+    setUploadSheetTab('options');
+    setLinkUrlInput('');
+    setLinkErrorMsg(null);
+    setShowUploadSheet(true);
+  };
+
+  const handleAttachFromLibrary = async (file: UserFile) => {
+    setShowUploadSheet(false);
+    if (!activeCourseId) return;
+
+    // Attach reference to this course's libraryFiles without duplicating stored cloud file
+    const existingFiles = activeHub.libraryFiles || [];
+    const alreadyAttached = existingFiles.some(f => f.id === file.id || f.s3Key === file.storagePath);
+    if (!alreadyAttached) {
+      const refFile: LibraryFile = {
+        id: file.id,
+        fileName: file.fileName,
+        fileType: file.fileType || 'application/octet-stream',
+        fileSize: file.fileSize,
+        s3Key: file.storagePath,
+        s3Url: file.downloadUrl || '',
+        timestamp: file.timestamp || Date.now()
+      };
+      const updatedHub = {
+        ...activeHub,
+        libraryFiles: [refFile, ...existingFiles]
+      } as StudyHubData;
+      setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
+      await DBService.saveHub(updatedHub);
+    }
+
+    await handleSelectRecentFile({ ...file, courseId: activeCourseId });
+  };
+
+  const handleExtractFromLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedUrl = linkUrlInput.trim();
+    if (!trimmedUrl || !activeCourseId) return;
+
+    if (!/^https?:\/\//i.test(trimmedUrl)) {
+      setLinkErrorMsg('Please enter a valid http:// or https:// URL.');
+      return;
+    }
+
+    setLinkErrorMsg(null);
+    setShowUploadSheet(false);
+    setIsExtracting(true);
+    setIsSessionFileActive(true);
+    addNotification('content', 'Fetching Link', `Reading study material from ${trimmedUrl}...`, 'hub');
+
+    try {
+      const res = await GeminiService.extractUrlText(trimmedUrl);
+      if (!res.success || !res.extractedText) {
+        setIsExtracting(false);
+        setUploadSheetTab('link');
+        setLinkErrorMsg(res.error || "We couldn't read that link. Check that the page or document is publicly accessible.");
+        setShowUploadSheet(true);
+        return;
+      }
+
+      const content = res.extractedText;
+      const derivedTitle = res.fileName || new URL(trimmedUrl).hostname;
+      setFileContent(content);
+
+      let summaryText = '';
+      try {
+        const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
+        if (sumRes) {
+          summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
+        }
+      } catch (sumErr) {
+        console.warn('URL summary generation warning:', sumErr);
+      }
+
+      const updatedHub = {
+        ...activeHub,
+        fileContent: content,
+        fileName: derivedTitle,
+        summary: summaryText || activeHub.summary
+      } as StudyHubData;
+
+      setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
+      await DBService.saveHub(updatedHub);
+      addNotification('content', 'Link Imported', `Extracted and summarized ${derivedTitle}.`, 'hub');
+      setActiveTool('summary');
+    } catch (err: any) {
+      setUploadSheetTab('link');
+      setLinkErrorMsg(err?.message || "We couldn't read that link. Please try another URL.");
+      setShowUploadSheet(true);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   useEffect(() => {
     const fetchUserFiles = async () => {
       const userId = getCurrentUserId();
@@ -799,15 +901,29 @@ const StudyHub: React.FC<StudyHubProps> = ({
                 <span className="text-[8px] text-slate-400 mt-1.5 uppercase tracking-wide">Extracting file knowledge</span>
               </div>
             ) : (
-              <div className="border-2 border-dashed border-slate-100 rounded-2xl p-6 text-center hover:bg-slate-50 hover:border-blue-200 transition-all cursor-pointer relative group/file">
-                <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-20" onChange={handleFileUpload} />
-                <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 mx-auto group-hover/file:scale-110 transition-transform duration-500 border border-slate-100 shadow-sm relative z-10">
-                  {ICONS.Plus}
-                </div>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest relative z-10">
-                  Upload Document
-                </p>
-              </div>
+              <>
+                <input
+                  ref={deviceFileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+                <button
+                  type="button"
+                  onClick={openUploadSheet}
+                  className="w-full border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:bg-slate-50 hover:border-blue-300 transition-all cursor-pointer relative group/file min-h-[120px]"
+                >
+                  <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 mx-auto group-hover/file:scale-105 transition-transform duration-300 border border-slate-100 shadow-sm relative z-10">
+                    {ICONS.Plus}
+                  </div>
+                  <p className="text-xs text-slate-700 font-semibold relative z-10">
+                    Upload Material
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 relative z-10">
+                    From device, Library, or link
+                  </p>
+                </button>
+              </>
             )}
           </div>
 
@@ -916,9 +1032,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <h3 className="text-base font-semibold text-slate-900 mb-1">
                 Upload or Select Study Material
               </h3>
-              <p className="max-w-md text-slate-500 leading-relaxed text-xs">
-                Upload a document above or choose any file from <span className="font-semibold text-blue-600">Recent Courses &amp; Files</span> below to generate summaries, flashcards, quizzes, and podcasts.
+              <p className="max-w-md text-slate-500 leading-relaxed text-xs mb-4">
+                Upload a document from your device, pick an existing file from your Library, or paste a public link to generate summaries, flashcards, and quizzes.
               </p>
+              <button
+                type="button"
+                onClick={openUploadSheet}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer"
+              >
+                <Upload size={15} />
+                <span>Upload material</span>
+              </button>
             </div>
           ) : (
             <div className="page-transition">
@@ -1922,6 +2046,201 @@ const StudyHub: React.FC<StudyHubProps> = ({
           refreshTrigger={refreshFilesTrigger}
         />
       </section>
+
+      {/* 3-Source Upload Sheet Modal (From device / From my Library / From a link) */}
+      {showUploadSheet && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowUploadSheet(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full sm:max-w-md bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-t-2xl sm:rounded-xl p-5 space-y-4 shadow-xl"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-[#111827] dark:text-white">
+                  {uploadSheetTab === 'library'
+                    ? 'Pick from my Library'
+                    : uploadSheetTab === 'link'
+                    ? 'Import from a link'
+                    : 'Upload study material'}
+                </h3>
+                <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                  {currentCourse ? `${currentCourse.code}: ${currentCourse.title}` : 'Attach study material'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUploadSheet(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                aria-label="Close upload options"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {uploadSheetTab === 'options' && (
+              <div className="space-y-2.5">
+                {/* Option 1: From device */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUploadSheet(false);
+                    deviceFileInputRef.current?.click();
+                  }}
+                  className="w-full p-3.5 rounded-xl border border-[#E5E7EB] dark:border-slate-800 hover:border-[#2563EB] hover:bg-blue-50/40 dark:hover:bg-slate-800 flex items-center gap-3.5 text-left transition-colors min-h-[56px] cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <Upload size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#111827] dark:text-white">
+                      From device
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Upload a PDF, Word document, slides, or notes from your phone or computer
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 2: From my Library */}
+                <button
+                  type="button"
+                  onClick={() => setUploadSheetTab('library')}
+                  className="w-full p-3.5 rounded-xl border border-[#E5E7EB] dark:border-slate-800 hover:border-[#2563EB] hover:bg-blue-50/40 dark:hover:bg-slate-800 flex items-center gap-3.5 text-left transition-colors min-h-[56px] cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <Folder size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#111827] dark:text-white">
+                      From my Library ({userFiles.length})
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Attach an existing file from your Library without re-uploading
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 3: From a link */}
+                <button
+                  type="button"
+                  onClick={() => setUploadSheetTab('link')}
+                  className="w-full p-3.5 rounded-xl border border-[#E5E7EB] dark:border-slate-800 hover:border-[#2563EB] hover:bg-blue-50/40 dark:hover:bg-slate-800 flex items-center gap-3.5 text-left transition-colors min-h-[56px] cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <LinkIcon size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#111827] dark:text-white">
+                      From a link
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Paste a public URL to an article, syllabus page, or PDF document
+                    </p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {uploadSheetTab === 'library' && (
+              <div className="space-y-3">
+                {userFiles.length === 0 ? (
+                  <div className="p-6 text-center space-y-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-[#E5E7EB] dark:border-slate-700">
+                    <p className="text-xs font-semibold text-[#111827] dark:text-white">
+                      Your Library is empty
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Upload a file from your device first and it will appear in your Library.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto divide-y divide-[#E5E7EB] dark:divide-slate-800 border border-[#E5E7EB] dark:border-slate-800 rounded-xl">
+                    {userFiles.map(file => (
+                      <button
+                        key={file.id}
+                        type="button"
+                        onClick={() => handleAttachFromLibrary(file)}
+                        className="w-full px-3.5 py-3 text-left hover:bg-blue-50/60 dark:hover:bg-slate-800 flex items-center justify-between gap-3 transition-colors min-h-[48px] cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <FileText size={16} className="text-[#2563EB] shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[#111827] dark:text-white truncate">
+                              {file.fileName}
+                            </p>
+                            <p className="text-[11px] text-[#5B6472] dark:text-slate-400">
+                              {file.courseCode ? `${file.courseCode} · ` : ''}{file.fileSize || ''}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-xs font-semibold text-[#2563EB] shrink-0">
+                          Attach
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setUploadSheetTab('options')}
+                    className="px-3 py-2 text-xs font-semibold text-[#5B6472] hover:text-[#111827] min-h-[44px] cursor-pointer"
+                  >
+                    &larr; Back
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {uploadSheetTab === 'link' && (
+              <form onSubmit={handleExtractFromLink} className="space-y-3">
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-[#111827] dark:text-white">
+                    Document or webpage URL
+                  </span>
+                  <input
+                    type="url"
+                    required
+                    autoFocus
+                    value={linkUrlInput}
+                    onChange={e => setLinkUrlInput(e.target.value)}
+                    placeholder="https://example.edu/lecture-notes.pdf"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm bg-white dark:bg-slate-950 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-[#111827] dark:text-white focus:outline-none focus:border-[#2563EB] min-h-[44px]"
+                  />
+                </label>
+                {linkErrorMsg && (
+                  <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2" role="alert">
+                    {linkErrorMsg}
+                  </p>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLinkErrorMsg(null);
+                      setUploadSheetTab('options');
+                    }}
+                    className="px-3 py-2 text-xs font-semibold text-[#5B6472] hover:text-[#111827] min-h-[44px] cursor-pointer"
+                  >
+                    &larr; Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!linkUrlInput.trim()}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white text-xs font-semibold rounded-lg min-h-[44px] cursor-pointer"
+                  >
+                    Import link
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

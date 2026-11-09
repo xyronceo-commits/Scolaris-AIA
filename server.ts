@@ -2788,6 +2788,196 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     }
   });
 
+  // SSRF-safe server-side URL content extractor for Study Hub "Upload from a link"
+  const isPrivateOrReservedIp = (ip: string): boolean => {
+    const clean = ip.toLowerCase().replace(/^::ffff:/, '');
+    if (
+      clean === 'localhost' ||
+      clean === '::1' ||
+      clean === '0.0.0.0' ||
+      clean.startsWith('127.') ||
+      clean.startsWith('10.') ||
+      clean.startsWith('192.168.') ||
+      clean.startsWith('169.254.') ||
+      clean.startsWith('0.') ||
+      clean.startsWith('fc') ||
+      clean.startsWith('fd') ||
+      clean.startsWith('fe80:')
+    ) {
+      return true;
+    }
+    const m172 = clean.match(/^172\.(\d+)\./);
+    if (m172) {
+      const second = parseInt(m172[1], 10);
+      if (second >= 16 && second <= 31) return true;
+    }
+    const m100 = clean.match(/^100\.(\d+)\./);
+    if (m100) {
+      const second = parseInt(m100[1], 10);
+      if (second >= 64 && second <= 127) return true;
+    }
+    return false;
+  };
+
+  app.post('/api/files/extract-url', requireAuth, apiRateLimiter, async (req, res) => {
+    try {
+      const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+      if (!rawUrl) {
+        return res.status(400).json({ success: false, error: 'Please enter a valid http:// or https:// URL.' });
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(rawUrl);
+      } catch {
+        return res.status(400).json({ success: false, error: 'Invalid URL format. Include http:// or https://.' });
+      }
+
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return res.status(400).json({ success: false, error: 'Only http:// and https:// links are supported.' });
+      }
+
+      const hostname = parsedUrl.hostname.toLowerCase();
+      if (
+        hostname === 'localhost' ||
+        hostname.endsWith('.localhost') ||
+        hostname.endsWith('.local') ||
+        hostname.endsWith('.internal') ||
+        isPrivateOrReservedIp(hostname)
+      ) {
+        return res.status(400).json({ success: false, error: 'Private or local network URLs are not allowed.' });
+      }
+
+      // Resolve DNS to block SSRF via DNS rebinding or private A/AAAA records
+      try {
+        const dns = await import('dns');
+        const records = await dns.promises.lookup(hostname, { all: true });
+        if (!records || records.length === 0 || records.some(r => isPrivateOrReservedIp(r.address))) {
+          return res.status(400).json({ success: false, error: 'That URL resolves to a restricted network address and cannot be fetched.' });
+        }
+      } catch {
+        return res.status(400).json({ success: false, error: "We couldn't resolve that domain. Check the URL and try again." });
+      }
+
+      const MAX_URL_BYTES = 10 * 1024 * 1024; // 10 MB limit
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      let response: Response;
+      try {
+        response = await fetch(parsedUrl.toString(), {
+          method: 'GET',
+          redirect: 'follow',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'KorsIQ-StudyHub/1.0 (+https://korsiq.com)',
+            'Accept': 'text/html,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*;q=0.8'
+          }
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        return res.status(200).json({
+          success: false,
+          error: `We couldn't read that link (HTTP ${response.status}). Make sure the page or file is publicly accessible.`
+        });
+      }
+
+      // Re-verify final redirected URL hostname against SSRF
+      if (response.url) {
+        try {
+          const finalUrl = new URL(response.url);
+          if (isPrivateOrReservedIp(finalUrl.hostname) || finalUrl.hostname.toLowerCase() === 'localhost') {
+            return res.status(400).json({ success: false, error: 'Redirect to a private network address was blocked.' });
+          }
+        } catch {}
+      }
+
+      const contentLength = Number(response.headers.get('content-length') || 0);
+      if (contentLength > MAX_URL_BYTES) {
+        return res.status(200).json({
+          success: false,
+          error: 'That file is larger than 10 MB. Download it and upload from your device instead.'
+        });
+      }
+
+      const arrayBuf = await response.arrayBuffer();
+      if (arrayBuf.byteLength > MAX_URL_BYTES) {
+        return res.status(200).json({
+          success: false,
+          error: 'That file is larger than 10 MB. Download it and upload from your device instead.'
+        });
+      }
+
+      const buffer = Buffer.from(arrayBuf);
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      const pathPart = parsedUrl.pathname.split('/').filter(Boolean).pop() || parsedUrl.hostname;
+      const derivedName = decodeURIComponent(pathPart).slice(0, 80) || parsedUrl.hostname;
+
+      const isDocBinary =
+        contentType.includes('application/pdf') ||
+        contentType.includes('officedocument') ||
+        /\.(pdf|docx|pptx)$/i.test(parsedUrl.pathname);
+
+      let extractedText = '';
+      if (isDocBinary) {
+        const result = await extractDocumentWithOcrFallback(buffer, derivedName, contentType);
+        if (!result.success || !result.extractedText) {
+          return res.status(200).json({
+            success: false,
+            error: result.error || "We couldn't extract readable text from that document link."
+          });
+        }
+        extractedText = result.extractedText;
+      } else {
+        const rawHtmlOrText = buffer.toString('utf-8');
+        if (contentType.includes('html') || /<html|<body|<article|<p\b/i.test(rawHtmlOrText)) {
+          extractedText = rawHtmlOrText
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+            .replace(/<\/(p|div|h[1-6]|li|tr|section|article|br)>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, "'")
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        } else {
+          extractedText = rawHtmlOrText.trim();
+        }
+      }
+
+      const validation = validateExtractedText(extractedText);
+      if (!validation.isValid || extractedText.length < 40) {
+        return res.status(200).json({
+          success: false,
+          error: "We couldn't find enough readable text at that link. Try another link or upload the file from your device."
+        });
+      }
+
+      return res.json({
+        success: true,
+        fileName: derivedName,
+        extractedText: normalizeExtractedText(extractedText)
+      });
+    } catch (error: any) {
+      const isTimeout = error?.name === 'AbortError';
+      return res.status(200).json({
+        success: false,
+        error: isTimeout
+          ? 'That link took too long to respond. Please try another link or upload from your device.'
+          : "We couldn't read that link. Check the URL and try again."
+      });
+    }
+  });
+
   // Vision Document Scanner Endpoint: Parses handwritten notes & PDFs into structured study content
   app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
     try {
