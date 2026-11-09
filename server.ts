@@ -115,7 +115,11 @@ function verifyAdminToken(token: string): { email: string; role: string; fullNam
   }
 }
 
-const OCR_MODEL = 'gemini-2.0-flash';
+// Gemini models are configurable because Google retires them (gemini-2.0-flash and 1.5-flash are retired).
+// Override with GEMINI_MODEL / GEMINI_FALLBACK_MODEL in the hosting environment when Google retires the next one.
+const GEMINI_PRIMARY_MODEL = cleanEnvKey('GEMINI_MODEL') || 'gemini-3.6-flash';
+const GEMINI_FALLBACK_MODEL = cleanEnvKey('GEMINI_FALLBACK_MODEL') || 'gemini-3.1-flash-lite';
+const OCR_MODEL = GEMINI_PRIMARY_MODEL;
 const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
 
 function pickGeminiKey(): string | null {
@@ -405,7 +409,7 @@ async function startServer() {
       config.responseMimeType = "application/json";
     }
 
-    const geminiCandidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+    const geminiCandidateModels = Array.from(new Set([GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL]));
     let lastError: any = null;
 
     for (const model of geminiCandidateModels) {
@@ -425,7 +429,7 @@ async function startServer() {
     }
 
     const failureReason = lastError?.message || 'Gemini API failed to generate a response';
-    console.error('[Gemini AI Execution Fatal]:', failureReason);
+    console.error('[Gemini AI Execution Fatal]:', { models: geminiCandidateModels, status: lastError?.status, reason: failureReason });
     throw new Error(`Gemini AI service error: ${failureReason}`);
   };
 
@@ -2751,7 +2755,7 @@ You MUST return a JSON object containing structured study assets with this exact
         };
 
         const response = await aiGen.models.generateContent({
-          model: 'gemini-2.0-flash',
+          model: GEMINI_PRIMARY_MODEL,
           contents: [
             mediaInput,
             "Scan and transcribe this document, then synthesize structured study assets matching the JSON schema."
