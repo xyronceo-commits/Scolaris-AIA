@@ -150,37 +150,6 @@ const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onSc
     }
   };
 
-  const handleLoadDemo = () => {
-    setError(null);
-    const demoCourses: Course[] = [
-      {
-        id: crypto.randomUUID(),
-        code: 'CS203',
-        title: 'Advanced Algorithms',
-        units: 3,
-        difficulty: Difficulty.HARD,
-        description: 'Study of dynamic programming, graph algorithms, complex complexity classes, and tree search structures.'
-      },
-      {
-        id: crypto.randomUUID(),
-        code: 'BIO180',
-        title: 'Core Biostatistics',
-        units: 4,
-        difficulty: Difficulty.MEDIUM,
-        description: 'Covers regression models, statistical inference, data sampling, and genetic variant screening.'
-      },
-      {
-        id: crypto.randomUUID(),
-        code: 'EC102',
-        title: 'Introduction to Microeconomics',
-        units: 3,
-        difficulty: Difficulty.EASY,
-        description: 'Analysis of consumer choices, competitive pricing, supply/demand curves, and regulatory systems.'
-      }
-    ];
-    setCourses(demoCourses);
-  };
-
   const handleClearAll = () => {
     setError(null);
     if (courses.length === 0) return;
