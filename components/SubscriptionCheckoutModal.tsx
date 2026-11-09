@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Check, 
   X, 
@@ -6,14 +6,13 @@ import {
   AlertCircle, 
   Clock, 
   ArrowRight, 
-  Sparkles, 
   Lock,
   ExternalLink,
   RotateCcw,
   Loader2
 } from 'lucide-react';
 import { UserProfile, SubscriptionPlanType } from '../types';
-import { getAccessToken } from '../lib/supabase';
+import { getAccessToken, getCurrentUserId } from '../lib/supabase';
 import { BETA_PLAN_LIMITS } from '../constants';
 
 interface SubscriptionCheckoutModalProps {
@@ -42,6 +41,24 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
     description: string;
   } | null>(null);
 
+  const uid = getCurrentUserId() || (currentProfile as any)?.id || '';
+  const pendingRefStorageKey = uid ? `scolaris_pending_payment_ref_${uid}` : '';
+  const pendingPlanStorageKey = uid ? `scolaris_pending_payment_plan_${uid}` : '';
+
+  useEffect(() => {
+    setSelectedPlan(initialPlan);
+  }, [initialPlan]);
+
+  useEffect(() => {
+    if (!isOpen || !pendingRefStorageKey) return;
+    try {
+      const savedRef = localStorage.getItem(pendingRefStorageKey);
+      if (savedRef && !paymentRef) {
+        setPaymentRef(savedRef);
+      }
+    } catch {}
+  }, [isOpen, pendingRefStorageKey]);
+
   if (!isOpen) return null;
 
   const planInfo = selectedPlan === 'studio' ? BETA_PLAN_LIMITS.studio : BETA_PLAN_LIMITS.plus;
@@ -53,17 +70,10 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
     return headers;
   };
 
-  // Step 1: Initialize transaction with backend and open direct Paystack checkout
+  // Step 1: Initialize transaction with backend FIRST (inserts payment_transactions row), then redirect to Paystack
   const handleInitiatePayment = async () => {
     setIsProcessing(true);
     setStatusMessage(null);
-
-    const directUrl = selectedPlan === 'studio' 
-      ? 'https://paystack.shop/pay/asaup43dpk' 
-      : 'https://paystack.shop/pay/c-mcwwacc8';
-
-    // Open Paystack checkout page directly in a new tab immediately
-    window.open(directUrl, '_blank', 'noopener,noreferrer');
 
     try {
       const headers = await getHeaders();
@@ -72,19 +82,42 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         headers,
         body: JSON.stringify({ plan: selectedPlan })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (res.ok && data.success) {
-        setPaymentRef(data.reference);
-        if (data.authorizationUrl) {
-          setAuthUrl(data.authorizationUrl);
-        }
+      if (!res.ok || !data.success || !data.reference) {
+        setStatusMessage({
+          type: 'error',
+          title: 'Could Not Start Checkout',
+          description: data.error || 'Failed to initialize payment session with Paystack. Please try again.'
+        });
+        setStep('status');
+        return;
       }
+
+      setPaymentRef(data.reference);
+      try {
+        if (pendingRefStorageKey) localStorage.setItem(pendingRefStorageKey, data.reference);
+        if (pendingPlanStorageKey) localStorage.setItem(pendingPlanStorageKey, selectedPlan);
+      } catch {}
+
+      if (data.authorizationUrl) {
+        setAuthUrl(data.authorizationUrl);
+        // Navigate to Paystack checkout URL so Paystack redirects back to our callback_url (?payment=return&reference=...)
+        window.location.href = data.authorizationUrl;
+        return;
+      }
+
+      setStep('confirm');
     } catch (err: any) {
-      console.warn('Backend pre-init notification:', err);
+      console.error('Payment initialization error:', err);
+      setStatusMessage({
+        type: 'error',
+        title: 'Connection Error',
+        description: err?.message || 'Could not reach the payment server. Please check your connection and try again.'
+      });
+      setStep('status');
     } finally {
       setIsProcessing(false);
-      setStep('confirm');
     }
   };
 
@@ -121,6 +154,11 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         return;
       }
 
+      try {
+        if (pendingRefStorageKey) localStorage.removeItem(pendingRefStorageKey);
+        if (pendingPlanStorageKey) localStorage.removeItem(pendingPlanStorageKey);
+      } catch {}
+
       // Successful verified payment!
       const updatedProfile: UserProfile = {
         ...currentProfile,
@@ -137,7 +175,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
       setStatusMessage({
         type: 'success',
         title: 'Subscription Activated!',
-        description: `Your account is now upgraded to ${data.tier === 'studio' ? 'KorsIQ Premium' : 'Plus'}. All features and limits are unlocked!`
+        description: `Your account is now upgraded to ${data.tier === 'studio' ? 'KorsIQ Premium' : 'KorsIQ Plus'}. All features and limits are unlocked!`
       });
       setStep('status');
     } catch (err: any) {
@@ -161,7 +199,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-lg bg-[#EFF6FF] dark:bg-blue-950/60 text-[#2563EB]">
-              <Sparkles size={16} />
+              <ShieldCheck size={16} />
             </div>
             <div>
               <h2 className="text-base font-bold text-[#111827] dark:text-white">

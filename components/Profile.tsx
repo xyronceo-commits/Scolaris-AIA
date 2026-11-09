@@ -43,6 +43,87 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
   });
 
+  // Manual Paystack receipt verification state
+  const currentUid = getCurrentUserId() || (profile as any)?.id || '';
+  const pendingRefKey = currentUid ? `scolaris_pending_payment_ref_${currentUid}` : '';
+  const [receiptRefInput, setReceiptRefInput] = useState<string>(() => {
+    try {
+      return pendingRefKey ? (localStorage.getItem(pendingRefKey) || '') : '';
+    } catch {
+      return '';
+    }
+  });
+  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
+  const [receiptVerifyFeedback, setReceiptVerifyFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  const handleManualReceiptVerify = async (e?: React.FormEvent, useEmailLookup = false) => {
+    if (e) e.preventDefault();
+    const refToVerify = useEmailLookup ? '' : receiptRefInput.trim();
+    if (!useEmailLookup && !refToVerify) {
+      setReceiptVerifyFeedback({
+        type: 'error',
+        message: 'Paste your Paystack transaction reference from your email receipt.'
+      });
+      return;
+    }
+
+    setIsVerifyingReceipt(true);
+    setReceiptVerifyFeedback(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch('/api/subscription/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          reference: refToVerify || undefined,
+          email: profile.email
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setReceiptVerifyFeedback({
+          type: 'error',
+          message: data.error || data.message || 'Could not verify that payment reference. Check the reference on your Paystack receipt and try again.'
+        });
+        return;
+      }
+
+      try {
+        if (pendingRefKey) localStorage.removeItem(pendingRefKey);
+      } catch {}
+
+      const updatedProfile: UserProfile = {
+        ...profile,
+        tier: data.tier || 'plus',
+        isPro: true,
+        subscriptionTier: data.tier || 'plus',
+        subscriptionStatus: 'active',
+        paymentStatus: 'paid',
+        subscriptionEnd: data.currentPeriodEnd || profile.subscriptionEnd || ''
+      };
+      setProfile(updatedProfile);
+      setEditedProfile(updatedProfile);
+      setReceiptRefInput('');
+      setReceiptVerifyFeedback({
+        type: 'success',
+        message: data.message || `Payment verified! Your plan is now ${data.tier === 'studio' ? 'KorsIQ Premium' : 'KorsIQ Plus'}.`
+      });
+    } catch (err: any) {
+      setReceiptVerifyFeedback({
+        type: 'error',
+        message: err?.message || 'Unable to connect to verification server. Please try again.'
+      });
+    } finally {
+      setIsVerifyingReceipt(false);
+    }
+  };
+
   useEffect(() => {
     setEditedProfile(profile);
   }, [profile]);
@@ -239,6 +320,11 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div>
                     <span className="text-2xl font-bold text-[#111827] dark:text-white">{currentPlan.price}</span>
+                    {profile.isPro && profile.subscriptionEnd && (
+                      <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 mt-1">
+                        Active · Renews {new Date(profile.subscriptionEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    )}
                   </div>
                   <p className="text-xs text-[#5B6472] max-w-sm">
                     {currentPlan.tagline}
@@ -313,6 +399,60 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     >
                       Upgrade plan
                     </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Have a receipt? Verify payment (Manual Recovery Box) */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CreditCard size={16} className="text-[#2563EB]" />
+                    <h3 className="font-bold text-sm text-[#111827] dark:text-white">Have a receipt? Verify payment</h3>
+                  </div>
+                </div>
+                <p className="text-xs text-[#5B6472]">
+                  Paid on Paystack and haven&apos;t seen your plan update? Paste the reference from your Paystack receipt below to verify and activate your subscription immediately.
+                </p>
+                <form onSubmit={(e) => handleManualReceiptVerify(e, false)} className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={receiptRefInput}
+                    onChange={(e) => setReceiptRefInput(e.target.value)}
+                    placeholder="e.g. KQ_PLUS_... or Paystack reference"
+                    className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-slate-950 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-[#111827] dark:text-white min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isVerifyingReceipt}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors"
+                  >
+                    {isVerifyingReceipt ? 'Verifying...' : 'Verify payment'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isVerifyingReceipt}
+                    onClick={() => handleManualReceiptVerify(undefined, true)}
+                    className="px-3.5 py-2 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-[#111827] dark:text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors"
+                  >
+                    Check by email
+                  </button>
+                </form>
+                {receiptVerifyFeedback && (
+                  <div
+                    role="alert"
+                    className={`p-3 rounded-lg text-xs flex items-center gap-2 border ${
+                      receiptVerifyFeedback.type === 'success'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
+                    }`}
+                  >
+                    {receiptVerifyFeedback.type === 'success' ? (
+                      <Check size={15} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle size={15} className="text-rose-600 shrink-0" />
+                    )}
+                    <span>{receiptVerifyFeedback.message}</span>
                   </div>
                 )}
               </div>
