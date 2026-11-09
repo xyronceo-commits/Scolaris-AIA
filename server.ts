@@ -244,10 +244,17 @@ export async function createExpressApp() {
     if (!supabaseAdmin || !userId) return buildStudentContext(null, []);
     try {
       const [profileRes, coursesRes] = await Promise.all([
-        supabaseAdmin.from('profiles').select('department, major, level, university, name').eq('id', userId).maybeSingle(),
-        supabaseAdmin.from('courses').select('code, title, units').eq('user_id', userId)
+        // NOTE: the profiles column is `institution` (there is no `university` column)
+        supabaseAdmin.from('profiles').select('department, major, level, institution, name').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('courses').select('code, title, credits').eq('user_id', userId)
       ]);
-      return buildStudentContext(profileRes.data, coursesRes.data || []);
+      if (profileRes.error) console.warn('Student context profile query failed:', profileRes.error.message);
+      if (coursesRes.error) console.warn('Student context courses query failed:', coursesRes.error.message);
+      const p: any = profileRes.data;
+      const profile = p ? { ...p, university: p.institution || '' } : null;
+      // NOTE: the courses column is `credits` (mapped to `units` in the client)
+      const courseRows = (coursesRes.data || []).map((c: any) => ({ code: c.code, title: c.title, units: c.credits }));
+      return buildStudentContext(profile, courseRows);
     } catch (err) {
       console.warn('Failed to fetch student context for AI:', err);
       return buildStudentContext(null, []);
@@ -2061,6 +2068,92 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     reason: "KorsIQ Academic Integrity Validation passed in preview mode."
   });
 
+  // =============================================================
+  // AI CREDITS USAGE METERING & PERIOD SUMMARY ENDPOINT
+  // =============================================================
+  async function recordAiUsage(userId: string | undefined, feature: string, credits = 1): Promise<void> {
+    if (!supabaseAdmin || !userId) return;
+    try {
+      await supabaseAdmin.from('ai_usage').insert({
+        user_id: userId,
+        credits: Math.max(1, Math.round(credits)),
+        feature
+      });
+    } catch (err: any) {
+      console.warn('[AI Metering] Failed to record ai_usage:', err?.message || err);
+    }
+  }
+
+  app.get('/api/usage/ai-credits', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const now = new Date();
+    const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
+    const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString();
+
+    if (!supabaseAdmin || !userId) {
+      return res.json({
+        used: 0,
+        allowance: 0,
+        tier: 'free',
+        periodStart,
+        periodEnd
+      });
+    }
+
+    try {
+      const [profileRes, usageRes] = await Promise.all([
+        supabaseAdmin
+          .from('profiles')
+          .select('tier, subscription_tier')
+          .eq('id', userId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('ai_usage')
+          .select('credits')
+          .eq('user_id', userId)
+          .gte('created_at', periodStart)
+      ]);
+
+      const rawTier = String(
+        profileRes.data?.subscription_tier ||
+        profileRes.data?.tier ||
+        (req as any).user?.tier ||
+        'free'
+      ).toLowerCase();
+
+      const normalizedTier =
+        rawTier === 'studio' || rawTier === 'sage'
+          ? 'studio'
+          : rawTier === 'plus' || rawTier === 'scholar'
+          ? 'plus'
+          : 'free';
+
+      const allowance =
+        normalizedTier === 'studio' ? 1000 : normalizedTier === 'plus' ? 250 : 0;
+
+      const used = Array.isArray(usageRes.data)
+        ? usageRes.data.reduce((sum: number, r: any) => sum + (Number(r.credits) || 1), 0)
+        : 0;
+
+      return res.json({
+        used,
+        allowance,
+        tier: normalizedTier,
+        periodStart,
+        periodEnd
+      });
+    } catch (err: any) {
+      console.warn('[AI Metering] /api/usage/ai-credits fallback:', err?.message || err);
+      return res.json({
+        used: 0,
+        allowance: 0,
+        tier: 'free',
+        periodStart,
+        periodEnd
+      });
+    }
+  });
+
   // Magic Import
   app.post('/api/ai/import', requireAuth, apiRateLimiter, async (req, res) => {
     const { text } = req.body;
@@ -2433,6 +2526,8 @@ Output JSON format:
         temperature: 0.3
       });
 
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_plan', 1);
+
       const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
       return res.json(parsed);
@@ -2526,6 +2621,8 @@ Return your response in clean Markdown formatting ready for direct insertion int
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.35
       });
+
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_generate_section', 2);
 
       return res.json({
         content: aiResponse || '',
@@ -2781,6 +2878,196 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     }
   });
 
+  // SSRF-safe server-side URL content extractor for Study Hub "Upload from a link"
+  const isPrivateOrReservedIp = (ip: string): boolean => {
+    const clean = ip.toLowerCase().replace(/^::ffff:/, '');
+    if (
+      clean === 'localhost' ||
+      clean === '::1' ||
+      clean === '0.0.0.0' ||
+      clean.startsWith('127.') ||
+      clean.startsWith('10.') ||
+      clean.startsWith('192.168.') ||
+      clean.startsWith('169.254.') ||
+      clean.startsWith('0.') ||
+      clean.startsWith('fc') ||
+      clean.startsWith('fd') ||
+      clean.startsWith('fe80:')
+    ) {
+      return true;
+    }
+    const m172 = clean.match(/^172\.(\d+)\./);
+    if (m172) {
+      const second = parseInt(m172[1], 10);
+      if (second >= 16 && second <= 31) return true;
+    }
+    const m100 = clean.match(/^100\.(\d+)\./);
+    if (m100) {
+      const second = parseInt(m100[1], 10);
+      if (second >= 64 && second <= 127) return true;
+    }
+    return false;
+  };
+
+  app.post('/api/files/extract-url', requireAuth, apiRateLimiter, async (req, res) => {
+    try {
+      const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+      if (!rawUrl) {
+        return res.status(400).json({ success: false, error: 'Please enter a valid http:// or https:// URL.' });
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(rawUrl);
+      } catch {
+        return res.status(400).json({ success: false, error: 'Invalid URL format. Include http:// or https://.' });
+      }
+
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return res.status(400).json({ success: false, error: 'Only http:// and https:// links are supported.' });
+      }
+
+      const hostname = parsedUrl.hostname.toLowerCase();
+      if (
+        hostname === 'localhost' ||
+        hostname.endsWith('.localhost') ||
+        hostname.endsWith('.local') ||
+        hostname.endsWith('.internal') ||
+        isPrivateOrReservedIp(hostname)
+      ) {
+        return res.status(400).json({ success: false, error: 'Private or local network URLs are not allowed.' });
+      }
+
+      // Resolve DNS to block SSRF via DNS rebinding or private A/AAAA records
+      try {
+        const dns = await import('dns');
+        const records = await dns.promises.lookup(hostname, { all: true });
+        if (!records || records.length === 0 || records.some(r => isPrivateOrReservedIp(r.address))) {
+          return res.status(400).json({ success: false, error: 'That URL resolves to a restricted network address and cannot be fetched.' });
+        }
+      } catch {
+        return res.status(400).json({ success: false, error: "We couldn't resolve that domain. Check the URL and try again." });
+      }
+
+      const MAX_URL_BYTES = 10 * 1024 * 1024; // 10 MB limit
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      let response: Response;
+      try {
+        response = await fetch(parsedUrl.toString(), {
+          method: 'GET',
+          redirect: 'follow',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'KorsIQ-StudyHub/1.0 (+https://korsiq.com)',
+            'Accept': 'text/html,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*;q=0.8'
+          }
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        return res.status(200).json({
+          success: false,
+          error: `We couldn't read that link (HTTP ${response.status}). Make sure the page or file is publicly accessible.`
+        });
+      }
+
+      // Re-verify final redirected URL hostname against SSRF
+      if (response.url) {
+        try {
+          const finalUrl = new URL(response.url);
+          if (isPrivateOrReservedIp(finalUrl.hostname) || finalUrl.hostname.toLowerCase() === 'localhost') {
+            return res.status(400).json({ success: false, error: 'Redirect to a private network address was blocked.' });
+          }
+        } catch {}
+      }
+
+      const contentLength = Number(response.headers.get('content-length') || 0);
+      if (contentLength > MAX_URL_BYTES) {
+        return res.status(200).json({
+          success: false,
+          error: 'That file is larger than 10 MB. Download it and upload from your device instead.'
+        });
+      }
+
+      const arrayBuf = await response.arrayBuffer();
+      if (arrayBuf.byteLength > MAX_URL_BYTES) {
+        return res.status(200).json({
+          success: false,
+          error: 'That file is larger than 10 MB. Download it and upload from your device instead.'
+        });
+      }
+
+      const buffer = Buffer.from(arrayBuf);
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      const pathPart = parsedUrl.pathname.split('/').filter(Boolean).pop() || parsedUrl.hostname;
+      const derivedName = decodeURIComponent(pathPart).slice(0, 80) || parsedUrl.hostname;
+
+      const isDocBinary =
+        contentType.includes('application/pdf') ||
+        contentType.includes('officedocument') ||
+        /\.(pdf|docx|pptx)$/i.test(parsedUrl.pathname);
+
+      let extractedText = '';
+      if (isDocBinary) {
+        const result = await extractDocumentWithOcrFallback(buffer, derivedName, contentType);
+        if (!result.success || !result.extractedText) {
+          return res.status(200).json({
+            success: false,
+            error: result.error || "We couldn't extract readable text from that document link."
+          });
+        }
+        extractedText = result.extractedText;
+      } else {
+        const rawHtmlOrText = buffer.toString('utf-8');
+        if (contentType.includes('html') || /<html|<body|<article|<p\b/i.test(rawHtmlOrText)) {
+          extractedText = rawHtmlOrText
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+            .replace(/<\/(p|div|h[1-6]|li|tr|section|article|br)>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, "'")
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        } else {
+          extractedText = rawHtmlOrText.trim();
+        }
+      }
+
+      const validation = validateExtractedText(extractedText);
+      if (!validation.isValid || extractedText.length < 40) {
+        return res.status(200).json({
+          success: false,
+          error: "We couldn't find enough readable text at that link. Try another link or upload the file from your device."
+        });
+      }
+
+      return res.json({
+        success: true,
+        fileName: derivedName,
+        extractedText: normalizeExtractedText(extractedText)
+      });
+    } catch (error: any) {
+      const isTimeout = error?.name === 'AbortError';
+      return res.status(200).json({
+        success: false,
+        error: isTimeout
+          ? 'That link took too long to respond. Please try another link or upload from your device.'
+          : "We couldn't read that link. Check the URL and try again."
+      });
+    }
+  });
+
   // Vision Document Scanner Endpoint: Parses handwritten notes & PDFs into structured study content
   app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
     try {
@@ -2912,9 +3199,130 @@ You MUST return a JSON object containing structured study assets with this exact
     }
   });
 
-  // Advanced Academic AI Companion / tutoring endpoint
+  // =============================================================
+  // PERSISTENT AI CONVERSATIONS & CHAT HISTORY (STUDY HUB AI)
+  // =============================================================
+  app.get('/api/ai/conversations', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const courseIdParam = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : undefined;
+    if (!supabaseAdmin || !userId) {
+      return res.json({ conversations: [] });
+    }
+    try {
+      let query = supabaseAdmin
+        .from('ai_conversations')
+        .select('id, user_id, course_id, title, created_at, updated_at')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+        .limit(50);
+
+      if (courseIdParam === 'general') {
+        query = query.is('course_id', null);
+      } else if (courseIdParam) {
+        query = query.eq('course_id', courseIdParam);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('ai_conversations list warning:', error.message);
+        return res.json({ conversations: [] });
+      }
+      return res.json({ conversations: data || [] });
+    } catch (err: any) {
+      console.warn('Failed to fetch ai_conversations:', err?.message || err);
+      return res.json({ conversations: [] });
+    }
+  });
+
+  app.get('/api/ai/conversations/:id/messages', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const convId = req.params.id;
+    if (!supabaseAdmin || !userId || !convId) {
+      return res.json({ messages: [] });
+    }
+    try {
+      const { data: conv } = await supabaseAdmin
+        .from('ai_conversations')
+        .select('id, user_id')
+        .eq('id', convId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!conv) {
+        return res.status(404).json({ error: 'Conversation not found.' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('ai_messages')
+        .select('id, conversation_id, role, content, created_at')
+        .eq('conversation_id', convId)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(100);
+      if (error) {
+        console.warn('ai_messages fetch warning:', error.message);
+        return res.json({ messages: [] });
+      }
+      return res.json({ messages: data || [] });
+    } catch (err: any) {
+      return res.json({ messages: [] });
+    }
+  });
+
+  app.patch('/api/ai/conversations/:id', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const convId = req.params.id;
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 80) : '';
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required.' });
+    }
+    if (!supabaseAdmin || !userId) {
+      return res.status(503).json({ error: 'Database unavailable.' });
+    }
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('ai_conversations')
+        .update({ title, updated_at: new Date().toISOString() })
+        .eq('id', convId)
+        .eq('user_id', userId)
+        .select('id, user_id, course_id, title, created_at, updated_at')
+        .maybeSingle();
+      if (error || !data) {
+        return res.status(404).json({ error: error?.message || 'Conversation not found.' });
+      }
+      return res.json({ conversation: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'Failed to rename conversation.' });
+    }
+  });
+
+  app.delete('/api/ai/conversations/:id', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const convId = req.params.id;
+    if (!supabaseAdmin || !userId) {
+      return res.status(503).json({ error: 'Database unavailable.' });
+    }
+    try {
+      await supabaseAdmin
+        .from('ai_messages')
+        .delete()
+        .eq('conversation_id', convId)
+        .eq('user_id', userId);
+      const { error } = await supabaseAdmin
+        .from('ai_conversations')
+        .delete()
+        .eq('id', convId)
+        .eq('user_id', userId);
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'Failed to delete conversation.' });
+    }
+  });
+
+  // Advanced Academic AI Companion / tutoring endpoint (with DB-backed conversation history)
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
-    const { messages, courseContext, fileContent } = req.body;
+    const { messages, message, conversationId, courseId, courseContext, fileContent } = req.body;
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
@@ -2923,7 +3331,18 @@ You MUST return a JSON object containing structured study assets with this exact
         });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const userId = (req as any).user?.id || (req as any).user?.uid;
+      const studentContext = await getStudentContextForUser(userId);
+
+      // Extract the new user message
+      const clientMsgs = Array.isArray(messages) ? messages : [];
+      const rawUserMessage = typeof message === 'string' && message.trim()
+        ? message.trim()
+        : (clientMsgs.length > 0 ? String(clientMsgs[clientMsgs.length - 1]?.content || clientMsgs[clientMsgs.length - 1]?.text || '').trim() : '');
+
+      if (!rawUserMessage) {
+        return res.status(400).json({ error: 'Message content is required.' });
+      }
 
       let systemPrompt = `${studentContext}
 
@@ -2938,9 +3357,7 @@ Focus your analysis, definitions, and problem-solving techniques on the scope an
       if (fileContent && typeof fileContent === 'string' && fileContent.trim().length > 0) {
         const val = validateExtractedText(fileContent);
         if (val.isValid) {
-          const clientMsgs = messages || [];
-          const lastUserMsg = clientMsgs.length > 0 ? (clientMsgs[clientMsgs.length - 1]?.content || clientMsgs[clientMsgs.length - 1]?.text || '') : '';
-          const cleanText = selectRelevantChunks(fileContent, lastUserMsg, 14000);
+          const cleanText = selectRelevantChunks(fileContent, rawUserMessage, 14000);
           systemPrompt += `\n\nCRITICAL CONTEXT: The student has uploaded a source material file to study. Below is clean readable text extracted from their file:
 ---
 ${cleanText}
@@ -2951,18 +3368,128 @@ Always refer to this context when answering questions about the material, explai
         }
       }
 
-      const clientMessages = (messages || []).map((m: any) => ({
-        role: m.role || (isAiSender(m.sender) ? 'assistant' : 'user'),
-        content: m.content || m.text
-      }));
+      // Load authoritative conversation history from the database for the authenticated user
+      let activeConv: any = null;
+      let conversationMessages: { role: string; content: string }[] = [];
+
+      if (supabaseAdmin && userId) {
+        try {
+          if (conversationId) {
+            const { data: existingConv } = await supabaseAdmin
+              .from('ai_conversations')
+              .select('id, user_id, course_id, title, created_at, updated_at')
+              .eq('id', conversationId)
+              .eq('user_id', userId)
+              .maybeSingle();
+
+            if (existingConv) {
+              activeConv = existingConv;
+              const { data: dbMsgs } = await supabaseAdmin
+                .from('ai_messages')
+                .select('role, content, created_at')
+                .eq('conversation_id', existingConv.id)
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+              if (Array.isArray(dbMsgs) && dbMsgs.length > 0) {
+                conversationMessages = dbMsgs
+                  .slice()
+                  .reverse()
+                  .map((m: any) => ({
+                    role: m.role === 'assistant' ? 'assistant' : 'user',
+                    content: m.content
+                  }));
+              }
+            }
+          }
+
+          if (!activeConv) {
+            const autoTitle = rawUserMessage.replace(/\s+/g, ' ').slice(0, 60);
+            const { data: createdConv } = await supabaseAdmin
+              .from('ai_conversations')
+              .insert({
+                user_id: userId,
+                course_id: courseId || null,
+                title: autoTitle || 'New conversation'
+              })
+              .select('id, user_id, course_id, title, created_at, updated_at')
+              .maybeSingle();
+            if (createdConv) {
+              activeConv = createdConv;
+            }
+          }
+        } catch (dbHistErr: any) {
+          console.warn('AI conversation DB lookup fallback:', dbHistErr?.message || dbHistErr);
+        }
+      }
+
+      // Append the current user prompt to the authoritative DB history
+      const messagesForAI = [
+        ...conversationMessages,
+        { role: 'user', content: rawUserMessage }
+      ];
 
       const aiContent = await runAICall({
         systemInstruction: systemPrompt,
-        messages: clientMessages,
+        messages: messagesForAI,
         temperature: 0.5
       });
 
-      res.json({ text: aiContent });
+      await recordAiUsage(userId, 'study_hub_chat', 1);
+
+      // Persist both the user message and the AI response to the database
+      let savedUserMsg: any = null;
+      let savedAssistantMsg: any = null;
+      if (supabaseAdmin && userId && activeConv?.id) {
+        try {
+          const nowIso = new Date().toISOString();
+          const { data: insertedMsgs } = await supabaseAdmin
+            .from('ai_messages')
+            .insert([
+              {
+                conversation_id: activeConv.id,
+                user_id: userId,
+                role: 'user',
+                content: rawUserMessage
+              },
+              {
+                conversation_id: activeConv.id,
+                user_id: userId,
+                role: 'assistant',
+                content: aiContent
+              }
+            ])
+            .select('id, conversation_id, role, content, created_at');
+
+          if (Array.isArray(insertedMsgs)) {
+            savedUserMsg = insertedMsgs.find((m: any) => m.role === 'user') || null;
+            savedAssistantMsg = insertedMsgs.find((m: any) => m.role === 'assistant') || null;
+          }
+
+          const updatedTitle = activeConv.title === 'New conversation'
+            ? rawUserMessage.replace(/\s+/g, ' ').slice(0, 60)
+            : activeConv.title;
+
+          const { data: updatedConv } = await supabaseAdmin
+            .from('ai_conversations')
+            .update({ title: updatedTitle, updated_at: nowIso })
+            .eq('id', activeConv.id)
+            .eq('user_id', userId)
+            .select('id, user_id, course_id, title, created_at, updated_at')
+            .maybeSingle();
+          if (updatedConv) activeConv = updatedConv;
+        } catch (saveErr: any) {
+          console.warn('Failed to persist AI chat messages:', saveErr?.message || saveErr);
+        }
+      }
+
+      res.json({
+        text: aiContent,
+        conversation: activeConv,
+        userMessage: savedUserMsg,
+        assistantMessage: savedAssistantMsg
+      });
     } catch (error: any) {
       console.error("KorsIQ Chat API pipeline error:", error?.message || error);
       res.status(500).json({
@@ -3069,6 +3596,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         messages: [{ role: 'user', content: userContent }],
         jsonMode: type !== 'summary'
       });
+
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, `materials_${type || 'summary'}`, 1);
       
       if (type === 'summary') {
         res.json(text);
@@ -3127,6 +3656,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       }
 
       const audioBase64 = wavBuffer.toString('base64');
+      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'podcast_generate', 1);
       res.json({ script, audioBase64, durationSec: validation.durationSec });
     } catch (error: any) {
       console.error('Podcast generation server error:', error?.message || error);
@@ -3192,31 +3722,59 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
     try {
       if (!supabaseAdmin || !supabaseAuthClient) {
-        console.warn('[Admin Auth] Supabase admin or auth client unavailable');
+        console.error(
+          '[Admin Auth] Cannot process OTP request: SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing in server environment variables.'
+        );
         return res.json(GENERIC_SUCCESS_RESPONSE);
       }
 
-      // Check allowlist table `admin_users`
+      // Check allowlist table `admin_users` (case-insensitive)
       const { data: adminRow, error: adminErr } = await supabaseAdmin
         .from('admin_users')
         .select('id, email, role, active')
-        .eq('email', rawEmail)
+        .ilike('email', rawEmail)
         .eq('active', true)
         .maybeSingle();
 
-      if (adminErr || !adminRow) {
+      if (adminErr) {
+        console.error('[Admin Auth] Error querying admin_users table (ensure migration 20261109_admin_and_circles_reddit.sql was applied):', adminErr.message);
+        return res.json(GENERIC_SUCCESS_RESPONSE);
+      }
+
+      if (!adminRow) {
         // Unknown or inactive email: do not send code, return identical message
         await logAdminAction(rawEmail, 'admin_otp_requested_unauthorized', { ip }, ip);
         return res.json(GENERIC_SUCCESS_RESPONSE);
       }
 
       // Authorized admin: trigger Supabase email OTP
-      const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
+      let { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
         email: rawEmail,
         options: {
           shouldCreateUser: false
         }
       });
+
+      // If the allowlisted admin email does not yet have a row in auth.users,
+      // provision their auth.users record via service role and re-send the OTP.
+      if (otpError) {
+        console.warn('[Admin Auth] Initial signInWithOtp failed for allowlisted admin, ensuring auth.users account exists:', otpError.message);
+        const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
+          email: rawEmail,
+          email_confirm: true
+        });
+        if (createErr && !createErr.message?.toLowerCase().includes('already')) {
+          console.error('[Admin Auth] Failed to auto-provision auth.users record for admin:', createErr.message);
+        } else {
+          const retryOtp = await supabaseAuthClient.auth.signInWithOtp({
+            email: rawEmail,
+            options: {
+              shouldCreateUser: false
+            }
+          });
+          otpError = retryOtp.error;
+        }
+      }
 
       if (otpError) {
         console.error('[Admin Auth] Supabase signInWithOtp error:', otpError.message);
@@ -3243,6 +3801,9 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
 
     if (!supabaseAdmin || !supabaseAuthClient) {
+      console.error(
+        '[Admin Auth] Cannot verify OTP: SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing in server environment variables.'
+      );
       return res.status(503).json({ success: false, error: 'Authentication service unavailable.' });
     }
 
@@ -3259,11 +3820,11 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         return res.status(401).json({ success: false, error: 'Invalid or expired 6-digit verification code.' });
       }
 
-      // 2. Cryptographically re-verify against admin_users allowlist
+      // 2. Cryptographically re-verify against admin_users allowlist (case-insensitive)
       const { data: adminRow, error: allowErr } = await supabaseAdmin
         .from('admin_users')
         .select('id, email, role, active')
-        .eq('email', rawEmail)
+        .ilike('email', rawEmail)
         .eq('active', true)
         .maybeSingle();
 
@@ -3278,7 +3839,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         success: true,
         user: {
           id: adminRow.id,
-          email: adminRow.email,
+          email: adminRow.email.toLowerCase(),
           role: adminRow.role
         },
         session: data.session
@@ -3314,11 +3875,11 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
       const email = data.user.email.toLowerCase().trim();
 
-      // Re-check active admin status in admin_users
+      // Re-check active admin status in admin_users (case-insensitive)
       const { data: adminRow, error: allowErr } = await supabaseAdmin
         .from('admin_users')
         .select('id, email, role, active')
-        .eq('email', email)
+        .ilike('email', email)
         .eq('active', true)
         .maybeSingle();
 
@@ -3730,6 +4291,59 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       res.status(404).json({ success: false, error: "That code doesn't match any circle. Check the code and try again." });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Error looking up circle.' });
+    }
+  });
+
+  // Search Study Circles (Public/General and Private)
+  app.get('/api/circles/search', async (req, res) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      if (!supabaseAdmin) {
+        return res.json({ success: true, groups: [] });
+      }
+
+      let query = supabaseAdmin
+        .from('study_groups')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(30);
+
+      if (q) {
+        const safe = q.replace(/[%_]/g, '');
+        query = query.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const groups = (data || []).map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        course: row.course,
+        type: row.type || 'private',
+        visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
+        inviteCode: row.invite_code,
+        inviteCodeActive: row.invite_code_active !== false,
+        department: row.department || '',
+        level: row.level || '',
+        university: row.university || '',
+        academicSession: row.academic_session || '',
+        groupImage: row.group_image || '',
+        ownerId: row.owner_id,
+        members: row.members || [],
+        memberCount: row.member_count || (row.members ? row.members.length : 1),
+        messages: [],
+        sharedMaterials: [],
+        discussions: [],
+        activityFeed: [],
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+
+      res.json({ success: true, groups });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Error searching circles.' });
     }
   });
 

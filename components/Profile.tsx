@@ -3,12 +3,12 @@ import { UserProfile, UserFile } from '../types';
 import { ICONS, BETA_PLAN_LIMITS } from '../constants';
 import { UserAvatar, AVATAR_OPTIONS } from './UserAvatar';
 import { DBService } from '../services/db';
-import { getCurrentUserId } from '../lib/supabase';
+import { getCurrentUserId, getAccessToken, supabase } from '../lib/supabase';
 import { 
   ArrowRight, 
   ArrowLeft,
   LogOut, 
-  Sparkles, 
+  Cpu, 
   X, 
   Check, 
   AlertCircle,
@@ -37,6 +37,11 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
   const [checkoutPlan, setCheckoutPlan] = useState<'plus' | 'studio'>('plus');
   const [userFiles, setUserFiles] = useState<UserFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
+  const [aiCreditsUsed, setAiCreditsUsed] = useState<number>(0);
+  const [aiPeriodEnd, setAiPeriodEnd] = useState<string>(() => {
+    const d = new Date();
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
+  });
 
   useEffect(() => {
     setEditedProfile(profile);
@@ -54,7 +59,43 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
       .finally(() => {
         setIsLoadingFiles(false);
       });
-  }, [profile.email]);
+
+    // Fetch real AI credit usage for the current billing period
+    const loadAiCreditsUsage = async () => {
+      try {
+        const token = await getAccessToken();
+        const res = await fetch('/api/usage/ai-credits', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data.used === 'number') setAiCreditsUsed(data.used);
+          if (data.periodEnd) setAiPeriodEnd(data.periodEnd);
+          return;
+        }
+      } catch {}
+
+      // Direct RLS-backed Supabase fallback
+      try {
+        const authUid = getCurrentUserId();
+        if (authUid) {
+          const now = new Date();
+          const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+          const { data } = await supabase
+            .from('ai_usage')
+            .select('credits')
+            .eq('user_id', authUid)
+            .gte('created_at', periodStart);
+          if (Array.isArray(data)) {
+            const sum = data.reduce((acc: number, row: any) => acc + (Number(row.credits) || 1), 0);
+            setAiCreditsUsed(sum);
+          }
+        }
+      } catch {}
+    };
+
+    loadAiCreditsUsage();
+  }, [profile.email, profile.tier, profile.subscriptionTier]);
 
   const handleSaveIdentity = async () => {
     setProfile(editedProfile);
@@ -230,10 +271,51 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 </p>
               </div>
 
-              {/* NOTE ON AI CREDITS CARD:
-                  Per spec rule: "The AI credits card must only appear if real metering exists.
-                  No fake content anywhere: no invented credit numbers."
-                  Since no backend metering counter exists, the card is omitted cleanly. */}
+              {/* AI Credits Card (Backed by real ai_usage metering) */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={16} className="text-[#2563EB]" />
+                    <h3 className="font-bold text-sm text-[#111827] dark:text-white">AI credits</h3>
+                  </div>
+                  {currentPlan.aiCreditsAllowance > 0 ? (
+                    <span className="text-xs text-[#5B6472]">
+                      {aiCreditsUsed} of {currentPlan.aiCreditsAllowance} credits used this period
+                    </span>
+                  ) : (
+                    <span className="text-xs text-[#5B6472]">Free plan</span>
+                  )}
+                </div>
+
+                {currentPlan.aiCreditsAllowance > 0 ? (
+                  <>
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#2563EB] h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.round((aiCreditsUsed / currentPlan.aiCreditsAllowance) * 100))}%`
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-[#5B6472]">
+                      Resets on {new Date(aiPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.
+                    </p>
+                  </>
+                ) : (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                    <p className="text-xs text-[#5B6472]">
+                      AI credits are not included in Free.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlansModal(true)}
+                      className="px-3.5 py-2 border border-[#2563EB] text-[#2563EB] hover:bg-[#EFF6FF] dark:hover:bg-blue-950/40 rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0"
+                    >
+                      Upgrade plan
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Right Column (4 cols on desktop): Quiet Upgrade Card */}

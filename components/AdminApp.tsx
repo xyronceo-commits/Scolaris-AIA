@@ -210,7 +210,11 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
         throw new Error(data.error || 'Invalid or expired 6-digit code.');
       }
 
-      saveSession(data.user, data.session?.access_token || 'admin_token');
+      if (!data.session?.access_token) {
+        throw new Error('Verification succeeded, but no session token was returned by the server.');
+      }
+
+      saveSession(data.user, data.session.access_token);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Verification failed. Please check the code.');
     } finally {

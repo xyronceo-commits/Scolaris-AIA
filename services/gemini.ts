@@ -235,16 +235,50 @@ export const GeminiService = {
     }, 'KorsIQ generation failed. Please verify that your document has readable text.');
   },
 
-  async scolarisChat(messages: any[], courseContext?: string, fileContent?: string, academicProfile?: any) {
+  async scolarisChat(
+    messages: any[],
+    courseContext?: string,
+    fileContent?: string,
+    academicProfile?: any,
+    options?: { conversationId?: string | null; courseId?: string | null; message?: string }
+  ) {
     try {
       return await safeFetchJson('/api/scolaris/chat', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify({ messages, courseContext, fileContent, academicProfile })
+        body: JSON.stringify({
+          messages,
+          message: options?.message,
+          conversationId: options?.conversationId || undefined,
+          courseId: options?.courseId || undefined,
+          courseContext,
+          fileContent,
+          academicProfile
+        })
       }, 'KorsIQ chatbot request failed');
     } catch (err: any) {
       console.warn("KorsIQ chat warning:", err?.message || err);
       return { text: `[KorsIQ Assistant] I encountered an issue: ${err?.message || 'Connection error'}. Please verify your AI API key is set in hosting environment variables.` };
+    }
+  },
+
+  async extractUrlText(url: string): Promise<{ success: boolean; extractedText?: string; fileName?: string; error?: string }> {
+    try {
+      const response = await fetch('/api/files/extract-url', {
+        method: 'POST',
+        headers: await getHeaders(),
+        body: JSON.stringify({ url })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (data && typeof data.success === 'boolean') {
+        return data;
+      }
+      if (!response.ok) {
+        return { success: false, error: data?.error || "We couldn't read that link. Check the URL and try again." };
+      }
+      return { success: true, extractedText: data?.extractedText || '', fileName: data?.fileName };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "We couldn't read that link. Please try another URL." };
     }
   },
 

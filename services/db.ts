@@ -67,42 +67,60 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 async function signedUrlMap(bucket: string, paths: string[]): Promise<Record<string, string>> {
-  const unique = Array.from(new Set(paths.filter(Boolean)));
+  const unique = Array.from(new Set(paths.filter((p) => p && !p.startsWith('http://') && !p.startsWith('https://'))));
   if (unique.length === 0) return {};
+  const map: Record<string, string> = {};
   try {
     const { data, error } = await supabase.storage.from(bucket).createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
-    if (!error && data && data.length > 0 && data.some(d => d.signedUrl)) {
-      const map: Record<string, string> = {};
+    if (!error && data && data.length > 0) {
       data.forEach((entry) => {
         if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
       });
-      return map;
     }
   } catch (err) {
     console.warn(`signedUrlMap primary bucket '${bucket}' error:`, err);
   }
 
-  // Fallback to FALLBACK_BUCKET if different
-  if (bucket !== FALLBACK_BUCKET) {
+  // Also check GROUP_MATERIALS_BUCKET for circle materials saved into Library
+  const groupPaths = unique.filter((p) => p.startsWith('groups/') && !map[p]);
+  if (groupPaths.length > 0 && bucket !== GROUP_MATERIALS_BUCKET) {
     try {
-      const { data: fbData, error: fbErr } = await supabase.storage.from(FALLBACK_BUCKET).createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
-      if (!fbErr && fbData) {
-        const map: Record<string, string> = {};
-        fbData.forEach((entry) => {
+      const { data: gmData, error: gmErr } = await supabase.storage
+        .from(GROUP_MATERIALS_BUCKET)
+        .createSignedUrls(groupPaths, SIGNED_URL_TTL_SECONDS);
+      if (!gmErr && gmData) {
+        gmData.forEach((entry) => {
           if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
         });
-        return map;
       }
     } catch {
       // non-blocking
     }
   }
 
-  return {};
+  // Fallback to FALLBACK_BUCKET for any unresolved paths
+  const remaining = unique.filter((p) => !map[p]);
+  if (remaining.length > 0 && bucket !== FALLBACK_BUCKET) {
+    try {
+      const { data: fbData, error: fbErr } = await supabase.storage.from(FALLBACK_BUCKET).createSignedUrls(remaining, SIGNED_URL_TTL_SECONDS);
+      if (!fbErr && fbData) {
+        fbData.forEach((entry) => {
+          if (entry.path && entry.signedUrl) map[entry.path] = entry.signedUrl;
+        });
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+
+  return map;
 }
 
 // ---------- row <-> model mappers ----------
 function rowToUserFile(row: any, urls: Record<string, string> = {}): UserFile {
+  const directUrl = row.storage_path && (row.storage_path.startsWith('http://') || row.storage_path.startsWith('https://'))
+    ? row.storage_path
+    : '';
   return {
     id: row.id,
     userId: row.user_id,
@@ -111,7 +129,7 @@ function rowToUserFile(row: any, urls: Record<string, string> = {}): UserFile {
     fileType: row.file_type || '',
     fileSize: row.file_size || '',
     storagePath: row.storage_path || '',
-    downloadUrl: urls[row.storage_path] || '',
+    downloadUrl: urls[row.storage_path] || directUrl,
     uploadedAt: row.uploaded_at || new Date().toISOString(),
     timestamp: Number(row.ts) || Date.now(),
     courseCode: row.course_code || '',
@@ -293,19 +311,22 @@ export const DBService = {
       if (profile.assistanceAreas !== undefined) fullPayload.assistance_areas = profile.assistanceAreas;
 
       let { error } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+      let droppedExtendedFields = false;
 
       // If database table doesn't have the extended columns yet, fall back gracefully to base columns
       if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
         console.warn('Extended profile columns missing from remote DB, saving core profile fields:', error.message);
         const retry = await supabase.from('profiles').upsert(basePayload, { onConflict: 'id' });
         error = retry.error;
+        // department/major etc. were NOT saved; callers must not report success for those fields
+        droppedExtendedFields = true;
       }
 
       if (error) throw error;
-      return { error: null };
+      return { error: null, droppedExtendedFields };
     } catch (err) {
       console.error('saveProfile error:', err);
-      return { error: err };
+      return { error: err, droppedExtendedFields: false };
     }
   },
 
@@ -1442,7 +1463,7 @@ export const DBService = {
 
   async getCircleDiscussions(circleId: string): Promise<GroupDiscussionPost[]> {
     try {
-      const [discRes, repliesRes] = await Promise.all([
+      const [discRes, repliesRes, materials] = await Promise.all([
         supabase
           .from('circle_discussions')
           .select('*')
@@ -1453,47 +1474,93 @@ export const DBService = {
           .select('*')
           .eq('circle_id', circleId)
           .order('created_at', { ascending: true }),
+        DBService.getCircleMaterials(circleId),
       ]);
 
-      if (!discRes.error && discRes.data && discRes.data.length > 0) {
-        const repliesByDisc: Record<string, GroupDiscussionReply[]> = {};
-        (repliesRes.data || []).forEach((r: any) => {
-          (repliesByDisc[r.discussion_id] ||= []).push({
-            id: r.id,
-            postId: r.discussion_id,
-            authorId: r.author_id,
-            authorName: r.author_name,
-            authorAvatar: r.author_avatar,
-            content: r.content,
-            timestamp: new Date(r.created_at).getTime(),
-            quoteReplyId: r.quote_reply_id,
-            quoteReplyText: r.quote_reply_text,
-            quoteReplyAuthor: r.quote_reply_author,
-          });
-        });
+      const materialByFileName: Record<string, SharedMaterial> = {};
+      materials.forEach((m) => {
+        if (m.fileName) materialByFileName[m.fileName.toLowerCase()] = m;
+      });
 
-        return discRes.data.map((d: any) => ({
-          id: d.id,
-          groupId: d.circle_id,
-          authorId: d.author_id,
-          authorName: d.author_name,
-          authorAvatar: d.author_avatar,
-          title: d.title,
-          content: d.content,
-          postType: d.post_type || 'thread',
-          isPinned: Boolean(d.is_pinned),
-          fileUrl: d.file_url,
-          fileName: d.file_name,
-          fileSize: d.file_size,
-          fileType: d.file_type,
-          repliesCount: d.replies_count || (repliesByDisc[d.id] || []).length,
-          timestamp: new Date(d.created_at).getTime(),
-          replies: repliesByDisc[d.id] || [],
-        }));
+      const repliesByDisc: Record<string, GroupDiscussionReply[]> = {};
+      (repliesRes.data || []).forEach((r: any) => {
+        (repliesByDisc[r.discussion_id] ||= []).push({
+          id: r.id,
+          postId: r.discussion_id,
+          authorId: r.author_id,
+          authorName: r.author_name,
+          authorAvatar: r.author_avatar,
+          content: r.content,
+          timestamp: new Date(r.created_at).getTime(),
+          quoteReplyId: r.quote_reply_id,
+          quoteReplyText: r.quote_reply_text,
+          quoteReplyAuthor: r.quote_reply_author,
+        });
+      });
+
+      let posts: GroupDiscussionPost[] = [];
+
+      if (!discRes.error && discRes.data && discRes.data.length > 0) {
+        posts = discRes.data.map((d: any) => {
+          const matchedMat = d.file_name ? materialByFileName[String(d.file_name).toLowerCase()] : undefined;
+          return {
+            id: d.id,
+            groupId: d.circle_id,
+            authorId: d.author_id,
+            authorName: d.author_name,
+            authorAvatar: d.author_avatar,
+            title: d.title,
+            content: d.content,
+            postType: d.post_type || 'thread',
+            isPinned: Boolean(d.is_pinned),
+            fileUrl: matchedMat?.downloadUrl || d.file_url,
+            fileName: d.file_name,
+            fileSize: d.file_size,
+            fileType: d.file_type,
+            repliesCount: d.replies_count || (repliesByDisc[d.id] || []).length,
+            timestamp: new Date(d.created_at).getTime(),
+            replies: repliesByDisc[d.id] || [],
+          };
+        });
+      } else {
+        const group = await fetchGroupRow(circleId);
+        posts = ((group?.discussions || []) as GroupDiscussionPost[]).map((p) => {
+          const matchedMat = p.fileName ? materialByFileName[p.fileName.toLowerCase()] : undefined;
+          return matchedMat?.downloadUrl ? { ...p, fileUrl: matchedMat.downloadUrl } : p;
+        });
       }
 
-      const group = await fetchGroupRow(circleId);
-      return (group?.discussions || []) as GroupDiscussionPost[];
+      // Include any standalone group_materials that do not already have a circle_discussions post
+      const existingFileNames = new Set(
+        posts.filter((p) => p.fileName).map((p) => p.fileName!.toLowerCase())
+      );
+      const existingIds = new Set(posts.map((p) => p.id));
+
+      materials.forEach((mat) => {
+        const fnameLower = (mat.fileName || '').toLowerCase();
+        if (!existingIds.has(mat.id) && (!fnameLower || !existingFileNames.has(fnameLower))) {
+          posts.push({
+            id: mat.id,
+            groupId: circleId,
+            authorId: mat.uploadedBy || '',
+            authorName: mat.uploadedByName || mat.sharedBy || 'Circle Owner',
+            authorAvatar: 'user',
+            title: mat.fileName || 'Shared Material',
+            content: mat.courseCode && mat.courseCode !== mat.fileName ? `Course: ${mat.courseCode}` : '',
+            postType: 'material',
+            isPinned: false,
+            fileUrl: mat.downloadUrl,
+            fileName: mat.fileName,
+            fileSize: mat.fileSizeBytes,
+            fileType: mat.fileType,
+            repliesCount: (repliesByDisc[mat.id] || []).length,
+            timestamp: mat.timestamp || Date.now(),
+            replies: repliesByDisc[mat.id] || [],
+          });
+        }
+      });
+
+      return posts.sort((a, b) => b.timestamp - a.timestamp);
     } catch (err) {
       console.warn('getCircleDiscussions error:', err);
       return [];
@@ -1593,17 +1660,25 @@ export const DBService = {
 
   async savePost(circleId: string, postId: string, userId: string): Promise<boolean> {
     try {
+      const localSaved = new Set(readCache<string[]>('circle_saved_posts', userId, []));
+      localSaved.add(postId);
+      writeCache('circle_saved_posts', userId, Array.from(localSaved));
+
       const { error } = await supabase
         .from('circle_saved_posts')
         .upsert({ circle_id: circleId, post_id: postId, user_id: userId }, { onConflict: 'user_id,post_id' });
       return !error;
     } catch {
-      return false;
+      return true;
     }
   },
 
   async unsavePost(postId: string, userId: string): Promise<boolean> {
     try {
+      const localSaved = new Set(readCache<string[]>('circle_saved_posts', userId, []));
+      localSaved.delete(postId);
+      writeCache('circle_saved_posts', userId, Array.from(localSaved));
+
       const { error } = await supabase
         .from('circle_saved_posts')
         .delete()
@@ -1611,20 +1686,116 @@ export const DBService = {
         .eq('user_id', userId);
       return !error;
     } catch {
-      return false;
+      return true;
     }
   },
 
   async getSavedPostIds(userId: string): Promise<string[]> {
+    const localSaved = readCache<string[]>('circle_saved_posts', userId, []);
     try {
       const { data, error } = await supabase
         .from('circle_saved_posts')
         .select('post_id')
         .eq('user_id', userId);
-      if (error || !data) return [];
-      return data.map((r: any) => r.post_id);
+      if (error || !data) return localSaved;
+      const merged = Array.from(new Set([...localSaved, ...data.map((r: any) => String(r.post_id))]));
+      writeCache('circle_saved_posts', userId, merged);
+      return merged;
     } catch {
-      return [];
+      return localSaved;
+    }
+  },
+
+  async searchCircles(query: string): Promise<StudyGroup[]> {
+    const q = (query || '').trim();
+    try {
+      const res = await fetch(`/api/circles/search?q=${encodeURIComponent(q)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.groups)) {
+          return json.groups;
+        }
+      }
+    } catch (err) {
+      console.warn('Backend /api/circles/search fallback:', err);
+    }
+
+    try {
+      let supQuery = supabase
+        .from('study_groups')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(30);
+      if (q) {
+        const safe = q.replace(/[%_]/g, '');
+        supQuery = supQuery.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+      }
+      const { data, error } = await supQuery;
+      if (!error && data) {
+        return data.map((row) => rowToGroup(row, []));
+      }
+    } catch (err) {
+      console.warn('Direct study_groups search error:', err);
+    }
+    return [];
+  },
+
+  async saveCircleMaterialToLibrary(
+    userId: string,
+    post: GroupDiscussionPost,
+    courseCode?: string,
+    circleName?: string
+  ): Promise<{ success: boolean; file?: UserFile; error?: string }> {
+    try {
+      if (!userId) return { success: false, error: 'You must be signed in.' };
+
+      const existing = readCache<UserFile[]>('files', userId, []);
+      const fileName = post.fileName || post.title || 'Circle Material';
+
+      let storagePath = post.fileUrl || '';
+      if (post.groupId && post.fileName) {
+        const { data: matRow } = await supabase
+          .from('group_materials')
+          .select('storage_path, file_size, file_type')
+          .eq('group_id', post.groupId)
+          .eq('file_name', post.fileName)
+          .limit(1)
+          .maybeSingle();
+        if (matRow?.storage_path) {
+          storagePath = matRow.storage_path;
+        }
+      }
+
+      const duplicate = existing.find(
+        (f) => f.fileName === fileName && (f.storagePath === storagePath || f.courseId === `circle_${post.groupId}`)
+      );
+      if (duplicate) {
+        return { success: true, file: duplicate };
+      }
+
+      const fileRecord: UserFile = {
+        id: `file_${Date.now()}_${rand()}`,
+        userId,
+        courseId: `circle_${post.groupId}`,
+        fileName,
+        fileType: post.fileType || 'application/pdf',
+        fileSize: post.fileSize ? formatSize(post.fileSize) : 'Shared File',
+        storagePath,
+        downloadUrl: post.fileUrl || '',
+        uploadedAt: new Date().toISOString(),
+        timestamp: Date.now(),
+        courseCode: courseCode || 'Circle',
+        courseTitle: circleName || 'Saved from Circle',
+        status: 'ready',
+      };
+
+      const { error } = await DBService.saveUserFileRecord(fileRecord);
+      if (error) {
+        return { success: false, error: error?.message || 'Failed to save material to Library.' };
+      }
+      return { success: true, file: fileRecord };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to save material to Library.' };
     }
   },
 
@@ -1925,7 +2096,7 @@ export const DBService = {
 
   async deleteUserFile(fileId: string, userId: string, storagePath?: string): Promise<void> {
     try {
-      if (storagePath) {
+      if (storagePath && storagePath.startsWith('users/')) {
         const { error: removeError } = await supabase.storage.from(USER_FILES_BUCKET).remove([storagePath]);
         if (removeError) console.warn('Storage file deletion warning:', removeError);
       }

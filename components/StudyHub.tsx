@@ -2,12 +2,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState, UserFile } from '../types';
 import { ICONS } from '../constants';
-import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus } from 'lucide-react';
+import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus, MessageSquare, Link as LinkIcon } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import { RecentFiles } from './RecentFiles';
+import { StudyHubAIChat } from './StudyHubAIChat';
 
 // Component for individual flashcards in Grid View
 const FlashcardItem: React.FC<{ card: Flashcard; index: number }> = ({ card, index }) => {
@@ -95,7 +96,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
       } catch {}
     }
   }, [selectedCourseId, courses]);
-  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner'>('summary');
+  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner' | 'ai'>('summary');
+  const [landingView, setLandingView] = useState<'courses' | 'ai'>('courses');
   const [loading, setLoading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
@@ -117,6 +119,108 @@ const StudyHub: React.FC<StudyHubProps> = ({
   
   const [libraryFilter, setLibraryFilter] = useState<'recent' | 'all'>('recent');
   const [userFiles, setUserFiles] = useState<UserFile[]>([]);
+
+  // 3-Source Upload Sheet State (From device, From my Library, From a link)
+  const [showUploadSheet, setShowUploadSheet] = useState(false);
+  const [uploadSheetTab, setUploadSheetTab] = useState<'options' | 'library' | 'link'>('options');
+  const [linkUrlInput, setLinkUrlInput] = useState('');
+  const [linkErrorMsg, setLinkErrorMsg] = useState<string | null>(null);
+  const deviceFileInputRef = useRef<HTMLInputElement>(null);
+
+  const openUploadSheet = () => {
+    setUploadSheetTab('options');
+    setLinkUrlInput('');
+    setLinkErrorMsg(null);
+    setShowUploadSheet(true);
+  };
+
+  const handleAttachFromLibrary = async (file: UserFile) => {
+    setShowUploadSheet(false);
+    if (!activeCourseId) return;
+
+    // Attach reference to this course's libraryFiles without duplicating stored cloud file
+    const existingFiles = activeHub.libraryFiles || [];
+    const alreadyAttached = existingFiles.some(f => f.id === file.id || f.s3Key === file.storagePath);
+    if (!alreadyAttached) {
+      const refFile: LibraryFile = {
+        id: file.id,
+        fileName: file.fileName,
+        fileType: file.fileType || 'application/octet-stream',
+        fileSize: file.fileSize,
+        s3Key: file.storagePath,
+        s3Url: file.downloadUrl || '',
+        timestamp: file.timestamp || Date.now()
+      };
+      const updatedHub = {
+        ...activeHub,
+        libraryFiles: [refFile, ...existingFiles]
+      } as StudyHubData;
+      setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
+      await DBService.saveHub(updatedHub);
+    }
+
+    await handleSelectRecentFile({ ...file, courseId: activeCourseId });
+  };
+
+  const handleExtractFromLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedUrl = linkUrlInput.trim();
+    if (!trimmedUrl || !activeCourseId) return;
+
+    if (!/^https?:\/\//i.test(trimmedUrl)) {
+      setLinkErrorMsg('Please enter a valid http:// or https:// URL.');
+      return;
+    }
+
+    setLinkErrorMsg(null);
+    setShowUploadSheet(false);
+    setIsExtracting(true);
+    setIsSessionFileActive(true);
+    addNotification('content', 'Fetching Link', `Reading study material from ${trimmedUrl}...`, 'hub');
+
+    try {
+      const res = await GeminiService.extractUrlText(trimmedUrl);
+      if (!res.success || !res.extractedText) {
+        setIsExtracting(false);
+        setUploadSheetTab('link');
+        setLinkErrorMsg(res.error || "We couldn't read that link. Check that the page or document is publicly accessible.");
+        setShowUploadSheet(true);
+        return;
+      }
+
+      const content = res.extractedText;
+      const derivedTitle = res.fileName || new URL(trimmedUrl).hostname;
+      setFileContent(content);
+
+      let summaryText = '';
+      try {
+        const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
+        if (sumRes) {
+          summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
+        }
+      } catch (sumErr) {
+        console.warn('URL summary generation warning:', sumErr);
+      }
+
+      const updatedHub = {
+        ...activeHub,
+        fileContent: content,
+        fileName: derivedTitle,
+        summary: summaryText || activeHub.summary
+      } as StudyHubData;
+
+      setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
+      await DBService.saveHub(updatedHub);
+      addNotification('content', 'Link Imported', `Extracted and summarized ${derivedTitle}.`, 'hub');
+      setActiveTool('summary');
+    } catch (err: any) {
+      setUploadSheetTab('link');
+      setLinkErrorMsg(err?.message || "We couldn't read that link. Please try another URL.");
+      setShowUploadSheet(true);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
 
   useEffect(() => {
     const fetchUserFiles = async () => {
@@ -576,6 +680,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const tools = [
     { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: 'Key Concepts' },
+    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
     { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
     { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
@@ -585,83 +690,133 @@ const StudyHub: React.FC<StudyHubProps> = ({
   if (!activeCourseId || !currentCourse) {
     return (
       <div className="space-y-6 max-w-5xl mx-auto pb-16">
-        {/* Header */}
-        <div className="border-b border-slate-200 dark:border-slate-800 pb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
-              Study Hub
-            </span>
+        {/* Header with Ask KorsIQ AI entry */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
+                Study Hub
+              </span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {landingView === 'ai' ? 'Ask KorsIQ AI' : 'Course Workbenches'}
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+              {landingView === 'ai'
+                ? 'General academic discussions with saved conversation history.'
+                : 'Select a course to open its study workbench, or start a conversation with KorsIQ AI.'}
+            </p>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Course Workbenches
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Select a course to open its study workbench, flashcards, summaries, and practice quizzes.
-          </p>
+
+          <button
+            type="button"
+            onClick={() => setLandingView(landingView === 'ai' ? 'courses' : 'ai')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs sm:text-sm font-semibold min-h-[44px] transition-colors cursor-pointer shrink-0 shadow-xs"
+          >
+            <MessageSquare size={16} />
+            <span>{landingView === 'ai' ? 'View courses' : 'Ask KorsIQ AI'}</span>
+          </button>
         </div>
 
-        {courses.length === 0 ? (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
-              <BookOpen size={24} />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-slate-900 dark:text-white">
-                No courses enrolled yet
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Add your courses to start generating tailored summaries, active recall flashcards, and quizzes.
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigate?.('planner')}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shadow-xs"
-            >
-              <Plus size={16} />
-              <span>Add your first course</span>
-            </button>
-          </div>
+        {landingView === 'ai' ? (
+          <StudyHubAIChat
+            profile={profile}
+            courses={courses}
+            activeCourse={null}
+            activeHub={null}
+            onBackToCourses={() => setLandingView('courses')}
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {courses.map(course => {
-              const hubData = hubs[course.id];
-              const hasMaterials = Boolean(hubData?.summary || hubData?.flashcards?.length || hubData?.quizzes?.length || hubData?.libraryFiles?.length);
+          <>
+            {/* Prominent Ask KorsIQ AI Entry Card */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-900">
+                  <MessageSquare size={20} />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Ask KorsIQ AI
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Chat with your discipline-tailored academic tutor and revisit your saved conversation history anytime.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLandingView('ai')}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shrink-0"
+              >
+                <MessageSquare size={15} />
+                <span>Open AI Chat</span>
+              </button>
+            </div>
 
-              return (
+            {courses.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+                  <BookOpen size={24} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                    No courses enrolled yet
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Add your courses to start generating tailored summaries, active recall flashcards, and quizzes.
+                  </p>
+                </div>
                 <button
-                  key={course.id}
-                  onClick={() => {
-                    setActiveCourseId(course.id);
-                    onCourseIdChange?.(course.id);
-                  }}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl p-5 text-left transition-all hover:shadow-sm min-h-[120px] flex flex-col justify-between group cursor-pointer"
+                  onClick={() => onNavigate?.('planner')}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shadow-xs"
                 >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-bold font-mono px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded border border-blue-100 dark:border-blue-900">
-                        {course.code}
-                      </span>
-                      <span className="text-[11px] font-medium text-slate-400">
-                        {course.units} Units
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {course.title}
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs">
-                    <span className="text-[11px] text-slate-400">
-                      {hasMaterials ? 'Materials active' : 'Ready to start'}
-                    </span>
-                    <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-                      Open Hub &rarr;
-                    </span>
-                  </div>
+                  <Plus size={16} />
+                  <span>Add your first course</span>
                 </button>
-              );
-            })}
-          </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {courses.map(course => {
+                  const hubData = hubs[course.id];
+                  const hasMaterials = Boolean(hubData?.summary || hubData?.flashcards?.length || hubData?.quizzes?.length || hubData?.libraryFiles?.length);
+
+                  return (
+                    <button
+                      key={course.id}
+                      onClick={() => {
+                        setActiveCourseId(course.id);
+                        onCourseIdChange?.(course.id);
+                      }}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl p-5 text-left transition-all hover:shadow-sm min-h-[120px] flex flex-col justify-between group cursor-pointer"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-bold font-mono px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded border border-blue-100 dark:border-blue-900">
+                            {course.code}
+                          </span>
+                          <span className="text-[11px] font-medium text-slate-400">
+                            {course.units} Units
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          {course.title}
+                        </h3>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs">
+                        <span className="text-[11px] text-slate-400">
+                          {hasMaterials ? 'Materials active' : 'Ready to start'}
+                        </span>
+                        <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                          Open Hub &rarr;
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -746,15 +901,29 @@ const StudyHub: React.FC<StudyHubProps> = ({
                 <span className="text-[8px] text-slate-400 mt-1.5 uppercase tracking-wide">Extracting file knowledge</span>
               </div>
             ) : (
-              <div className="border-2 border-dashed border-slate-100 rounded-2xl p-6 text-center hover:bg-slate-50 hover:border-blue-200 transition-all cursor-pointer relative group/file">
-                <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-20" onChange={handleFileUpload} />
-                <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 mx-auto group-hover/file:scale-110 transition-transform duration-500 border border-slate-100 shadow-sm relative z-10">
-                  {ICONS.Plus}
-                </div>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest relative z-10">
-                  Upload Document
-                </p>
-              </div>
+              <>
+                <input
+                  ref={deviceFileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+                <button
+                  type="button"
+                  onClick={openUploadSheet}
+                  className="w-full border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:bg-slate-50 hover:border-blue-300 transition-all cursor-pointer relative group/file min-h-[120px]"
+                >
+                  <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 mx-auto group-hover/file:scale-105 transition-transform duration-300 border border-slate-100 shadow-sm relative z-10">
+                    {ICONS.Plus}
+                  </div>
+                  <p className="text-xs text-slate-700 font-semibold relative z-10">
+                    Upload Material
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 relative z-10">
+                    From device, Library, or link
+                  </p>
+                </button>
+              </>
             )}
           </div>
 
@@ -848,7 +1017,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
             </div>
           )}
 
-          {!isSessionFileActive ? (
+          {activeTool === 'ai' ? (
+            <StudyHubAIChat
+              profile={profile}
+              courses={courses}
+              activeCourse={currentCourse}
+              activeHub={activeHub}
+            />
+          ) : !isSessionFileActive && activeTool !== 'library' ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in fade-in duration-300 min-h-[380px]">
               <div className="p-4 bg-blue-50 rounded-xl mb-4 text-blue-600 border border-blue-100 shadow-2xs">
                 <Sparkles size={28} />
@@ -856,9 +1032,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <h3 className="text-base font-semibold text-slate-900 mb-1">
                 Upload or Select Study Material
               </h3>
-              <p className="max-w-md text-slate-500 leading-relaxed text-xs">
-                Upload a document above or choose any file from <span className="font-semibold text-blue-600">Recent Courses &amp; Files</span> below to generate summaries, flashcards, quizzes, and podcasts.
+              <p className="max-w-md text-slate-500 leading-relaxed text-xs mb-4">
+                Upload a document from your device, pick an existing file from your Library, or paste a public link to generate summaries, flashcards, and quizzes.
               </p>
+              <button
+                type="button"
+                onClick={openUploadSheet}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer"
+              >
+                <Upload size={15} />
+                <span>Upload material</span>
+              </button>
             </div>
           ) : (
             <div className="page-transition">
@@ -1862,6 +2046,201 @@ const StudyHub: React.FC<StudyHubProps> = ({
           refreshTrigger={refreshFilesTrigger}
         />
       </section>
+
+      {/* 3-Source Upload Sheet Modal (From device / From my Library / From a link) */}
+      {showUploadSheet && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowUploadSheet(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full sm:max-w-md bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-t-2xl sm:rounded-xl p-5 space-y-4 shadow-xl"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-[#111827] dark:text-white">
+                  {uploadSheetTab === 'library'
+                    ? 'Pick from my Library'
+                    : uploadSheetTab === 'link'
+                    ? 'Import from a link'
+                    : 'Upload study material'}
+                </h3>
+                <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                  {currentCourse ? `${currentCourse.code}: ${currentCourse.title}` : 'Attach study material'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUploadSheet(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                aria-label="Close upload options"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {uploadSheetTab === 'options' && (
+              <div className="space-y-2.5">
+                {/* Option 1: From device */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUploadSheet(false);
+                    deviceFileInputRef.current?.click();
+                  }}
+                  className="w-full p-3.5 rounded-xl border border-[#E5E7EB] dark:border-slate-800 hover:border-[#2563EB] hover:bg-blue-50/40 dark:hover:bg-slate-800 flex items-center gap-3.5 text-left transition-colors min-h-[56px] cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <Upload size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#111827] dark:text-white">
+                      From device
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Upload a PDF, Word document, slides, or notes from your phone or computer
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 2: From my Library */}
+                <button
+                  type="button"
+                  onClick={() => setUploadSheetTab('library')}
+                  className="w-full p-3.5 rounded-xl border border-[#E5E7EB] dark:border-slate-800 hover:border-[#2563EB] hover:bg-blue-50/40 dark:hover:bg-slate-800 flex items-center gap-3.5 text-left transition-colors min-h-[56px] cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <Folder size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#111827] dark:text-white">
+                      From my Library ({userFiles.length})
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Attach an existing file from your Library without re-uploading
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 3: From a link */}
+                <button
+                  type="button"
+                  onClick={() => setUploadSheetTab('link')}
+                  className="w-full p-3.5 rounded-xl border border-[#E5E7EB] dark:border-slate-800 hover:border-[#2563EB] hover:bg-blue-50/40 dark:hover:bg-slate-800 flex items-center gap-3.5 text-left transition-colors min-h-[56px] cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <LinkIcon size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#111827] dark:text-white">
+                      From a link
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Paste a public URL to an article, syllabus page, or PDF document
+                    </p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {uploadSheetTab === 'library' && (
+              <div className="space-y-3">
+                {userFiles.length === 0 ? (
+                  <div className="p-6 text-center space-y-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-[#E5E7EB] dark:border-slate-700">
+                    <p className="text-xs font-semibold text-[#111827] dark:text-white">
+                      Your Library is empty
+                    </p>
+                    <p className="text-xs text-[#5B6472] dark:text-slate-400">
+                      Upload a file from your device first and it will appear in your Library.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto divide-y divide-[#E5E7EB] dark:divide-slate-800 border border-[#E5E7EB] dark:border-slate-800 rounded-xl">
+                    {userFiles.map(file => (
+                      <button
+                        key={file.id}
+                        type="button"
+                        onClick={() => handleAttachFromLibrary(file)}
+                        className="w-full px-3.5 py-3 text-left hover:bg-blue-50/60 dark:hover:bg-slate-800 flex items-center justify-between gap-3 transition-colors min-h-[48px] cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <FileText size={16} className="text-[#2563EB] shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[#111827] dark:text-white truncate">
+                              {file.fileName}
+                            </p>
+                            <p className="text-[11px] text-[#5B6472] dark:text-slate-400">
+                              {file.courseCode ? `${file.courseCode} · ` : ''}{file.fileSize || ''}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-xs font-semibold text-[#2563EB] shrink-0">
+                          Attach
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setUploadSheetTab('options')}
+                    className="px-3 py-2 text-xs font-semibold text-[#5B6472] hover:text-[#111827] min-h-[44px] cursor-pointer"
+                  >
+                    &larr; Back
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {uploadSheetTab === 'link' && (
+              <form onSubmit={handleExtractFromLink} className="space-y-3">
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-[#111827] dark:text-white">
+                    Document or webpage URL
+                  </span>
+                  <input
+                    type="url"
+                    required
+                    autoFocus
+                    value={linkUrlInput}
+                    onChange={e => setLinkUrlInput(e.target.value)}
+                    placeholder="https://example.edu/lecture-notes.pdf"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm bg-white dark:bg-slate-950 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-[#111827] dark:text-white focus:outline-none focus:border-[#2563EB] min-h-[44px]"
+                  />
+                </label>
+                {linkErrorMsg && (
+                  <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2" role="alert">
+                    {linkErrorMsg}
+                  </p>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLinkErrorMsg(null);
+                      setUploadSheetTab('options');
+                    }}
+                    className="px-3 py-2 text-xs font-semibold text-[#5B6472] hover:text-[#111827] min-h-[44px] cursor-pointer"
+                  >
+                    &larr; Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!linkUrlInput.trim()}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white text-xs font-semibold rounded-lg min-h-[44px] cursor-pointer"
+                  >
+                    Import link
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -17,7 +17,6 @@ import Profile from './components/Profile';
 import AnalyticsView from './components/AnalyticsView';
 import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
-import { ScolarisChatWidget } from './components/ScolarisChatWidget';
 import Auth, { type AuthMode } from './components/Auth';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
@@ -331,6 +330,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleQuickAddCourse = (newCourse: Course) => {
+    // Persisted by the courses effect above (DBService.saveCourses)
+    setCourses(prev => [...prev, newCourse]);
+  };
+
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
     if (authUser) {
       await DBService.saveProfile(authUser.uid, newProfile);
@@ -597,17 +601,23 @@ const App: React.FC = () => {
   }
 
   // 6. Main Protected Application View
+  const renderDashboard = () => (
+    <Dashboard 
+      profile={profile} 
+      courses={courses} 
+      schedule={schedule} 
+      onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+      onNavigate={(tab) => { setActiveTab(tab); }}
+      onUpdateProfile={(updated) => setProfile(updated)}
+      onAddCourse={handleQuickAddCourse}
+    />
+  );
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
       case 'dashboard':
-        return <Dashboard 
-          profile={profile} 
-          courses={courses} 
-          schedule={schedule} 
-          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
-          onNavigate={(tab) => { setActiveTab(tab); }}
-        />;
+        return renderDashboard();
       case 'planner':
         return <StudyPlannerView 
           initialTab="courses"
@@ -742,14 +752,7 @@ const App: React.FC = () => {
       case 'profile':
         return <Profile profile={profile} setProfile={handleSaveProfile} onSignOut={handleSignOut} onDelete={deleteAccount} />;
       default:
-        return <Dashboard 
-          profile={profile} 
-          courses={courses} 
-          schedule={schedule} 
-          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }} 
-          onNavigate={(tab) => { setActiveTab(tab); }}
-          onUpdateProfile={handleSaveProfile}
-        />;
+        return renderDashboard();
     }
   };
 
@@ -1083,15 +1086,6 @@ const App: React.FC = () => {
 
             {renderContent()}
           </div>
-
-          {profile && profile.onboarded && (
-            <ScolarisChatWidget 
-              profile={profile}
-              courses={courses}
-              activeCourseId={selectedCourseId}
-              activeHub={hubs[selectedCourseId || (courses[0]?.id || '')] || null}
-            />
-          )}
         </main>
 
         {/* Mobile Pinned Bottom Navigation Bar (Visible ONLY on mobile devices) */}
