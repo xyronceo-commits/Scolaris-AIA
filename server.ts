@@ -15,6 +15,12 @@ import {
 } from './lib/documentProcessor';
 import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
 import { buildStudentContext } from './lib/studentContext';
+import {
+  AI_CREDIT_ALLOWANCES,
+  AI_CREDIT_COSTS,
+  getMonthlyCreditAllowance,
+  getNormalizedCreditTier
+} from './lib/aiCredits';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -2181,89 +2187,259 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   });
 
   // =============================================================
-  // AI CREDITS USAGE METERING & PERIOD SUMMARY ENDPOINT
+  // AI CREDITS LEDGER, ATOMIC SPEND/REFUND & BALANCE ENDPOINT
   // =============================================================
-  async function recordAiUsage(userId: string | undefined, feature: string, credits = 1): Promise<void> {
-    if (!supabaseAdmin || !userId) return;
-    try {
-      await supabaseAdmin.from('ai_usage').insert({
-        user_id: userId,
-        credits: Math.max(1, Math.round(credits)),
-        feature
-      });
-    } catch (err: any) {
-      console.warn('[AI Metering] Failed to record ai_usage:', err?.message || err);
-    }
-  }
+  // Rule: Chatbot, Academic Adviser, Study Planner, and Timetable are NOT metered.
+  // Credits apply ONLY to Study Hub generation tools and Academic Studio tools.
 
-  app.get('/api/usage/ai-credits', requireAuth, async (req, res) => {
-    const userId = (req as any).user?.id || (req as any).user?.uid;
+  async function getAiCreditBalanceForUser(userId: string | undefined) {
     const now = new Date();
     const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
     const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString();
 
     if (!supabaseAdmin || !userId) {
-      return res.json({
+      return {
+        balance: AI_CREDIT_ALLOWANCES.free,
         used: 0,
-        allowance: 0,
-        tier: 'free',
+        allowance: AI_CREDIT_ALLOWANCES.free,
+        tier: 'free' as const,
         periodStart,
-        periodEnd
-      });
+        periodEnd,
+        costs: AI_CREDIT_COSTS
+      };
     }
 
+    // 1. Try the atomic Postgres RPC first
     try {
-      const [profileRes, usageRes] = await Promise.all([
-        supabaseAdmin
-          .from('profiles')
-          .select('tier, subscription_tier')
-          .eq('id', userId)
-          .maybeSingle(),
-        supabaseAdmin
-          .from('ai_usage')
-          .select('credits')
-          .eq('user_id', userId)
-          .gte('created_at', periodStart)
-      ]);
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('get_ai_credit_balance', {
+        p_user_id: userId
+      });
+      if (!rpcErr && rpcData && typeof rpcData === 'object') {
+        return {
+          balance: Number(rpcData.balance ?? AI_CREDIT_ALLOWANCES.free),
+          used: Number(rpcData.used ?? 0),
+          allowance: Number(rpcData.allowance ?? AI_CREDIT_ALLOWANCES.free),
+          tier: getNormalizedCreditTier(rpcData.tier),
+          periodStart: rpcData.period_start || periodStart,
+          periodEnd: rpcData.period_end || periodEnd,
+          costs: AI_CREDIT_COSTS
+        };
+      }
+    } catch {}
 
-      const rawTier = String(
+    // 2. Fallback if the RPC migration has not been applied yet on the live DB
+    try {
+      const profileRes = await supabaseAdmin
+        .from('profiles')
+        .select('tier, subscription_tier')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const rawTier =
         profileRes.data?.subscription_tier ||
         profileRes.data?.tier ||
-        (req as any).user?.tier ||
-        'free'
-      ).toLowerCase();
+        'free';
+      const normalizedTier = getNormalizedCreditTier(rawTier);
+      const allowance = getMonthlyCreditAllowance(normalizedTier);
 
-      const normalizedTier =
-        rawTier === 'studio' || rawTier === 'sage'
-          ? 'studio'
-          : rawTier === 'plus' || rawTier === 'scholar'
-          ? 'plus'
-          : 'free';
+      // Try reading ai_credit_ledger first; fall back to ai_usage if ai_credit_ledger is not yet created
+      const ledgerRes = await supabaseAdmin
+        .from('ai_credit_ledger')
+        .select('delta')
+        .eq('user_id', userId)
+        .gte('created_at', periodStart);
 
-      const allowance =
-        normalizedTier === 'studio' ? 1000 : normalizedTier === 'plus' ? 250 : 0;
+      if (!ledgerRes.error && Array.isArray(ledgerRes.data)) {
+        const netDelta = ledgerRes.data.reduce((sum: number, r: any) => sum + (Number(r.delta) || 0), 0);
+        const balance = Math.max(0, allowance + netDelta);
+        const used = Math.max(0, -netDelta);
+        return {
+          balance,
+          used,
+          allowance,
+          tier: normalizedTier,
+          periodStart,
+          periodEnd,
+          costs: AI_CREDIT_COSTS
+        };
+      }
+
+      const usageRes = await supabaseAdmin
+        .from('ai_usage')
+        .select('credits')
+        .eq('user_id', userId)
+        .gte('created_at', periodStart);
 
       const used = Array.isArray(usageRes.data)
         ? usageRes.data.reduce((sum: number, r: any) => sum + (Number(r.credits) || 1), 0)
         : 0;
+      const balance = Math.max(0, allowance - used);
 
-      return res.json({
+      return {
+        balance,
         used,
         allowance,
         tier: normalizedTier,
         periodStart,
-        periodEnd
-      });
+        periodEnd,
+        costs: AI_CREDIT_COSTS
+      };
     } catch (err: any) {
-      console.warn('[AI Metering] /api/usage/ai-credits fallback:', err?.message || err);
-      return res.json({
+      console.warn('[AI Credits] Balance lookup fallback warning:', err?.message || err);
+      return {
+        balance: AI_CREDIT_ALLOWANCES.free,
         used: 0,
-        allowance: 0,
-        tier: 'free',
+        allowance: AI_CREDIT_ALLOWANCES.free,
+        tier: 'free' as const,
         periodStart,
-        periodEnd
-      });
+        periodEnd,
+        costs: AI_CREDIT_COSTS
+      };
     }
+  }
+
+  async function consumeAiCredits(
+    userId: string | undefined,
+    feature: string,
+    cost: number,
+    requestId?: string
+  ): Promise<{
+    success: boolean;
+    balance: number;
+    used: number;
+    allowance: number;
+    required: number;
+    periodEnd: string;
+    requestId: string;
+  }> {
+    const reqId = (requestId && requestId.trim()) || `${feature}_${userId || 'anon'}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const current = await getAiCreditBalanceForUser(userId);
+
+    if (!supabaseAdmin || !userId || cost <= 0) {
+      return {
+        success: true,
+        balance: current.balance,
+        used: current.used,
+        allowance: current.allowance,
+        required: cost,
+        periodEnd: current.periodEnd,
+        requestId: reqId
+      };
+    }
+
+    // 1. Try the atomic Postgres RPC first
+    try {
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('consume_ai_credits', {
+        p_user_id: userId,
+        p_cost: cost,
+        p_feature: feature,
+        p_request_id: reqId
+      });
+
+      if (!rpcErr && rpcData && typeof rpcData === 'object') {
+        return {
+          success: Boolean(rpcData.success),
+          balance: Number(rpcData.balance ?? 0),
+          used: Number(rpcData.used ?? 0),
+          allowance: Number(rpcData.allowance ?? current.allowance),
+          required: cost,
+          periodEnd: rpcData.period_end || current.periodEnd,
+          requestId: reqId
+        };
+      }
+    } catch {}
+
+    // 2. Fallback if RPC migration is not yet applied on the live DB
+    if (current.balance < cost) {
+      return {
+        success: false,
+        balance: current.balance,
+        used: current.used,
+        allowance: current.allowance,
+        required: cost,
+        periodEnd: current.periodEnd,
+        requestId: reqId
+      };
+    }
+
+    try {
+      const { error: ledgerErr } = await supabaseAdmin.from('ai_credit_ledger').insert({
+        user_id: userId,
+        delta: -cost,
+        entry_type: 'spend',
+        feature,
+        request_id: reqId,
+        period_start: current.periodStart
+      });
+
+      if (ledgerErr) {
+        // Fallback to ai_usage if ai_credit_ledger table is not yet migrated
+        await supabaseAdmin.from('ai_usage').insert({
+          user_id: userId,
+          credits: cost,
+          feature: `${feature}:${reqId}`
+        });
+      }
+    } catch (err: any) {
+      console.warn('[AI Credits] Fallback spend insert warning:', err?.message || err);
+    }
+
+    return {
+      success: true,
+      balance: Math.max(0, current.balance - cost),
+      used: current.used + cost,
+      allowance: current.allowance,
+      required: cost,
+      periodEnd: current.periodEnd,
+      requestId: reqId
+    };
+  }
+
+  async function refundAiCredits(
+    userId: string | undefined,
+    feature: string,
+    cost: number,
+    requestId: string
+  ): Promise<void> {
+    if (!supabaseAdmin || !userId || !requestId || cost <= 0) return;
+
+    try {
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('refund_ai_credits', {
+        p_user_id: userId,
+        p_request_id: requestId
+      });
+      if (!rpcErr && rpcData?.success) return;
+    } catch {}
+
+    try {
+      const now = new Date();
+      const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
+      const { error: ledgerErr } = await supabaseAdmin.from('ai_credit_ledger').insert({
+        user_id: userId,
+        delta: cost,
+        entry_type: 'refund',
+        feature,
+        request_id: `${requestId}:refund`,
+        period_start: periodStart,
+        metadata: { refunded_request_id: requestId }
+      });
+
+      if (ledgerErr) {
+        await supabaseAdmin
+          .from('ai_usage')
+          .delete()
+          .eq('user_id', userId)
+          .eq('feature', `${feature}:${requestId}`);
+      }
+    } catch (err: any) {
+      console.warn('[AI Credits] Refund fallback warning:', err?.message || err);
+    }
+  }
+
+  app.get(['/api/usage/ai-credits', '/api/credits/balance'], requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const summary = await getAiCreditBalanceForUser(userId);
+    return res.json(summary);
   });
 
   // Magic Import
@@ -2550,25 +2726,40 @@ RULES:
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: Outline Planning Engine
+  // KORSIQ ACADEMIC STUDIO: Outline Planning Engine (2 credits)
   // =============================================================
   app.post('/api/ai/studio/plan', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
-    const { title, docType, subject, instructions, targetWordCount, citationStyle, references } = req.body;
+    const { title, docType, subject, instructions, targetWordCount, citationStyle, references, requestId } = req.body;
     const wordGoal = Number(targetWordCount) || 1500;
     const style = citationStyle || 'APA';
     const type = docType || 'assignment';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.studio_plan;
+
+    const spend = await consumeAiCredits(userId, 'studio_plan', cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json(getStudioPlanFallback(title || 'Academic Paper', type, subject, wordGoal, style));
+        await refundAiCredits(userId, 'studio_plan', cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
       const refSummary = (references || [])
         .map((r: any, idx: number) => `[Source ${idx + 1}] "${r.title}" by ${r.authors || 'Unknown'} (${r.year || 'n.d.'}): ${r.contentSnippet ? r.contentSnippet.slice(0, 300) : ''}`)
         .join('\n');
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2638,19 +2829,18 @@ Output JSON format:
         temperature: 0.3
       });
 
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_plan', 1);
-
       const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      return res.json(parsed);
+      return res.json({ ...parsed, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.warn('Academic studio plan AI fallback triggered:', error?.message || error);
-      return res.json(getStudioPlanFallback(title || 'Academic Paper', type, subject, wordGoal, style));
+      console.error('Academic studio plan AI failed, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, 'studio_plan', cost, spend.requestId);
+      return res.status(500).json({ error: error?.message || 'Failed to generate outline. Your credits have been refunded.' });
     }
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: Section Generation Engine
+  // KORSIQ ACADEMIC STUDIO: Section Generation Engine (3 credits / 10 full doc / 1 rewrite)
   // =============================================================
   app.post('/api/ai/studio/generate-section', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
     const {
@@ -2666,16 +2856,51 @@ Output JSON format:
       nextSectionTitle,
       references,
       existingContent,
-      mode
+      mode,
+      isFullDocumentFirstSection,
+      isFullDocumentContinuation,
+      requestId
     } = req.body;
 
     const wordCount = Number(targetWords) || 400;
     const style = citationStyle || 'APA';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+
+    // Determine exact credit cost:
+    // - Full document batch: 10 credits charged once on the first section, 0 on continuation sections
+    // - Rewrite / citation check mode on existing content: 1 credit
+    // - Standard section write: 3 credits
+    const isRewriteMode = Boolean(mode && ['expand', 'simplify', 'academic_tone', 'grammar', 'citations'].includes(mode));
+    const cost = isFullDocumentContinuation
+      ? 0
+      : isFullDocumentFirstSection
+      ? AI_CREDIT_COSTS.studio_full_doc
+      : isRewriteMode
+      ? AI_CREDIT_COSTS.studio_assist
+      : AI_CREDIT_COSTS.studio_section;
+    const featureKey = isFullDocumentFirstSection
+      ? 'studio_full_doc'
+      : isRewriteMode
+      ? 'studio_assist'
+      : 'studio_section';
+
+    const spend = await consumeAiCredits(userId, featureKey, cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json(getSectionGenerationFallback(sectionTitle || 'Section Analysis', sectionDescription || '', wordCount, style));
+        await refundAiCredits(userId, featureKey, cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
       const refList = (references || [])
@@ -2695,7 +2920,7 @@ Output JSON format:
         instructionModifier = `INSERT CITATIONS: Seamlessly integrate precise in-text citations using ${style} style based on the provided reference materials. Never fabricate fake citations.`;
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2734,32 +2959,51 @@ Return your response in clean Markdown formatting ready for direct insertion int
         temperature: 0.35
       });
 
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_generate_section', 2);
-
       return res.json({
         content: aiResponse || '',
-        wordCount: (aiResponse || '').trim().split(/\s+/).filter(Boolean).length
+        wordCount: (aiResponse || '').trim().split(/\s+/).filter(Boolean).length,
+        creditsRemaining: spend.balance
       });
     } catch (error: any) {
-      console.warn('Section generation AI fallback:', error?.message || error);
-      return res.json(getSectionGenerationFallback(sectionTitle || 'Section Analysis', sectionDescription || '', wordCount, style));
+      console.error('Section generation AI failed, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, featureKey, cost, spend.requestId);
+      return res.status(500).json({ error: error?.message || 'Section generation failed. Your credits have been refunded.' });
     }
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: Comprehensive Document Review Engine
+  // KORSIQ ACADEMIC STUDIO: Comprehensive Document Review Engine (1 credit)
   // =============================================================
   app.post('/api/ai/studio/review', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
-    const { docTitle, docType, fullContent, citationStyle, references } = req.body;
+    const { docTitle, docType, fullContent, citationStyle, references, requestId } = req.body;
     const style = citationStyle || 'APA';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.studio_review;
+
+    if (!fullContent || fullContent.length < 50) {
+      return res.status(400).json({ error: 'Please write at least 50 characters before running Academic Review.' });
+    }
+
+    const spend = await consumeAiCredits(userId, 'studio_review', cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
       const apiKey = getAIKey();
-      if (!apiKey || !fullContent || fullContent.length < 50) {
-        return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
+      if (!apiKey) {
+        await refundAiCredits(userId, 'studio_review', cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2816,27 +3060,46 @@ Output JSON schema:
 
       const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      return res.json(parsed);
+      return res.json({ ...parsed, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.warn('Academic review AI fallback:', error?.message || error);
-      return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
+      console.error('Academic review AI failed, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, 'studio_review', cost, spend.requestId);
+      return res.status(500).json({ error: error?.message || 'Document review failed. Your credits have been refunded.' });
     }
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: In-Context Writing Assistant
+  // KORSIQ ACADEMIC STUDIO: In-Context Writing Assistant (1 credit)
   // =============================================================
   app.post('/api/ai/studio/assist', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
-    const { selectedText, instruction, docTitle, sectionTitle } = req.body;
+    const { selectedText, instruction, docTitle, sectionTitle, requestId } = req.body;
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.studio_assist;
+
+    if (!selectedText) {
+      return res.status(400).json({ error: 'Please select text to transform.' });
+    }
+
+    const spend = await consumeAiCredits(userId, 'studio_assist', cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
+
     try {
       const apiKey = getAIKey();
-      if (!apiKey || !selectedText) {
-        return res.json({
-          text: `[Academic Revision] ${selectedText || 'Please select text to transform.'}`
-        });
+      if (!apiKey) {
+        await refundAiCredits(userId, 'studio_assist', cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2852,27 +3115,48 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         temperature: 0.3
       });
 
-      return res.json({ text: (aiResponse || selectedText).trim() });
+      return res.json({ text: (aiResponse || selectedText).trim(), creditsRemaining: spend.balance });
     } catch (err: any) {
-      return res.json({ text: selectedText });
+      await refundAiCredits(userId, 'studio_assist', cost, spend.requestId);
+      return res.status(500).json({ error: err?.message || 'Rewrite failed. Your credits have been refunded.' });
     }
   });
 
-  // KorsIQ Generate
+  // KorsIQ Generate (Flashcards: 2 credits, Quiz: 2 credits)
   app.post('/api/scolaris/generate', requireAuth, apiRateLimiter, async (req, res) => {
-    const { studyMaterial, mode } = req.body;
+    const { studyMaterial, mode, requestId } = req.body;
 
     if (!studyMaterial) {
       return res.status(400).json({ error: "No study material provided." });
     }
 
+    if (mode !== 'quiz' && mode !== 'flashcards') {
+      return res.status(400).json({ error: "Invalid mode. Use 'quiz' or 'flashcards'." });
+    }
+
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = mode === 'quiz' ? AI_CREDIT_COSTS.quiz : AI_CREDIT_COSTS.flashcards;
+
+    const spend = await consumeAiCredits(userId, mode, cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
+
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
+        await refundAiCredits(userId, mode, cost, spend.requestId);
         return res.status(503).json({ error: "Our AI service is temporarily unavailable. Please try again shortly." });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       let systemPrompt = "";
       let userPrompt = "";
@@ -2943,15 +3227,11 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         });
       }
 
-      res.json({ success: true, data: parsedData });
+      res.json({ success: true, data: parsedData, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.warn("KorsIQ Generation Warning:", error?.message || error);
-      const fallback = getMaterialsFallback(studyMaterial, mode as 'quiz' | 'flashcards');
-      if (mode === 'quiz') {
-        res.json({ success: true, data: { quiz: fallback } });
-      } else {
-        res.json({ success: true, data: { flashcards: fallback } });
-      }
+      console.warn("KorsIQ Generation failed, refunding credits:", error?.message || error);
+      await refundAiCredits(userId, mode, cost, spend.requestId);
+      res.status(500).json({ error: error?.message || "Generation failed. Your credits have been refunded." });
     }
   });
 
@@ -3548,7 +3828,7 @@ Always refer to this context when answering questions about the material, explai
         temperature: 0.5
       });
 
-      await recordAiUsage(userId, 'study_hub_chat', 1);
+      // Chat (AI tutor, Circle @korsiq) is NOT credit-metered (protected by rate limiting only)
 
       // Persist both the user message and the AI response to the database
       let savedUserMsg: any = null;
@@ -3610,33 +3890,50 @@ Always refer to this context when answering questions about the material, explai
     }
   });
 
-  // Study Materials
+  // Study Materials (Summary: 1 credit, Flashcards/Quiz/Test: 2 credits)
   app.post('/api/ai/materials', requireAuth, apiRateLimiter, async (req, res) => {
-    const { content, type } = req.body;
+    const { content, type, requestId } = req.body;
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const materialType = type === 'flashcards' || type === 'quiz' || type === 'test' ? type : 'summary';
+    const cost = materialType === 'summary' ? AI_CREDIT_COSTS.summary : AI_CREDIT_COSTS.flashcards;
+
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: "No study material provided." });
+    }
+
+    const val = validateExtractedText(content);
+    if (!val.isValid) {
+      return res.status(400).json({
+        error: val.reason || "We couldn't read this document correctly. Please try uploading another copy or text-based material."
+      });
+    }
+
+    const spend = await consumeAiCredits(userId, materialType, cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
+
     try {
-      if (!content || typeof content !== 'string') {
-        return res.status(400).json({ error: "No study material provided." });
-      }
-
-      const val = validateExtractedText(content);
-      if (!val.isValid) {
-        return res.status(400).json({
-          error: val.reason || "We couldn't read this document correctly. Please try uploading another copy or text-based material."
-        });
-      }
-
       const cleanContent = normalizeExtractedText(content);
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json(getMaterialsFallback(cleanContent, type));
+        await refundAiCredits(userId, materialType, cost, spend.requestId);
+        return res.status(503).json({ error: "AI service is not configured on the server. Your credits have been refunded." });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       let systemInstruction = "";
       let userContent = "";
 
-      if (type === 'summary') {
+      if (materialType === 'summary') {
         systemInstruction = `${studentContext}
 
 You are an elite, student-friendly academic tutor.
@@ -3647,8 +3944,8 @@ CRITICAL WRITING RULES:
 - Explain every key concept, formula, and rule in simple, intuitive, plain English that any student can immediately understand.
 - Format logically with clear Markdown headings (e.g., # Summary, ## Core Takeaways, ## Key Definitions), clean bullet points, and bolded terms.
 - Focus on practical understanding, real-world examples, and maximum clarity.`;
-        userContent = content;
-      } else if (type === 'flashcards') {
+        userContent = cleanContent;
+      } else if (materialType === 'flashcards') {
         systemInstruction = `${studentContext}
 
 You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
@@ -3666,8 +3963,8 @@ You are an elite memorization assistant. Your job is to output structurally perf
       }
 
       Study Text:
-      "${content}"`;
-      } else if (type === 'quiz') {
+      "${cleanContent}"`;
+      } else if (materialType === 'quiz') {
         systemInstruction = `${studentContext}
 
 You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.`;
@@ -3687,8 +3984,8 @@ You are an elite academic assessment engine. Your job is to output structurally 
       }
 
       Study Text:
-      "${content}"`;
-      } else if (type === 'test') {
+      "${cleanContent}"`;
+      } else if (materialType === 'test') {
         systemInstruction = `${studentContext}
 
 Generate a comprehensive exam simulation with 8 questions from the provided text content.
@@ -3700,24 +3997,21 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
             - "options": array of strings
             - "answer": string (must exactly match one of the options)
             - "explanation": string explaining why it is correct`;
-        userContent = content;
+        userContent = cleanContent;
       }
       
       const text = await runAICall({
         systemInstruction,
         messages: [{ role: 'user', content: userContent }],
-        jsonMode: type !== 'summary'
+        jsonMode: materialType !== 'summary'
       });
 
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, `materials_${type || 'summary'}`, 1);
-      
-      if (type === 'summary') {
+      if (materialType === 'summary') {
         res.json(text);
       } else {
         const parsed = JSON.parse(text || '{}');
         let data = parsed.flashcards || parsed.quiz || parsed.test || parsed;
         
-        // Defensive mapping to ensure complete compatibility in both answer/correctAnswer keys
         if (Array.isArray(data)) {
           data = data.map((item: any) => {
             if (item && item.correctAnswer && !item.answer) {
@@ -3730,30 +4024,41 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         res.json(data);
       }
     } catch (error: any) {
-      console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
-      res.json(getMaterialsFallback(content, type));
+      console.warn("Materials AI generation failed, refunding credits:", error?.message || error);
+      await refundAiCredits(userId, materialType, cost, spend.requestId);
+      res.status(500).json({ error: error?.message || "Generation failed. Your credits have been refunded." });
     }
   });
 
-  // Podcast Generation via Google Gemini & Speech Audio Synthesis
+  // Podcast Generation via Google Gemini & Speech Audio Synthesis (6 credits)
   const handlePodcastGeneration = async (req: express.Request, res: express.Response) => {
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.podcast;
+
+    if (!studyText || typeof studyText !== 'string' || !studyText.trim()) {
+      return res.status(400).json({ error: "Please provide study text or select a material to generate a podcast." });
+    }
+
+    const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
-      // Fetch server-authenticated student context
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       // Generate script using Google Gemini
-      let rawScript = '';
-      try {
-        rawScript = await generateGeminiPodcastScript(studyText, studentContext);
-      } catch (geminiErr: any) {
-        console.warn('Gemini podcast generation error:', geminiErr?.message || geminiErr);
-      }
-
-      if (!rawScript || typeof rawScript !== 'string') {
-        const fallbackObj = getPodcastFallback();
-        rawScript = fallbackObj.script;
+      const rawScript = await generateGeminiPodcastScript(studyText, studentContext);
+      if (!rawScript || typeof rawScript !== 'string' || !rawScript.trim()) {
+        throw new Error('Failed to generate podcast script from AI service.');
       }
 
       // Step 2: Clean script of Markdown, special symbols, and formatting noise before audio generation
@@ -3764,15 +4069,16 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       const validation = validateWavBuffer(wavBuffer);
       if (!validation.valid) {
         console.error('Audio validation failed for podcast output:', validation.error);
+        await refundAiCredits(userId, 'podcast', cost, spend.requestId);
         return res.status(500).json({ error: `Audio stream validation failed: ${validation.error || 'Corrupt media file generated.'}` });
       }
 
       const audioBase64 = wavBuffer.toString('base64');
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'podcast_generate', 1);
-      res.json({ script, audioBase64, durationSec: validation.durationSec });
+      res.json({ script, audioBase64, durationSec: validation.durationSec, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.error('Podcast generation server error:', error?.message || error);
-      res.status(500).json({ error: "We couldn't generate your podcast right now. Please try again." });
+      console.error('Podcast generation server error, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, 'podcast', cost, spend.requestId);
+      res.status(500).json({ error: "We couldn't generate your podcast right now. Your credits have been refunded." });
     }
   };
 

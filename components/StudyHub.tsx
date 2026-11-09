@@ -96,9 +96,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
       } catch {}
     }
   }, [selectedCourseId, courses]);
-  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner' | 'ai'>('summary');
+  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'podcast' | 'library' | 'scanner' | 'ai'>('summary');
   const [landingView, setLandingView] = useState<'courses' | 'ai'>('courses');
   const [loading, setLoading] = useState(false);
+  const [insufficientCreditsNotice, setInsufficientCreditsNotice] = useState<{
+    required: number;
+    balance: number;
+    resetDate?: string;
+  } | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
@@ -632,6 +637,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       return;
     }
 
+    setInsufficientCreditsNotice(null);
     setLoading(true);
     try {
       const data = await GeminiService.generateStudyMaterials(fileContent, type);
@@ -642,8 +648,48 @@ const StudyHub: React.FC<StudyHubProps> = ({
       addNotification('content', `${type.toUpperCase()} Ready`, `Your ${type} for ${currentCourse?.code} has been generated.`, 'hub');
     } catch (err: any) {
       console.error(err);
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? (type === 'summary' ? 1 : 2),
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
       const msg = err?.message || "AI Processing failed.";
       alert(`AI Processing warning: ${msg}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generatePodcastTool = async () => {
+    const source = (fileContent && fileContent.trim()) || activeHub.summary || `${currentCourse?.code}: ${currentCourse?.title}`;
+    if (!source || !source.trim()) return alert("Upload or select study material first!");
+
+    setInsufficientCreditsNotice(null);
+    setLoading(true);
+    try {
+      const res = await GeminiService.generatePodcast(source);
+      const updatedHub = {
+        ...activeHub,
+        podcastUrl: res.wavUrl || undefined,
+        transcript: res.script
+      } as StudyHubData;
+      setHubs({ ...hubs, [activeCourseId]: updatedHub });
+      await DBService.saveHub(updatedHub);
+      addNotification('content', 'AI Podcast Ready', `Your audio overview for ${currentCourse?.code} has been generated.`, 'hub');
+    } catch (err: any) {
+      console.error(err);
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? 6,
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
+      alert(err?.message || "We couldn't generate your podcast right now.");
     } finally {
       setLoading(false);
     }
@@ -679,12 +725,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
   };
 
   const tools = [
-    { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: 'Key Concepts' },
-    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History' },
+    { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: '1 credit' },
+    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History (Free)' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
-    { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
-    { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
-    { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: 'Timed Exam' },
+    { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: '2 credits' },
+    { id: 'quiz', label: 'Practice Quiz', icon: ICONS.CheckCircle, desc: '2 credits' },
+    { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: '2 credits' },
+    { id: 'podcast', label: 'AI Podcast', icon: <AudioWaveform size={18} />, desc: '6 credits' },
   ];
 
   if (!activeCourseId || !currentCourse) {
@@ -1003,6 +1050,47 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
         {/* Main Workbench Display */}
         <div className="lg:col-span-8 xl:col-span-9 min-h-[500px] bg-white rounded-xl p-6 sm:p-8 relative border border-slate-200 shadow-2xs transition-all duration-300">
+          {insufficientCreditsNotice && (
+            <div
+              role="alert"
+              className="mb-6 p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-bold">
+                    Not enough credits ({insufficientCreditsNotice.balance} remaining, {insufficientCreditsNotice.required} required)
+                  </p>
+                  <p className="text-amber-800">
+                    {insufficientCreditsNotice.resetDate
+                      ? `Your monthly credits reset on ${new Date(insufficientCreditsNotice.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}. `
+                      : ''}
+                    Upgrade your plan in Settings for up to 200 monthly AI credits.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {onNavigate && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('profile')}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[40px] cursor-pointer"
+                  >
+                    Upgrade
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setInsufficientCreditsNotice(null)}
+                  className="p-2 text-amber-700 hover:text-amber-900 rounded-lg cursor-pointer"
+                  aria-label="Dismiss credit alert"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {loading && (
             <div className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-200 rounded-xl">
                <div className="relative w-16 h-16 mb-6">
@@ -1050,8 +1138,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="space-y-12">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-10 gap-4">
                   <h3 className="text-3xl sm:text-4xl font-serif font-bold tracking-tight text-slate-900">Executive Summary</h3>
-                  <button onClick={() => generateTool('summary')} className="flex items-center gap-3 text-xs font-bold uppercase tracking-widest text-blue-700 hover:text-blue-800 transition-all p-3 bg-blue-50 rounded-xl border border-blue-100">
-                     <span className="group-hover:rotate-180 transition-transform duration-700">{ICONS.RotateCcw}</span> Regenerate
+                  <button onClick={() => generateTool('summary')} className="flex items-center gap-3 text-xs font-bold uppercase tracking-widest text-blue-700 hover:text-blue-800 transition-all p-3 bg-blue-50 rounded-xl border border-blue-100 cursor-pointer">
+                     <span className="group-hover:rotate-180 transition-transform duration-700">{ICONS.RotateCcw}</span> Regenerate — 1 credit
                   </button>
                 </div>
                 <div className="prose max-w-none text-slate-700 text-lg sm:text-xl leading-[1.7] space-y-8 font-medium prose-slate prose-p:leading-relaxed prose-headings:font-serif">
@@ -1062,16 +1150,15 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
             {activeTool === 'summary' && !activeHub.summary && fileContent && (
               <div className="flex flex-col items-center justify-center h-[400px] gap-8">
-                  <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 animate-bounce">
+                  <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
                     {ICONS.FileText}
                   </div>
                   <button 
                     onClick={() => generateTool('summary')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Summary
+                    Generate Summary — 1 credit
                   </button>
-                  <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Powered by Gemini AI</p>
               </div>
             )}
 
@@ -1797,9 +1884,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('test')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs cursor-pointer"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Practice Test
+                    Generate Practice Test — 2 credits
                   </button>
               </div>
             )}
@@ -1811,9 +1898,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('quiz')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Quiz
+                    Practice Quiz — 2 credits
                   </button>
               </div>
             )}
@@ -1825,10 +1912,55 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('flashcards')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Cards
+                    Flashcards — 2 credits
                   </button>
+              </div>
+            )}
+
+            {activeTool === 'podcast' && (
+              <div className="space-y-8 animate-in fade-in duration-300">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-6 gap-4">
+                  <div>
+                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">AI Podcast Overview</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Generate a two-host academic audio overview and transcript from your course material.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={generatePodcastTool}
+                    className="px-4 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0"
+                  >
+                    {activeHub.transcript ? 'Regenerate AI Podcast — 6 credits' : 'AI Podcast — 6 credits'}
+                  </button>
+                </div>
+
+                {activeHub.podcastUrl && (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <p className="text-xs font-semibold text-slate-700">Audio Stream</p>
+                    <audio ref={audioRef} controls src={activeHub.podcastUrl} className="w-full" />
+                  </div>
+                )}
+
+                {activeHub.transcript ? (
+                  <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 max-h-[420px] overflow-y-auto">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Podcast Script</p>
+                    <div className="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                      {activeHub.transcript}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-[260px] gap-4 text-center">
+                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+                      <AudioWaveform size={28} />
+                    </div>
+                    <p className="text-xs text-slate-500 max-w-sm">
+                      Turn your uploaded lecture notes into a structured study dialogue.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

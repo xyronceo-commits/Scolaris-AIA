@@ -141,27 +141,38 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
         setIsLoadingFiles(false);
       });
 
-    // Fetch real AI credit usage for the current billing period
+    // Fetch real AI credit balance & usage for the current billing period
     const loadAiCreditsUsage = async () => {
       try {
         const token = await getAccessToken();
-        const res = await fetch('/api/usage/ai-credits', {
+        const res = await fetch('/api/credits/balance', {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         if (res.ok) {
           const data = await res.json();
           if (typeof data.used === 'number') setAiCreditsUsed(data.used);
-          if (data.periodEnd) setAiPeriodEnd(data.periodEnd);
+          if (data.periodEnd || data.resetDate) setAiPeriodEnd(data.periodEnd || data.resetDate);
           return;
         }
       } catch {}
 
-      // Direct RLS-backed Supabase fallback
+      // Direct RLS-backed Supabase fallback (ai_credit_ledger -> ai_usage)
       try {
         const authUid = getCurrentUserId();
         if (authUid) {
           const now = new Date();
           const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+          const { data: ledgerRows, error: ledgerErr } = await supabase
+            .from('ai_credit_ledger')
+            .select('delta')
+            .eq('user_id', authUid)
+            .gte('created_at', periodStart);
+          if (!ledgerErr && Array.isArray(ledgerRows) && ledgerRows.length > 0) {
+            const netSpent = ledgerRows.reduce((acc: number, row: any) => acc + -(Number(row.delta) || 0), 0);
+            setAiCreditsUsed(Math.max(0, netSpent));
+            return;
+          }
+
           const { data } = await supabase
             .from('ai_usage')
             .select('credits')
@@ -357,50 +368,43 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 </p>
               </div>
 
-              {/* AI Credits Card (Backed by real ai_usage metering) */}
+              {/* AI Credits Card (Backed by atomic ai_credit_ledger) */}
               <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Cpu size={16} className="text-[#2563EB]" />
                     <h3 className="font-bold text-sm text-[#111827] dark:text-white">AI credits</h3>
                   </div>
-                  {currentPlan.aiCreditsAllowance > 0 ? (
-                    <span className="text-xs text-[#5B6472]">
-                      {aiCreditsUsed} of {currentPlan.aiCreditsAllowance} credits used this period
-                    </span>
-                  ) : (
-                    <span className="text-xs text-[#5B6472]">Free plan</span>
-                  )}
+                  <span className="text-xs font-semibold text-[#111827] dark:text-white">
+                    {Math.max(0, currentPlan.aiCreditsAllowance - aiCreditsUsed)} of {currentPlan.aiCreditsAllowance} credits remaining
+                  </span>
                 </div>
 
-                {currentPlan.aiCreditsAllowance > 0 ? (
-                  <>
-                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div
-                        className="bg-[#2563EB] h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${Math.min(100, Math.round((aiCreditsUsed / currentPlan.aiCreditsAllowance) * 100))}%`
-                        }}
-                      />
-                    </div>
-                    <p className="text-xs text-[#5B6472]">
-                      Resets on {new Date(aiPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.
-                    </p>
-                  </>
-                ) : (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                    <p className="text-xs text-[#5B6472]">
-                      AI credits are not included in Free.
-                    </p>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-[#2563EB] h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.min(100, Math.round((Math.max(0, currentPlan.aiCreditsAllowance - aiCreditsUsed) / Math.max(1, currentPlan.aiCreditsAllowance)) * 100))}%`
+                    }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#5B6472]">
+                  <span>
+                    {aiCreditsUsed} used this period · Resets on {new Date(aiPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                  {planKey !== 'studio' && (
                     <button
                       type="button"
                       onClick={() => setShowPlansModal(true)}
-                      className="px-3.5 py-2 border border-[#2563EB] text-[#2563EB] hover:bg-[#EFF6FF] dark:hover:bg-blue-950/40 rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0"
+                      className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer"
                     >
-                      Upgrade plan
+                      Get more credits →
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
+                <p className="text-[11px] text-[#5B6472]">
+                  Summary (1) · Flashcards (2) · Practice Quiz (2) · AI Podcast (6) · Studio Outline (2) · Studio Section (3) · Full Document (10) · AI Tutor &amp; Circle @korsiq chat are free.
+                </p>
               </div>
 
               {/* Have a receipt? Verify payment (Manual Recovery Box) */}
@@ -810,6 +814,10 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                       <Check size={14} className="text-[#2563EB] shrink-0" />
                       <span>Public study circles</span>
                     </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>20 monthly AI credits</span>
+                    </li>
                   </ul>
                 </div>
                 <button
@@ -817,7 +825,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   onClick={() => setShowPlansModal(false)}
                   className="w-full py-2.5 bg-[#2563EB] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
                 >
-                  Current Plan
+                  {planKey === 'free' ? 'Current Plan' : 'Free Plan'}
                 </button>
               </div>
 
@@ -854,7 +862,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     </li>
                     <li className="flex items-center gap-2">
                       <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>200 monthly AI study credits</span>
+                      <span>150 monthly AI credits</span>
                     </li>
                   </ul>
                 </div>
@@ -867,7 +875,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  {profile.tier === 'plus' ? 'Current Plan' : 'Upgrade to Plus'}
+                  {planKey === 'plus' ? 'Current Plan' : 'Upgrade to Plus'}
                 </button>
               </div>
 
@@ -901,7 +909,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     </li>
                     <li className="flex items-center gap-2">
                       <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>1,000 AI credits, 10 GB storage</span>
+                      <span>200 monthly AI credits, 10 GB storage</span>
                     </li>
                   </ul>
                 </div>
@@ -914,7 +922,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  {profile.tier === 'studio' ? 'Current Plan' : 'Upgrade to KorsIQ Premium'}
+                  {planKey === 'studio' ? 'Current Plan' : 'Upgrade to KorsIQ Premium'}
                 </button>
               </div>
             </div>

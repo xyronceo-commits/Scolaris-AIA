@@ -104,6 +104,9 @@ export const DIFFICULTY_COLORS = {
   Hard: 'bg-rose-50 text-rose-700 border-rose-100'
 };
 
+import { AI_CREDIT_ALLOWANCES, AI_CREDIT_COSTS } from './lib/aiCredits';
+export { AI_CREDIT_ALLOWANCES, AI_CREDIT_COSTS };
+
 // ==========================================
 // Official Paystack Direct Payment Links
 // ==========================================
@@ -126,7 +129,7 @@ export const BETA_PLAN_LIMITS = {
     storageLimitBytes: 500 * 1024 * 1024, // 500 MB (beta)
     storageLimitDisplay: '500 MB',
     monthlyUploadsLimit: 15,
-    aiCreditsAllowance: 0,
+    aiCreditsAllowance: AI_CREDIT_ALLOWANCES.free, // 20 credits / month
     hasStudioAccess: false,
     canCreateCircles: false, // can join only
     canExportDocxPdf: false,
@@ -137,11 +140,11 @@ export const BETA_PLAN_LIMITS = {
     price: '₦7,500 / month',
     priceNumeric: 7500,
     paymentLink: PAYSTACK_PAYMENT_LINKS.plus,
-    tagline: 'Study smarter. More AI help, storage and Lite Studio.',
+    tagline: 'Study smarter. More AI credits, storage and Lite Studio.',
     storageLimitBytes: 2 * 1024 * 1024 * 1024, // 2 GB (beta)
     storageLimitDisplay: '2 GB',
     monthlyUploadsLimit: 50,
-    aiCreditsAllowance: 250,
+    aiCreditsAllowance: AI_CREDIT_ALLOWANCES.plus, // 150 credits / month
     hasStudioAccess: true, // Lite studio
     canCreateCircles: true,
     canExportDocxPdf: true,
@@ -156,7 +159,7 @@ export const BETA_PLAN_LIMITS = {
     storageLimitBytes: 10 * 1024 * 1024 * 1024, // 10 GB (beta)
     storageLimitDisplay: '10 GB',
     monthlyUploadsLimit: 200,
-    aiCreditsAllowance: 1000,
+    aiCreditsAllowance: AI_CREDIT_ALLOWANCES.studio, // 200 credits / month
     hasStudioAccess: true,
     canCreateCircles: true,
     canExportDocxPdf: true,

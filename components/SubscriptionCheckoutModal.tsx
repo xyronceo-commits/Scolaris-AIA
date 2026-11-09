@@ -290,7 +290,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={13} className="text-[#2563EB] shrink-0" />
-                  <span>{selectedPlan === 'studio' ? '10 GB cloud storage & 1,000 AI credits' : '2 GB cloud storage & 250 AI credits'}</span>
+                  <span>{selectedPlan === 'studio' ? '10 GB cloud storage & 200 monthly AI credits' : '2 GB cloud storage & 150 monthly AI credits'}</span>
                 </li>
               </ul>
             </div>
