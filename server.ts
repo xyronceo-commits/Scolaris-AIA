@@ -165,7 +165,16 @@ export async function createExpressApp() {
 
   // URL normalizer: ensure incoming paths match Express /api routes on all hosting providers
   app.use((req, _res, next) => {
-    if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/assets') && req.url !== '/' && req.url !== '/index.html' && !req.url.startsWith('/vite')) {
+    if (
+      req.url && 
+      !req.url.startsWith('/api') && 
+      !req.url.startsWith('/assets') && 
+      req.url !== '/' && 
+      req.url !== '/index.html' && 
+      !req.url.startsWith('/vite') &&
+      req.url !== '/admin' &&
+      !req.url.startsWith('/admin')
+    ) {
       req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
     }
     next();
@@ -3090,10 +3099,369 @@ CRITICAL WRITING RULES:
   app.post('/api/podcast/generate', requireAuth, apiRateLimiter, handlePodcastGeneration);
 
   // ==========================================
-  // ADMIN ACCESS & AUTHORIZATION
-  // Legacy admin endpoints deleted for planned rebuild.
-  // See architectural specification at docs/specs/admin-dashboard-plan.md
+  // OTP-ONLY ADMIN AUTH & MANAGEMENT API
   // ==========================================
+
+  const adminOtpCooldowns = new Map<string, number>();
+  const adminIpRateLimits = new Map<string, number[]>();
+
+  async function logAdminAction(adminEmail: string, action: string, details: any = {}, ipAddress: string = '') {
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('admin_audit_log').insert({
+          admin_email: adminEmail,
+          action,
+          details,
+          ip_address: ipAddress
+        });
+      } catch (err) {
+        console.warn('[Admin Audit] Failed to record audit log:', err);
+      }
+    }
+  }
+
+  // 1. Submit email to request 6-digit OTP
+  app.post('/api/admin/auth/request-otp', async (req, res) => {
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+    if (!rawEmail || !rawEmail.includes('@')) {
+      return res.status(400).json({ success: false, error: 'A valid email address is required.' });
+    }
+
+    // Rate limit per IP: max 10 requests per 15 minutes
+    const now = Date.now();
+    const ipTimes = (adminIpRateLimits.get(ip) || []).filter(t => now - t < 15 * 60 * 1000);
+    if (ipTimes.length >= 10) {
+      return res.status(429).json({ success: false, error: 'Too many requests. Please wait a few minutes before trying again.' });
+    }
+    ipTimes.push(now);
+    adminIpRateLimits.set(ip, ipTimes);
+
+    // Rate limit per email: 60-second cooldown
+    const lastSent = adminOtpCooldowns.get(rawEmail) || 0;
+    if (now - lastSent < 60 * 1000) {
+      const waitSec = Math.ceil((60 * 1000 - (now - lastSent)) / 1000);
+      return res.status(429).json({ success: false, error: `Please wait ${waitSec} seconds before requesting a new code.` });
+    }
+
+    // Generic response identical whether authorized or not
+    const GENERIC_SUCCESS_RESPONSE = {
+      success: true,
+      message: 'If this email is authorized, a 6-digit verification code has been sent.'
+    };
+
+    try {
+      if (!supabaseAdmin || !supabaseAuthClient) {
+        console.warn('[Admin Auth] Supabase admin or auth client unavailable');
+        return res.json(GENERIC_SUCCESS_RESPONSE);
+      }
+
+      // Check allowlist table `admin_users`
+      const { data: adminRow, error: adminErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .eq('email', rawEmail)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (adminErr || !adminRow) {
+        // Unknown or inactive email: do not send code, return identical message
+        await logAdminAction(rawEmail, 'admin_otp_requested_unauthorized', { ip }, ip);
+        return res.json(GENERIC_SUCCESS_RESPONSE);
+      }
+
+      // Authorized admin: trigger Supabase email OTP
+      const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
+        email: rawEmail,
+        options: {
+          shouldCreateUser: false
+        }
+      });
+
+      if (otpError) {
+        console.error('[Admin Auth] Supabase signInWithOtp error:', otpError.message);
+      }
+
+      adminOtpCooldowns.set(rawEmail, now);
+      await logAdminAction(rawEmail, 'admin_otp_sent', { role: adminRow.role, ip }, ip);
+
+      return res.json(GENERIC_SUCCESS_RESPONSE);
+    } catch (err: any) {
+      console.error('[Admin Auth] Request OTP error:', err);
+      return res.json(GENERIC_SUCCESS_RESPONSE);
+    }
+  });
+
+  // 2. Verify 6-digit OTP
+  app.post('/api/admin/auth/verify-otp', async (req, res) => {
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+
+    if (!rawEmail || !token) {
+      return res.status(400).json({ success: false, error: 'Email and 6-digit verification code are required.' });
+    }
+
+    if (!supabaseAdmin || !supabaseAuthClient) {
+      return res.status(503).json({ success: false, error: 'Authentication service unavailable.' });
+    }
+
+    try {
+      // 1. Verify code via Supabase Auth
+      const { data, error } = await supabaseAuthClient.auth.verifyOtp({
+        email: rawEmail,
+        token,
+        type: 'email'
+      });
+
+      if (error || !data.user) {
+        await logAdminAction(rawEmail, 'admin_otp_verify_failed', { error: error?.message, ip }, ip);
+        return res.status(401).json({ success: false, error: 'Invalid or expired 6-digit verification code.' });
+      }
+
+      // 2. Cryptographically re-verify against admin_users allowlist
+      const { data: adminRow, error: allowErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .eq('email', rawEmail)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (allowErr || !adminRow) {
+        await logAdminAction(rawEmail, 'admin_access_denied_not_allowlisted', { ip }, ip);
+        return res.status(403).json({ success: false, error: 'Access denied: Email is not an authorized administrator.' });
+      }
+
+      await logAdminAction(rawEmail, 'admin_sign_in_success', { role: adminRow.role, ip }, ip);
+
+      return res.json({
+        success: true,
+        user: {
+          id: adminRow.id,
+          email: adminRow.email,
+          role: adminRow.role
+        },
+        session: data.session
+      });
+    } catch (err: any) {
+      console.error('[Admin Auth] Verify error:', err);
+      return res.status(500).json({ success: false, error: 'Failed to verify admin code.' });
+    }
+  });
+
+  // 3. Strict Admin Authorization Middleware for Protected Admin API
+  const requireAdminAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!supabaseAdmin || !supabaseAuthClient) {
+      return res.status(503).json({ success: false, error: 'Admin service unavailable: Supabase credentials unconfigured.' });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing admin authorization token.' });
+    }
+
+    const token = authHeader.substring(7).trim();
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing access token.' });
+    }
+
+    try {
+      // Cryptographically validate JWT against Supabase Auth
+      const { data, error } = await supabaseAuthClient.auth.getUser(token);
+      if (error || !data.user || !data.user.email) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Admin session expired or invalid.' });
+      }
+
+      const email = data.user.email.toLowerCase().trim();
+
+      // Re-check active admin status in admin_users
+      const { data: adminRow, error: allowErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .eq('email', email)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (allowErr || !adminRow) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Admin privileges inactive or revoked.' });
+      }
+
+      (req as any).adminUser = adminRow;
+      next();
+    } catch (err: any) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Token validation failed.' });
+    }
+  };
+
+  // 4. Admin Dashboard API: Overview
+  app.get('/api/admin/overview', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const [profilesRes, subsRes, groupsRes, logsRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }),
+        supabaseAdmin.from('subscriptions').select('id, amount_paid, status, created_at').eq('status', 'active'),
+        supabaseAdmin.from('study_groups').select('id', { count: 'exact', head: true }),
+        supabaseAdmin.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(10)
+      ]);
+
+      const now = new Date();
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const monthRevenue = (subsRes.data || [])
+        .filter((s: any) => s.created_at >= firstOfMonth)
+        .reduce((sum: number, s: any) => sum + (Number(s.amount_paid) || 0), 0);
+
+      res.json({
+        success: true,
+        data: {
+          totalUsers: profilesRes.count || 0,
+          activeSubscriptions: subsRes.data?.length || 0,
+          monthRevenue,
+          totalCircles: groupsRes.count || 0,
+          recentLogs: logsRes.data || []
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch overview metrics.' });
+    }
+  });
+
+  // 5. Admin Dashboard API: Users search
+  app.get('/api/admin/users', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+    try {
+      let query = supabaseAdmin
+        .from('profiles')
+        .select('id, email, name, university, department, level, tier, is_pro, subscription_status, created_at')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (search) {
+        query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, users: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch users.' });
+    }
+  });
+
+  // 6. Admin Dashboard API: Subscriptions / Transactions
+  app.get('/api/admin/subscriptions', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('subscriptions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json({ success: true, subscriptions: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch subscriptions.' });
+    }
+  });
+
+  // 7. Admin Dashboard API: Manual Grant / Revoke Subscription
+  app.post('/api/admin/subscriptions/grant-tier', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const { userId, targetTier } = req.body;
+    const admin = (req as any).adminUser;
+
+    if (!userId || !targetTier) {
+      return res.status(400).json({ success: false, error: 'userId and targetTier are required.' });
+    }
+
+    try {
+      const isPro = targetTier === 'plus' || targetTier === 'studio';
+      const status = isPro ? 'active' : 'inactive';
+
+      // Update profile
+      await supabaseAdmin
+        .from('profiles')
+        .update({
+          tier: targetTier,
+          is_pro: isPro,
+          subscription_tier: targetTier,
+          subscription_status: status
+        })
+        .eq('id', userId);
+
+      // Record in subscriptions
+      await supabaseAdmin.from('subscriptions').insert({
+        user_id: userId,
+        plan_tier: targetTier,
+        billing_cycle: 'monthly',
+        status,
+        payment_provider: 'manual_admin',
+        payment_status: isPro ? 'paid' : 'none',
+        amount_paid: 0,
+        currency: 'NGN',
+        current_period_start: new Date().toISOString()
+      });
+
+      await logAdminAction(admin.email, 'admin_grant_tier', { userId, targetTier });
+
+      res.json({ success: true, message: `Successfully updated user tier to ${targetTier}.` });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to update user tier.' });
+    }
+  });
+
+  // 8. Admin Dashboard API: Circles list
+  app.get('/api/admin/circles', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('study_groups')
+        .select('id, name, course, type, owner_id, member_count, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json({ success: true, circles: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to list circles.' });
+    }
+  });
+
+  // 9. Admin Dashboard API: Remove inappropriate Circle Post
+  app.delete('/api/admin/circles/posts/:postId', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const postId = req.params.postId;
+    const admin = (req as any).adminUser;
+
+    try {
+      const { error } = await supabaseAdmin.from('circle_discussions').delete().eq('id', postId);
+      if (error) throw error;
+      await logAdminAction(admin.email, 'admin_delete_circle_post', { postId });
+      res.json({ success: true, message: 'Circle post deleted.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to delete post.' });
+    }
+  });
+
+  // 10. Admin Dashboard API: Audit log
+  app.get('/api/admin/audit-log', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('admin_audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json({ success: true, logs: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit log.' });
+    }
+  });
 
   // ==========================================
   // PUBLIC / STUDENT CIRCLES API ENDPOINTS

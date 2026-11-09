@@ -26,8 +26,22 @@ import { cleanupLegacyApiKeyStorage } from './services/gemini';
 import KorsIQLogo from './components/KorsIQLogo';
 import StudyPlannerView from './components/StudyPlannerView';
 import ResourcesView from './components/ResourcesView';
+import AdminApp from './components/AdminApp';
 
 const App: React.FC = () => {
+  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin');
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setIsAdminRoute(window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin'));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
   const [courses, setCourses] = useState<Course[]>([]);
   const [schedule, setSchedule] = useState<StudySession[]>([]);
@@ -518,6 +532,18 @@ const App: React.FC = () => {
             window.history.replaceState(null, '', window.location.pathname);
           }
         }}
+      />
+    );
+  }
+
+  // Admin Portal Route Handling (/admin)
+  if (isAdminRoute) {
+    return (
+      <AdminApp 
+        onExit={() => {
+          window.history.pushState({}, '', '/');
+          setIsAdminRoute(false);
+        }} 
       />
     );
   }
