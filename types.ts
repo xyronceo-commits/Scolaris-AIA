@@ -255,6 +255,13 @@ export interface GroupDiscussionPost {
   title?: string;
   content: string;
   timestamp: number;
+  postType?: 'thread' | 'material';
+  isPinned?: boolean;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
+  repliesCount?: number;
   attachments?: { fileName: string; fileUrl?: string; storagePath?: string; fileType?: string }[];
   replies?: GroupDiscussionReply[];
 }
