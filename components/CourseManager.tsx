@@ -22,6 +22,8 @@ interface CourseManagerProps {
   setCourses: React.Dispatch<React.SetStateAction<Course[]>>;
   onScheduleGenerated: (schedule: any[]) => void;
   profile: UserProfile;
+  initialOpenForm?: 'manual' | 'import' | null;
+  openFormSignal?: number;
 }
 
 const PRESET_SYLLABUSES = [
@@ -45,14 +47,33 @@ const PRESET_MANUALS = [
   { code: 'PHYS301', title: 'Quantum Mechanics', difficulty: Difficulty.HARD, units: 4, description: 'Wave equations, Schrodinger formulation, and quantum state superpositions.' }
 ];
 
-const CourseManager: React.FC<CourseManagerProps> = ({ courses, setCourses, onScheduleGenerated, profile }) => {
+const CourseManager: React.FC<CourseManagerProps> = ({
+  courses,
+  setCourses,
+  onScheduleGenerated,
+  profile,
+  initialOpenForm = null,
+  openFormSignal = 0,
+}) => {
   const [magicText, setMagicText] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   
-  const [activeForm, setActiveForm] = useState<'manual' | 'import' | null>(null);
+  const [activeForm, setActiveForm] = useState<'manual' | 'import' | null>(initialOpenForm);
   const [importTab, setImportTab] = useState<'syllabus' | 'url'>('syllabus');
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (initialOpenForm) {
+      setActiveForm(initialOpenForm);
+    }
+  }, [initialOpenForm]);
+
+  React.useEffect(() => {
+    if (openFormSignal > 0) {
+      setActiveForm('manual');
+    }
+  }, [openFormSignal]);
 
   const [manualCourse, setManualCourse] = useState<Partial<Course>>({
     difficulty: Difficulty.MEDIUM,

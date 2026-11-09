@@ -478,9 +478,16 @@ const App: React.FC = () => {
     }
   };
 
+  const [openAddCourseSignal, setOpenAddCourseSignal] = useState(0);
+
   const handleQuickAddCourse = (newCourse: Course) => {
     // Persisted by the courses effect above (DBService.saveCourses)
     setCourses(prev => [...prev, newCourse]);
+  };
+
+  const handleOpenAddCourseFlow = () => {
+    setOpenAddCourseSignal(s => s + 1);
+    setActiveTab('courses');
   };
 
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
@@ -758,6 +765,7 @@ const App: React.FC = () => {
       onNavigate={(tab) => { setActiveTab(tab); }}
       onUpdateProfile={(updated) => setProfile(updated)}
       onAddCourse={handleQuickAddCourse}
+      onOpenAddCourse={handleOpenAddCourseFlow}
     />
   );
 
@@ -768,7 +776,8 @@ const App: React.FC = () => {
         return renderDashboard();
       case 'planner':
         return <StudyPlannerView 
-          initialTab="courses"
+          initialTab={openAddCourseSignal > 0 ? 'courses' : 'today'}
+          openAddCourseSignal={openAddCourseSignal}
           courses={courses}
           setCourses={setCourses}
           schedule={schedule}
@@ -784,6 +793,7 @@ const App: React.FC = () => {
       case 'courses':
         return <StudyPlannerView 
           initialTab="courses"
+          openAddCourseSignal={openAddCourseSignal}
           courses={courses}
           setCourses={setCourses}
           schedule={schedule}

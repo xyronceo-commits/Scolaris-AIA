@@ -30,6 +30,7 @@ interface DashboardProps {
   onTasksUpdated?: (tasks: AcademicTask[]) => void;
   onUpdateProfile?: (updatedProfile: UserProfile) => void;
   onAddCourse?: (course: Course) => void;
+  onOpenAddCourse?: () => void;
 }
 
 const MAX_COURSES = 12;
@@ -42,7 +43,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigate,
   onTasksUpdated,
   onUpdateProfile,
-  onAddCourse
+  onAddCourse,
+  onOpenAddCourse
 }) => {
   const userId = getCurrentUserId() || (profile as any)?.id || (profile as any)?.userId || '';
   const dayIndex = new Date().getDay();
@@ -376,7 +378,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setIsCourseModalOpen(true)}
+            onClick={() => {
+              if (onOpenAddCourse) {
+                onOpenAddCourse();
+              } else {
+                setIsCourseModalOpen(true);
+              }
+            }}
             className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-900 border border-[#2563EB] text-[#2563EB] dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium rounded-lg min-h-[44px] transition-colors cursor-pointer"
           >
             <BookOpen size={16} />
