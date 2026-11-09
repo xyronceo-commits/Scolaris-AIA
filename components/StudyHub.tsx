@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState, UserFile } from '../types';
 import { ICONS } from '../constants';
-import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight } from 'lucide-react';
+import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
@@ -54,6 +54,7 @@ interface StudyHubProps {
   profile: UserProfile;
   addNotification: (type: any, title: string, message: string, link?: any) => void;
   onCourseIdChange?: (id: string) => void;
+  onNavigate?: (tab: string) => void;
 }
 
 const StudyHub: React.FC<StudyHubProps> = ({ 
@@ -65,9 +66,35 @@ const StudyHub: React.FC<StudyHubProps> = ({
   setGroups,
   profile,
   addNotification,
-  onCourseIdChange
+  onCourseIdChange,
+  onNavigate
 }) => {
-  const [activeCourseId, setActiveCourseId] = useState(selectedCourseId || (courses[0]?.id || ''));
+  // Remember last opened course; if none remembered or selected, show course list
+  const [activeCourseId, setActiveCourseId] = useState<string>(() => {
+    if (selectedCourseId && courses.some(c => c.id === selectedCourseId)) {
+      return selectedCourseId;
+    }
+    try {
+      const saved = localStorage.getItem('korsiq_last_hub_course_id') || localStorage.getItem('scolaris_last_accessed_course_id');
+      if (saved && courses.some(c => c.id === saved)) {
+        return saved;
+      }
+    } catch {}
+    // If only 1 course exists, open it directly; otherwise start at course list
+    if (courses.length === 1) return courses[0].id;
+    return '';
+  });
+
+  // Deep links sync: if selectedCourseId changes from an outside screen, switch to it immediately
+  useEffect(() => {
+    if (selectedCourseId && courses.some(c => c.id === selectedCourseId)) {
+      setActiveCourseId(selectedCourseId);
+      try {
+        localStorage.setItem('korsiq_last_hub_course_id', selectedCourseId);
+        localStorage.setItem('scolaris_last_accessed_course_id', selectedCourseId);
+      } catch {}
+    }
+  }, [selectedCourseId, courses]);
   const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner'>('summary');
   const [loading, setLoading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -142,7 +169,10 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   useEffect(() => {
     if (activeCourseId) {
-      localStorage.setItem('scolaris_last_accessed_course_id', activeCourseId);
+      try {
+        localStorage.setItem('scolaris_last_accessed_course_id', activeCourseId);
+        localStorage.setItem('korsiq_last_hub_course_id', activeCourseId);
+      } catch {}
     }
   }, [activeCourseId]);
 
@@ -552,31 +582,134 @@ const StudyHub: React.FC<StudyHubProps> = ({
     { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: 'Timed Exam' },
   ];
 
+  if (!activeCourseId || !currentCourse) {
+    return (
+      <div className="space-y-6 max-w-5xl mx-auto pb-16">
+        {/* Header */}
+        <div className="border-b border-slate-200 dark:border-slate-800 pb-5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
+              Study Hub
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+            Course Workbenches
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Select a course to open its study workbench, flashcards, summaries, and practice quizzes.
+          </p>
+        </div>
+
+        {courses.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+              <BookOpen size={24} />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                No courses enrolled yet
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Add your courses to start generating tailored summaries, active recall flashcards, and quizzes.
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigate?.('planner')}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shadow-xs"
+            >
+              <Plus size={16} />
+              <span>Add your first course</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {courses.map(course => {
+              const hubData = hubs[course.id];
+              const hasMaterials = Boolean(hubData?.summary || hubData?.flashcards?.length || hubData?.quizzes?.length || hubData?.libraryFiles?.length);
+
+              return (
+                <button
+                  key={course.id}
+                  onClick={() => {
+                    setActiveCourseId(course.id);
+                    onCourseIdChange?.(course.id);
+                  }}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl p-5 text-left transition-all hover:shadow-sm min-h-[120px] flex flex-col justify-between group cursor-pointer"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-xs font-bold font-mono px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded border border-blue-100 dark:border-blue-900">
+                        {course.code}
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-400">
+                        {course.units} Units
+                      </span>
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {course.title}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs">
+                    <span className="text-[11px] text-slate-400">
+                      {hasMaterials ? 'Materials active' : 'Ready to start'}
+                    </span>
+                    <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                      Open Hub &rarr;
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 animate-in fade-in duration-700 pb-20 relative">
       {/* Dynamic Header Area */}
       <div className="flex flex-col xl:flex-row gap-6 justify-between items-start xl:items-end">
         <div className="space-y-2">
           <div className="flex items-center gap-2 mb-1">
-             <div className="px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-full text-[8px] font-bold uppercase tracking-widest text-blue-700">Study Hub</div>
-             {activeHub.summary && <div className="px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-full text-[8px] font-bold uppercase tracking-widest text-emerald-600">Generated</div>}
+             <div className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 border border-blue-100 dark:border-blue-900 rounded-full text-[8px] font-bold uppercase tracking-widest text-blue-700 dark:text-blue-300">Study Hub</div>
+             {activeHub.summary && <div className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950 border border-emerald-100 dark:border-emerald-900 rounded-full text-[8px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-300">Generated</div>}
           </div>
-          <h1 className="text-3xl md:text-4xl lg:text-5xl font-serif font-bold tracking-tight text-slate-900 leading-none">Academic Studio</h1>
-          <p className="text-slate-500 font-medium text-sm md:text-base">Transforming source material into polished study assets.</p>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight">
+            {currentCourse.code}: {currentCourse.title}
+          </h1>
+          <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm">
+            Course workbench: summaries, flashcards, active recall quizzes, and course materials.
+          </p>
         </div>
         
-        <div className="flex flex-wrap gap-3 w-full xl:w-auto">
+        <div className="flex flex-wrap gap-2.5 w-full xl:w-auto items-center">
+          <button
+            onClick={() => {
+              setActiveCourseId('');
+              try {
+                localStorage.removeItem('korsiq_last_hub_course_id');
+              } catch {}
+            }}
+            className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold min-h-[44px] transition-colors cursor-pointer"
+            title="Switch Course"
+          >
+            <ChevronLeft size={16} />
+            <span>Switch course</span>
+          </button>
+
           {activeHub.summary && (
             <button 
               onClick={() => setShowShareModal(true)}
-              className="flex-1 xl:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-blue-700 text-white rounded-xl font-bold uppercase text-[10px] tracking-wide hover:bg-blue-800 transition-all shadow-md"
+              className="flex-1 xl:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold uppercase text-[10px] tracking-wide transition-all shadow-xs min-h-[44px]"
             >
               {ICONS.Share} Share Hub
             </button>
           )}
-          <div className="relative flex-1 xl:min-w-[250px] group">
+          <div className="relative flex-1 xl:min-w-[240px] group">
             <select 
-              className="w-full bg-white border border-slate-200 rounded-xl px-6 py-3 font-bold text-[10px] uppercase tracking-widest shadow-sm focus:ring-2 focus:ring-blue-500/20 outline-none appearance-none cursor-pointer transition-all pr-10 text-slate-700"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 font-bold text-[10px] uppercase tracking-widest shadow-2xs focus:ring-2 focus:ring-blue-500/20 outline-none appearance-none cursor-pointer transition-all pr-10 text-slate-700 dark:text-slate-200 min-h-[44px]"
               value={activeCourseId}
               onChange={e => {
                 const val = e.target.value;
@@ -586,7 +719,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
             >
               {courses.map(c => <option key={c.id} value={c.id}>{c.code}: {c.title}</option>)}
             </select>
-            <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 group-hover:text-blue-700 transition-colors">
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 group-hover:text-blue-700 transition-colors">
               {ICONS.ChevronDown}
             </div>
           </div>
