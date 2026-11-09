@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { isAiSender } from './lib/brand';
+import { isAiSender } from './lib/brand.js';
 import { GoogleGenAI } from '@google/genai';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -12,8 +12,8 @@ import {
   normalizeExtractedText, 
   validateExtractedText, 
   selectRelevantChunks 
-} from './lib/documentProcessor';
-import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
+} from './lib/documentProcessor.js';
+import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities.js';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -193,9 +193,13 @@ async function parsePdfBuffer(buffer: Buffer): Promise<string> {
   return '';
 }
 
-async function startServer() {
+/**
+ * Builds the Express app with every API route registered, without starting a listener.
+ * Vercel imports this (api/index.ts) and runs the app as a serverless function;
+ * everywhere else startServer() below wraps it in a normal long-running server.
+ */
+export async function createApp() {
   const app = express();
-  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json({
@@ -4926,6 +4930,13 @@ CRITICAL WRITING RULES:
     }
   });
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
+  const PORT = 3000;
+
   // Vite integration
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
@@ -4960,4 +4971,7 @@ CRITICAL WRITING RULES:
   });
 }
 
-startServer();
+// On Vercel the app is served through api/index.ts, so it must not open its own port.
+if (!process.env.VERCEL) {
+  startServer();
+}

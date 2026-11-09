@@ -226,6 +226,7 @@ export const DBService = {
       }
 
       const profile: UserProfile = {
+        id: userId,
         name: data.name || '',
         email: data.email || '',
         university: data.institution || '',
@@ -1685,11 +1686,21 @@ export const DBService = {
         updated_at: now,
       });
 
-      if (error) {
-        console.warn('createTask remote warning:', error.message);
+      if (error) throw error;
+    } catch (err: any) {
+      // The task was not saved. Remove the optimistic copy so it does not look saved, and tell the caller.
+      writeCache('academic_tasks', userId, cached);
+      console.error('createTask failed:', err);
+
+      const code = String(err?.code || '');
+      const message = String(err?.message || '');
+      if (code === '42P01' || code === 'PGRST205' || /relation .* does not exist|schema cache/i.test(message)) {
+        throw new Error('Tasks are not available yet because the database is still being set up. Please try again later.');
       }
-    } catch (err) {
-      console.warn('createTask exception:', err);
+      if (code === 'PGRST301' || code === '401' || /jwt|not authenticated|permission denied|row-level security/i.test(message)) {
+        throw new Error('Your session has expired. Please sign in again and retry.');
+      }
+      throw new Error('We could not save your task. Check your connection and try again.');
     }
 
     return newTask;

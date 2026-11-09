@@ -206,7 +206,7 @@ const App: React.FC = () => {
         if ((!dbProfile.name || dbProfile.name === 'Scholar') && user.displayName) {
           dbProfile.name = user.displayName;
         }
-        setProfile(dbProfile);
+        setProfile({ ...dbProfile, id: user.uid });
       } else {
         // Create initial default profile in Supabase for new user
         const newProfile: UserProfile = {
@@ -227,7 +227,7 @@ const App: React.FC = () => {
           semesterEnd: ''
         };
         await DBService.saveProfile(uid, newProfile);
-        setProfile(newProfile);
+        setProfile({ ...newProfile, id: uid });
       }
 
       const [dbCourses, dbSchedule, dbHubs, dbGroups] = await Promise.all([
@@ -387,7 +387,7 @@ const App: React.FC = () => {
   }, [profile, schedule, courses]);
 
   const handleSaveProfile = async (updatedProfile: UserProfile) => {
-    setProfile(updatedProfile);
+    setProfile({ ...updatedProfile, id: updatedProfile.id ?? authUser?.uid });
     if (authUser) {
       await DBService.saveProfile(authUser.uid, updatedProfile);
     }
@@ -397,7 +397,7 @@ const App: React.FC = () => {
     if (authUser) {
       await DBService.saveProfile(authUser.uid, newProfile);
     }
-    setProfile(newProfile);
+    setProfile({ ...newProfile, id: newProfile.id ?? authUser?.uid });
     setActiveTab('dashboard');
   };
 

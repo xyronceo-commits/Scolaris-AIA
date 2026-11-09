@@ -115,6 +115,8 @@ export interface AcademicTask {
 }
 
 export interface UserProfile {
+  /** The signed-in user's id. Set when the profile is loaded; not stored in the profile row itself. */
+  id?: string;
   name: string;
   email: string;
   university: string;

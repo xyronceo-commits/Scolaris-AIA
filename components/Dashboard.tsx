@@ -38,7 +38,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigate,
   onTasksUpdated
 }) => {
-  const userId = getCurrentUserId() || '';
+  // getCurrentUserId() can be briefly empty right after sign-in; the loaded profile has the same id
+  const userId = getCurrentUserId() || profile?.id || '';
   const dayIndex = new Date().getDay();
   const today = DAYS[dayIndex === 0 ? 6 : dayIndex - 1] || 'Monday';
   const todayIso = new Date().toISOString().split('T')[0];
@@ -91,7 +92,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [userId]);
 
   const handleSaveTask = async (taskData: Omit<AcademicTask, 'id' | 'userId' | 'createdAt' | 'updatedAt'>) => {
-    if (!userId) return;
+    // Throw instead of returning quietly: the task form shows this message and stays open,
+    // rather than closing as if the task had been saved.
+    if (!userId) throw new Error('We could not confirm your sign-in. Please refresh the page and try again.');
     if (taskToEdit) {
       await DBService.updateTask(userId, taskToEdit.id, taskData);
     } else {
