@@ -14,6 +14,10 @@ import {
   StudioVersion,
   AcademicTask,
   AppNotification,
+  GroupMessage,
+  GroupDiscussionPost,
+  GroupDiscussionReply,
+  SharedMaterial,
 } from '../types';
 
 const USER_FILES_BUCKET = 'user-files';
@@ -122,17 +126,21 @@ function rowToMaterial(row: any, urls: Record<string, string> = {}) {
     groupId: row.group_id,
     courseId: row.course_id || 'group_material',
     courseCode: row.course_code || row.file_name || '',
-    sharedBy: row.uploaded_by_name || 'Member',
-    uploadedBy: row.uploaded_by || '',
-    uploadedByName: row.uploaded_by_name || 'Member',
-    uploadedAt: row.uploaded_at || new Date().toISOString(),
-    timestamp: Number(row.ts) || Date.now(),
+    sharedBy: row.uploaded_by_name || row.uploader_name || 'Member',
+    uploadedBy: row.uploaded_by || row.uploader_id || '',
+    uploadedByName: row.uploaded_by_name || row.uploader_name || 'Member',
+    uploadedAt: row.uploaded_at || row.created_at || new Date().toISOString(),
+    timestamp: Number(row.ts) || (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
     fileName: row.file_name || 'Document',
     fileType: row.file_type || 'application/pdf',
-    fileSize: row.file_size || '',
+    fileSize: row.file_size || (row.file_size_bytes ? formatSize(row.file_size_bytes) : ''),
+    fileSizeBytes: row.file_size_bytes ? Number(row.file_size_bytes) : undefined,
     storagePath: row.storage_path || '',
     downloadUrl: urls[row.storage_path] || '',
-    content: row.content || '',
+    content: row.extracted_text || row.content || '',
+    extractedText: row.extracted_text || row.content || '',
+    status: (row.status as 'pending' | 'processing' | 'ready' | 'failed') || 'ready',
+    errorMessage: row.error_message || undefined,
   };
 }
 
@@ -798,6 +806,25 @@ export const DBService = {
 
         const materials = (await loadGroupMaterials([groupId]))[groupId] || [];
         const joinedGroup = rowToGroup(updatedData, materials);
+
+        // Ensure relational membership for RLS
+        try {
+          await supabase
+            .from('circle_members')
+            .upsert(
+              {
+                circle_id: groupId,
+                user_id: userId,
+                user_name: userName || 'Member',
+                role: 'member',
+                joined_at: new Date().toISOString(),
+              },
+              { onConflict: 'circle_id,user_id' }
+            );
+        } catch {
+          /* non-blocking */
+        }
+
         const list = readCache<StudyGroup[]>('groups', userId, []);
         writeCache('groups', userId, [joinedGroup, ...list.filter((g) => g.id !== joinedGroup.id)]);
         return { success: true, group: joinedGroup };
@@ -842,6 +869,9 @@ export const DBService = {
 
       // Extract plain text server-side so the group AI can use the material
       let extractedText = '';
+      let processingStatus: 'ready' | 'processing' | 'failed' = 'processing';
+      let extractionError: string | null = null;
+
       try {
         const token = await getAccessToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -857,9 +887,20 @@ export const DBService = {
         });
         if (resp.ok) {
           const resData = await resp.json();
-          if (resData.success && resData.extractedText) extractedText = resData.extractedText;
+          if (resData.success && resData.extractedText) {
+            extractedText = resData.extractedText;
+            processingStatus = 'ready';
+          } else {
+            processingStatus = 'failed';
+            extractionError = resData.error || 'Text extraction was unable to parse this document structure.';
+          }
+        } else {
+          processingStatus = 'failed';
+          extractionError = 'Text extraction server request failed.';
         }
-      } catch (extErr) {
+      } catch (extErr: any) {
+        processingStatus = 'failed';
+        extractionError = extErr?.message || 'Text extraction failed.';
         console.warn('Material text extraction warning:', extErr);
       }
 
@@ -871,10 +912,16 @@ export const DBService = {
           file_name: file.name,
           file_type: file.type || 'application/octet-stream',
           file_size: formatSize(file.size),
+          file_size_bytes: file.size,
           storage_path: storagePath,
           uploaded_by: uploaderId,
           uploaded_by_name: uploaderName,
+          uploader_id: uploaderId,
+          uploader_name: uploaderName,
           content: extractedText,
+          extracted_text: extractedText,
+          status: processingStatus,
+          error_message: extractionError,
           course_id: 'group_material',
           course_code: file.name,
         })
@@ -1018,6 +1065,15 @@ export const DBService = {
         .update({ members, member_count: members.length })
         .eq('id', groupId);
       if (error) throw error;
+      try {
+        await supabase
+          .from('circle_members')
+          .delete()
+          .eq('circle_id', groupId)
+          .eq('user_id', targetUserId);
+      } catch {
+        /* non-blocking */
+      }
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to remove member.' };
@@ -1250,6 +1306,420 @@ export const DBService = {
     } catch (err) {
       console.error('deleteGroupLocal error:', err);
     }
+  },
+
+  // ---------------- Relational Realtime Circle Chat, Forum & Resources ----------------
+  async getCircleMessages(circleId: string): Promise<GroupMessage[]> {
+    try {
+      const { data, error } = await supabase
+        .from('circle_messages')
+        .select('*')
+        .eq('circle_id', circleId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.warn('circle_messages select notice:', error.message);
+        const group = await fetchGroupRow(circleId);
+        return (group?.messages || []) as GroupMessage[];
+      }
+
+      if (data && data.length > 0) {
+        return data.map((r: any) => ({
+          id: r.id,
+          sender: r.sender_name,
+          senderId: r.sender_id,
+          senderAvatar: r.sender_avatar,
+          text: r.text,
+          timestamp: new Date(r.created_at).getTime(),
+          replyToId: r.reply_to_id,
+          replyToText: r.reply_to_text,
+          replyToSender: r.reply_to_sender,
+          clientTempId: r.client_temp_id,
+          status: 'sent',
+        }));
+      }
+
+      const group = await fetchGroupRow(circleId);
+      return (group?.messages || []) as GroupMessage[];
+    } catch (err) {
+      console.warn('getCircleMessages error:', err);
+      return [];
+    }
+  },
+
+  async sendCircleMessage(
+    circleId: string,
+    senderId: string,
+    senderName: string,
+    text: string,
+    options?: {
+      replyToId?: string;
+      replyToText?: string;
+      replyToSender?: string;
+      clientTempId?: string;
+      senderAvatar?: string;
+    }
+  ): Promise<{ success: boolean; message?: GroupMessage; error?: string }> {
+    try {
+      const { data, error } = await supabase
+        .from('circle_messages')
+        .insert({
+          circle_id: circleId,
+          sender_id: senderId,
+          sender_name: senderName,
+          sender_avatar: options?.senderAvatar || 'user',
+          text: text.trim(),
+          reply_to_id: options?.replyToId || null,
+          reply_to_text: options?.replyToText || null,
+          reply_to_sender: options?.replyToSender || null,
+          client_temp_id: options?.clientTempId || null,
+        })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.warn('Fallback to study_groups.messages array:', error.message);
+        const group = await fetchGroupRow(circleId);
+        const msgId = options?.clientTempId || `msg_${Date.now()}_${rand()}`;
+        const msgObj: GroupMessage = {
+          id: msgId,
+          sender: senderName,
+          senderId,
+          text: text.trim(),
+          timestamp: Date.now(),
+          replyToId: options?.replyToId,
+          replyToText: options?.replyToText,
+          replyToSender: options?.replyToSender,
+          clientTempId: options?.clientTempId,
+          status: 'sent',
+        };
+        if (group) {
+          await supabase
+            .from('study_groups')
+            .update({ messages: [...(group.messages || []), msgObj] })
+            .eq('id', circleId);
+        }
+        return { success: true, message: msgObj };
+      }
+
+      const msg: GroupMessage = {
+        id: data.id,
+        sender: data.sender_name,
+        senderId: data.sender_id,
+        senderAvatar: data.sender_avatar,
+        text: data.text,
+        timestamp: new Date(data.created_at).getTime(),
+        replyToId: data.reply_to_id,
+        replyToText: data.reply_to_text,
+        replyToSender: data.reply_to_sender,
+        clientTempId: data.client_temp_id,
+        status: 'sent',
+      };
+      return { success: true, message: msg };
+    } catch (err: any) {
+      console.error('sendCircleMessage error:', err);
+      return { success: false, error: err?.message || 'Failed to send message.' };
+    }
+  },
+
+  async deleteCircleMessage(messageId: string, circleId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.from('circle_messages').delete().eq('id', messageId);
+      if (error && circleId) {
+        const group = await fetchGroupRow(circleId);
+        if (group && group.messages) {
+          const filtered = (group.messages as any[]).filter(
+            (m) => m.id !== messageId && m.clientTempId !== messageId
+          );
+          await supabase.from('study_groups').update({ messages: filtered }).eq('id', circleId);
+        }
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete message.' };
+    }
+  },
+
+  async getCircleDiscussions(circleId: string): Promise<GroupDiscussionPost[]> {
+    try {
+      const [discRes, repliesRes] = await Promise.all([
+        supabase
+          .from('circle_discussions')
+          .select('*')
+          .eq('circle_id', circleId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('circle_discussion_replies')
+          .select('*')
+          .eq('circle_id', circleId)
+          .order('created_at', { ascending: true }),
+      ]);
+
+      if (!discRes.error && discRes.data && discRes.data.length > 0) {
+        const repliesByDisc: Record<string, GroupDiscussionReply[]> = {};
+        (repliesRes.data || []).forEach((r: any) => {
+          (repliesByDisc[r.discussion_id] ||= []).push({
+            id: r.id,
+            postId: r.discussion_id,
+            authorId: r.author_id,
+            authorName: r.author_name,
+            authorAvatar: r.author_avatar,
+            content: r.content,
+            timestamp: new Date(r.created_at).getTime(),
+            quoteReplyId: r.quote_reply_id,
+            quoteReplyText: r.quote_reply_text,
+            quoteReplyAuthor: r.quote_reply_author,
+          });
+        });
+
+        return discRes.data.map((d: any) => ({
+          id: d.id,
+          groupId: d.circle_id,
+          authorId: d.author_id,
+          authorName: d.author_name,
+          authorAvatar: d.author_avatar,
+          title: d.title,
+          content: d.content,
+          timestamp: new Date(d.created_at).getTime(),
+          replies: repliesByDisc[d.id] || [],
+        }));
+      }
+
+      const group = await fetchGroupRow(circleId);
+      return (group?.discussions || []) as GroupDiscussionPost[];
+    } catch (err) {
+      console.warn('getCircleDiscussions error:', err);
+      return [];
+    }
+  },
+
+  async createCircleDiscussion(
+    circleId: string,
+    post: { title?: string; content: string; authorId: string; authorName: string; authorAvatar?: string }
+  ): Promise<{ success: boolean; post?: GroupDiscussionPost; error?: string }> {
+    try {
+      const { data, error } = await supabase
+        .from('circle_discussions')
+        .insert({
+          circle_id: circleId,
+          author_id: post.authorId,
+          author_name: post.authorName,
+          author_avatar: post.authorAvatar || 'user',
+          title: (post.title || '').trim(),
+          content: post.content.trim(),
+        })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.warn('Fallback to legacy createDiscussionPost:', error.message);
+        const legacyRes = await DBService.createDiscussionPost(circleId, post);
+        return { success: legacyRes.success, post: legacyRes.discussionPost, error: legacyRes.error };
+      }
+
+      const createdPost: GroupDiscussionPost = {
+        id: data.id,
+        groupId: data.circle_id,
+        authorId: data.author_id,
+        authorName: data.author_name,
+        authorAvatar: data.author_avatar,
+        title: data.title,
+        content: data.content,
+        timestamp: new Date(data.created_at).getTime(),
+        replies: [],
+      };
+
+      try {
+        const group = await fetchGroupRow(circleId);
+        if (group) {
+          await supabase
+            .from('study_groups')
+            .update({ discussions: [createdPost, ...(group.discussions || [])] })
+            .eq('id', circleId);
+        }
+      } catch {}
+
+      return { success: true, post: createdPost };
+    } catch (err: any) {
+      console.error('createCircleDiscussion error:', err);
+      return { success: false, error: err?.message || 'Failed to post discussion.' };
+    }
+  },
+
+  async deleteCircleDiscussion(discussionId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.from('circle_discussions').delete().eq('id', discussionId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete discussion.' };
+    }
+  },
+
+  async addCircleReply(
+    circleId: string,
+    discussionId: string,
+    reply: {
+      authorId: string;
+      authorName: string;
+      authorAvatar?: string;
+      content: string;
+      quoteReplyId?: string;
+      quoteReplyText?: string;
+      quoteReplyAuthor?: string;
+    }
+  ): Promise<{ success: boolean; reply?: GroupDiscussionReply; error?: string }> {
+    try {
+      const { data, error } = await supabase
+        .from('circle_discussion_replies')
+        .insert({
+          discussion_id: discussionId,
+          circle_id: circleId,
+          author_id: reply.authorId,
+          author_name: reply.authorName,
+          author_avatar: reply.authorAvatar || 'user',
+          content: reply.content.trim(),
+          quote_reply_id: reply.quoteReplyId || null,
+          quote_reply_text: reply.quoteReplyText || null,
+          quote_reply_author: reply.quoteReplyAuthor || null,
+        })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.warn('Fallback to legacy addDiscussionReply:', error.message);
+        return await DBService.addDiscussionReply(circleId, discussionId, reply);
+      }
+
+      const createdReply: GroupDiscussionReply = {
+        id: data.id,
+        postId: data.discussion_id,
+        authorId: data.author_id,
+        authorName: data.author_name,
+        authorAvatar: data.author_avatar,
+        content: data.content,
+        timestamp: new Date(data.created_at).getTime(),
+        quoteReplyId: data.quote_reply_id,
+        quoteReplyText: data.quote_reply_text,
+        quoteReplyAuthor: data.quote_reply_author,
+      };
+
+      return { success: true, reply: createdReply };
+    } catch (err: any) {
+      console.error('addCircleReply error:', err);
+      return { success: false, error: err?.message || 'Failed to submit reply.' };
+    }
+  },
+
+  async deleteCircleReply(replyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.from('circle_discussion_replies').delete().eq('id', replyId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete reply.' };
+    }
+  },
+
+  async getCircleMaterials(circleId: string): Promise<SharedMaterial[]> {
+    try {
+      const { data, error } = await supabase
+        .from('group_materials')
+        .select('*')
+        .eq('group_id', circleId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      const rows = data || [];
+      const urls = await signedUrlMap(GROUP_MATERIALS_BUCKET, rows.map((r) => r.storage_path));
+      return rows.map((r) => rowToMaterial(r, urls));
+    } catch (err) {
+      console.error('getCircleMaterials error:', err);
+      return [];
+    }
+  },
+
+  async retryMaterialExtraction(
+    materialId: string,
+    storagePath: string,
+    fileName: string,
+    fileType: string
+  ): Promise<{ success: boolean; extractedText?: string; error?: string }> {
+    try {
+      const { data: blob, error: dlError } = await supabase.storage.from(GROUP_MATERIALS_BUCKET).download(storagePath);
+      if (dlError || !blob) {
+        throw dlError || new Error('Could not download file from storage.');
+      }
+
+      const buffer = await blob.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+
+      const token = await getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const resp = await fetch('/api/files/extract', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ fileName, fileType, contentBase64: base64 }),
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Server returned HTTP ${resp.status}`);
+      }
+
+      const resJson = await resp.json();
+      if (!resJson.success || !resJson.extractedText) {
+        await supabase
+          .from('group_materials')
+          .update({
+            status: 'failed',
+            error_message: resJson.error || 'Text extraction unsuccessful.',
+          })
+          .eq('id', materialId);
+        return { success: false, error: resJson.error || 'Extraction failed' };
+      }
+
+      await supabase
+        .from('group_materials')
+        .update({
+          extracted_text: resJson.extractedText,
+          content: resJson.extractedText,
+          status: 'ready',
+          error_message: null,
+        })
+        .eq('id', materialId);
+
+      return { success: true, extractedText: resJson.extractedText };
+    } catch (err: any) {
+      console.error('retryMaterialExtraction error:', err);
+      await supabase
+        .from('group_materials')
+        .update({
+          status: 'failed',
+          error_message: err?.message || 'Extraction retry failed.',
+        })
+        .eq('id', materialId);
+      return { success: false, error: err?.message || 'Extraction retry failed.' };
+    }
+  },
+
+  clearUserCache(userId?: string): void {
+    try {
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('scolaris_user_private_v1_') || (userId && key.includes(userId)))) {
+          toRemove.push(key);
+        }
+      }
+      toRemove.forEach((k) => localStorage.removeItem(k));
+    } catch {}
   },
 
   // ---------------- User Files ----------------
