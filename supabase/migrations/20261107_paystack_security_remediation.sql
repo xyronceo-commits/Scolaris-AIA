@@ -859,6 +859,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_protect_profile_subscription ON public.profiles;
 CREATE TRIGGER trg_protect_profile_subscription
   BEFORE INSERT OR UPDATE ON public.profiles
   FOR EACH ROW

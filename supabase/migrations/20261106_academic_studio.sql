@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS academic_documents (
   status TEXT NOT NULL DEFAULT 'planning',
   outline JSONB NOT NULL DEFAULT '[]'::jsonb,
   sections JSONB NOT NULL DEFAULT '[]'::jsonb,
-  references JSONB NOT NULL DEFAULT '[]'::jsonb,
+  "references" JSONB NOT NULL DEFAULT '[]'::jsonb,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   version INT NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -47,32 +47,32 @@ ALTER TABLE academic_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE academic_versions ENABLE ROW LEVEL SECURITY;
 
 -- Documents RLS Policies
-CREATE POLICY "Users can read own academic documents"
-  ON academic_documents FOR SELECT
+DROP POLICY IF EXISTS "Users can read own academic documents" ON academic_documents;
+CREATE POLICY "Users can read own academic documents" ON academic_documents FOR SELECT
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own academic documents"
-  ON academic_documents FOR INSERT
+DROP POLICY IF EXISTS "Users can insert own academic documents" ON academic_documents;
+CREATE POLICY "Users can insert own academic documents" ON academic_documents FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update own academic documents"
-  ON academic_documents FOR UPDATE
+DROP POLICY IF EXISTS "Users can update own academic documents" ON academic_documents;
+CREATE POLICY "Users can update own academic documents" ON academic_documents FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own academic documents"
-  ON academic_documents FOR DELETE
+DROP POLICY IF EXISTS "Users can delete own academic documents" ON academic_documents;
+CREATE POLICY "Users can delete own academic documents" ON academic_documents FOR DELETE
   USING (auth.uid() = user_id);
 
 -- Versions RLS Policies
-CREATE POLICY "Users can read own document versions"
-  ON academic_versions FOR SELECT
+DROP POLICY IF EXISTS "Users can read own document versions" ON academic_versions;
+CREATE POLICY "Users can read own document versions" ON academic_versions FOR SELECT
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own document versions"
-  ON academic_versions FOR INSERT
+DROP POLICY IF EXISTS "Users can insert own document versions" ON academic_versions;
+CREATE POLICY "Users can insert own document versions" ON academic_versions FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own document versions"
-  ON academic_versions FOR DELETE
+DROP POLICY IF EXISTS "Users can delete own document versions" ON academic_versions;
+CREATE POLICY "Users can delete own document versions" ON academic_versions FOR DELETE
   USING (auth.uid() = user_id);
