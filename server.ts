@@ -4168,6 +4168,59 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
+  // Search Study Circles (Public/General and Private)
+  app.get('/api/circles/search', async (req, res) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      if (!supabaseAdmin) {
+        return res.json({ success: true, groups: [] });
+      }
+
+      let query = supabaseAdmin
+        .from('study_groups')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(30);
+
+      if (q) {
+        const safe = q.replace(/[%_]/g, '');
+        query = query.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const groups = (data || []).map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        course: row.course,
+        type: row.type || 'private',
+        visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
+        inviteCode: row.invite_code,
+        inviteCodeActive: row.invite_code_active !== false,
+        department: row.department || '',
+        level: row.level || '',
+        university: row.university || '',
+        academicSession: row.academic_session || '',
+        groupImage: row.group_image || '',
+        ownerId: row.owner_id,
+        members: row.members || [],
+        memberCount: row.member_count || (row.members ? row.members.length : 1),
+        messages: [],
+        sharedMaterials: [],
+        discussions: [],
+        activityFeed: [],
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+
+      res.json({ success: true, groups });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Error searching circles.' });
+    }
+  });
+
   // Join Study Circle
   app.post('/api/circles/join', async (req, res) => {
     try {
