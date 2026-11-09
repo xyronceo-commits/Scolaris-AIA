@@ -244,10 +244,17 @@ export async function createExpressApp() {
     if (!supabaseAdmin || !userId) return buildStudentContext(null, []);
     try {
       const [profileRes, coursesRes] = await Promise.all([
-        supabaseAdmin.from('profiles').select('department, major, level, university, name').eq('id', userId).maybeSingle(),
-        supabaseAdmin.from('courses').select('code, title, units').eq('user_id', userId)
+        // NOTE: the profiles column is `institution` (there is no `university` column)
+        supabaseAdmin.from('profiles').select('department, major, level, institution, name').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('courses').select('code, title, credits').eq('user_id', userId)
       ]);
-      return buildStudentContext(profileRes.data, coursesRes.data || []);
+      if (profileRes.error) console.warn('Student context profile query failed:', profileRes.error.message);
+      if (coursesRes.error) console.warn('Student context courses query failed:', coursesRes.error.message);
+      const p: any = profileRes.data;
+      const profile = p ? { ...p, university: p.institution || '' } : null;
+      // NOTE: the courses column is `credits` (mapped to `units` in the client)
+      const courseRows = (coursesRes.data || []).map((c: any) => ({ code: c.code, title: c.title, units: c.credits }));
+      return buildStudentContext(profile, courseRows);
     } catch (err) {
       console.warn('Failed to fetch student context for AI:', err);
       return buildStudentContext(null, []);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile, Course, StudySession, AcademicDocument, CGPASemester, AcademicTask, TaskCategory } from '../types';
+import { UserProfile, Course, StudySession, AcademicDocument, CGPASemester, AcademicTask, TaskCategory, Difficulty } from '../types';
 import { DAYS } from '../constants';
 import { getCurrentUserId } from '../lib/supabase';
 import { DBService } from '../services/db';
@@ -29,7 +29,10 @@ interface DashboardProps {
   onNavigate?: (tab: any) => void;
   onTasksUpdated?: (tasks: AcademicTask[]) => void;
   onUpdateProfile?: (updatedProfile: UserProfile) => void;
+  onAddCourse?: (course: Course) => void;
 }
+
+const MAX_COURSES = 12;
 
 export const Dashboard: React.FC<DashboardProps> = ({
   profile,
@@ -38,12 +41,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenHub,
   onNavigate,
   onTasksUpdated,
-  onUpdateProfile
+  onUpdateProfile,
+  onAddCourse
 }) => {
   const userId = getCurrentUserId() || (profile as any)?.id || (profile as any)?.userId || '';
   const dayIndex = new Date().getDay();
   const today = DAYS[dayIndex === 0 ? 6 : dayIndex - 1] || 'Monday';
   const todayIso = new Date().toISOString().split('T')[0];
+
+  // Quick "Add course" modal
+  const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
+  const [newCourseCode, setNewCourseCode] = useState('');
+  const [newCourseTitle, setNewCourseTitle] = useState('');
+  const [newCourseUnits, setNewCourseUnits] = useState(3);
+  const [courseError, setCourseError] = useState<string | null>(null);
+
+  const closeCourseModal = () => {
+    setIsCourseModalOpen(false);
+    setNewCourseCode('');
+    setNewCourseTitle('');
+    setNewCourseUnits(3);
+    setCourseError(null);
+  };
+
+  const handleAddCourseSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = newCourseCode.trim().toUpperCase();
+    const title = newCourseTitle.trim();
+    if (!code || !title) {
+      setCourseError('Enter a course code and title.');
+      return;
+    }
+    if (courses.length >= MAX_COURSES) {
+      setCourseError(`Course limit reached. You can add up to ${MAX_COURSES} courses.`);
+      return;
+    }
+    if (courses.some(c => c.code.toUpperCase() === code)) {
+      setCourseError(`${code} is already in your courses.`);
+      return;
+    }
+    onAddCourse?.({
+      id: crypto.randomUUID(),
+      code,
+      title,
+      units: Number(newCourseUnits) || 3,
+      difficulty: Difficulty.MEDIUM
+    });
+    closeCourseModal();
+  };
 
   // Load real academic documents
   const [recentDocs, setRecentDocs] = useState<AcademicDocument[]>([]);
@@ -59,29 +104,49 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Inline department prompt for discipline-tailored AI
   const [departmentInput, setDepartmentInput] = useState('');
   const [isSavingDept, setIsSavingDept] = useState(false);
-  const [deptPromptDismissed, setDeptPromptDismissed] = useState(false);
+  const deptDismissKey = userId ? `scolaris_dept_prompt_dismissed_${userId}` : '';
+  const [deptPromptDismissed, setDeptPromptDismissed] = useState<boolean>(() => {
+    try {
+      return !!deptDismissKey && localStorage.getItem(deptDismissKey) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [deptSavedSuccess, setDeptSavedSuccess] = useState(false);
+  const [deptSaveError, setDeptSaveError] = useState<string | null>(null);
 
+  // Once a department exists on the profile, the banner never shows again.
   const hasMissingDepartment = !(profile?.department?.trim() || profile?.major?.trim());
+
+  const dismissDeptPrompt = () => {
+    setDeptPromptDismissed(true);
+    try {
+      if (deptDismissKey) localStorage.setItem(deptDismissKey, '1');
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   const handleSaveDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!departmentInput.trim() || !userId) return;
+    const value = departmentInput.trim();
+    if (!value || !userId) return;
     setIsSavingDept(true);
+    setDeptSaveError(null);
     try {
-      const updated = {
-        ...profile,
-        department: departmentInput.trim(),
-        major: departmentInput.trim()
-      };
-      await DBService.saveProfile(userId, updated);
+      const updated: UserProfile = { ...profile, department: value, major: value };
+      // Single write; App's profile state is then updated so the banner stays hidden on remount.
+      const result = await DBService.saveProfile(userId, updated);
+      if (result?.error || (result as any)?.droppedExtendedFields) {
+        setDeptSaveError("We couldn't save your department. Please try again or set it in Settings.");
+        return;
+      }
       onUpdateProfile?.(updated);
       setDeptSavedSuccess(true);
-      setTimeout(() => {
-        setDeptPromptDismissed(true);
-      }, 1500);
+      setTimeout(() => setDeptSavedSuccess(false), 1800);
     } catch (err) {
       console.error('Failed to save department:', err);
+      setDeptSaveError("We couldn't save your department. Please try again.");
     } finally {
       setIsSavingDept(false);
     }
@@ -307,21 +372,92 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </p>
         </div>
 
-        {/* Primary Action Button: Add Task */}
-        <button
-          onClick={() => {
-            setTaskToEdit(null);
-            setIsTaskModalOpen(true);
-          }}
-          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-medium rounded-lg shadow-sm min-h-[44px] transition-colors cursor-pointer shrink-0"
-        >
-          <Plus size={16} />
-          <span>Add task</span>
-        </button>
+        {/* Actions on the same row as the greeting: Add task (primary) + Add course (secondary) */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsCourseModalOpen(true)}
+            className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-900 border border-[#2563EB] text-[#2563EB] dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium rounded-lg min-h-[44px] transition-colors cursor-pointer"
+          >
+            <BookOpen size={16} />
+            <span>Add course</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTaskToEdit(null);
+              setIsTaskModalOpen(true);
+            }}
+            className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-medium rounded-lg shadow-sm min-h-[44px] transition-colors cursor-pointer"
+          >
+            <Plus size={16} />
+            <span>Add task</span>
+          </button>
+        </div>
       </div>
 
+      {/* Quick Add Course modal */}
+      {isCourseModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-course-title"
+          onClick={closeCourseModal}
+        >
+          <form
+            onSubmit={handleAddCourseSubmit}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full sm:max-w-md bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-xl p-5 space-y-4"
+          >
+            <h2 id="add-course-title" className="text-base font-bold text-[#111827] dark:text-white">Add course</h2>
+            <div className="grid grid-cols-3 gap-3">
+              <label className="col-span-2 text-xs font-medium text-[#5B6472] dark:text-slate-400 space-y-1">
+                <span>Course code</span>
+                <input
+                  autoFocus
+                  value={newCourseCode}
+                  onChange={(e) => setNewCourseCode(e.target.value)}
+                  placeholder="e.g. BLD301"
+                  className="w-full px-3 py-2 text-sm border border-[#E5E7EB] dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-lg min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+              </label>
+              <label className="text-xs font-medium text-[#5B6472] dark:text-slate-400 space-y-1">
+                <span>Units</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={newCourseUnits}
+                  onChange={(e) => setNewCourseUnits(Number(e.target.value))}
+                  className="w-full px-3 py-2 text-sm border border-[#E5E7EB] dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-lg min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+              </label>
+            </div>
+            <label className="block text-xs font-medium text-[#5B6472] dark:text-slate-400 space-y-1">
+              <span>Course title</span>
+              <input
+                value={newCourseTitle}
+                onChange={(e) => setNewCourseTitle(e.target.value)}
+                placeholder="e.g. Advanced Construction Technology"
+                className="w-full px-3 py-2 text-sm border border-[#E5E7EB] dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-lg min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+              />
+            </label>
+            {courseError && <p className="text-xs text-red-600 dark:text-red-400" role="alert">{courseError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={closeCourseModal} className="px-4 min-h-[44px] text-sm font-medium text-[#5B6472] dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                Cancel
+              </button>
+              <button type="submit" className="px-4 min-h-[44px] text-sm font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg cursor-pointer">
+                Save course
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Inline Department Prompt for discipline-tailored AI */}
-      {hasMissingDepartment && !deptPromptDismissed && (
+      {((hasMissingDepartment && !deptPromptDismissed) || deptSavedSuccess) && (
         <div className="bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-lg p-4 transition-all">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-0.5">
@@ -356,7 +492,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDeptPromptDismissed(true)}
+                  onClick={dismissDeptPrompt}
                   className="px-2 py-2 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 shrink-0 cursor-pointer min-h-[40px]"
                   title="Dismiss for now"
                 >
@@ -365,6 +501,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </form>
             )}
           </div>
+          {deptSaveError && (
+            <p className="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">{deptSaveError}</p>
+          )}
         </div>
       )}
 

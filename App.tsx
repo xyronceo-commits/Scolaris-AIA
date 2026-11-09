@@ -331,6 +331,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleQuickAddCourse = (newCourse: Course) => {
+    // Persisted by the courses effect above (DBService.saveCourses)
+    setCourses(prev => [...prev, newCourse]);
+  };
+
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
     if (authUser) {
       await DBService.saveProfile(authUser.uid, newProfile);
@@ -597,17 +602,23 @@ const App: React.FC = () => {
   }
 
   // 6. Main Protected Application View
+  const renderDashboard = () => (
+    <Dashboard 
+      profile={profile} 
+      courses={courses} 
+      schedule={schedule} 
+      onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
+      onNavigate={(tab) => { setActiveTab(tab); }}
+      onUpdateProfile={(updated) => setProfile(updated)}
+      onAddCourse={handleQuickAddCourse}
+    />
+  );
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
       case 'dashboard':
-        return <Dashboard 
-          profile={profile} 
-          courses={courses} 
-          schedule={schedule} 
-          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }}
-          onNavigate={(tab) => { setActiveTab(tab); }}
-        />;
+        return renderDashboard();
       case 'planner':
         return <StudyPlannerView 
           initialTab="courses"
@@ -742,14 +753,7 @@ const App: React.FC = () => {
       case 'profile':
         return <Profile profile={profile} setProfile={handleSaveProfile} onSignOut={handleSignOut} onDelete={deleteAccount} />;
       default:
-        return <Dashboard 
-          profile={profile} 
-          courses={courses} 
-          schedule={schedule} 
-          onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }} 
-          onNavigate={(tab) => { setActiveTab(tab); }}
-          onUpdateProfile={handleSaveProfile}
-        />;
+        return renderDashboard();
     }
   };
 

@@ -293,19 +293,22 @@ export const DBService = {
       if (profile.assistanceAreas !== undefined) fullPayload.assistance_areas = profile.assistanceAreas;
 
       let { error } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+      let droppedExtendedFields = false;
 
       // If database table doesn't have the extended columns yet, fall back gracefully to base columns
       if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
         console.warn('Extended profile columns missing from remote DB, saving core profile fields:', error.message);
         const retry = await supabase.from('profiles').upsert(basePayload, { onConflict: 'id' });
         error = retry.error;
+        // department/major etc. were NOT saved; callers must not report success for those fields
+        droppedExtendedFields = true;
       }
 
       if (error) throw error;
-      return { error: null };
+      return { error: null, droppedExtendedFields };
     } catch (err) {
       console.error('saveProfile error:', err);
-      return { error: err };
+      return { error: err, droppedExtendedFields: false };
     }
   },
 
