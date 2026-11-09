@@ -241,6 +241,9 @@ export interface GroupDiscussionReply {
   authorAvatar?: string;
   content: string;
   timestamp: number;
+  quoteReplyId?: string;
+  quoteReplyText?: string;
+  quoteReplyAuthor?: string;
 }
 
 export interface GroupDiscussionPost {
@@ -274,6 +277,13 @@ export interface GroupMessage {
   text: string;
   timestamp: number;
   isIrrelevant?: boolean;
+  senderId?: string;
+  senderAvatar?: string;
+  replyToId?: string;
+  replyToText?: string;
+  replyToSender?: string;
+  clientTempId?: string;
+  status?: 'sending' | 'sent' | 'failed';
 }
 
 export interface SharedMaterial {
@@ -292,6 +302,10 @@ export interface SharedMaterial {
   storagePath?: string;
   downloadUrl?: string;
   content?: string; // For direct uploads or extracted text
+  extractedText?: string;
+  status?: 'pending' | 'processing' | 'ready' | 'failed';
+  errorMessage?: string;
+  fileSizeBytes?: number;
   s3Key?: string;   // Unique S3 object key
   s3Url?: string;   // Object storage URL (real-time generated or direct)
 }

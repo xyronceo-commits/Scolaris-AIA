@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Course, UserProfile, StudySession, AppState, StudyHubData, StudyGroup, AppNotification } from './types';
 import { ICONS } from './constants';
-import { GraduationCap, Menu, X, ShieldAlert, Shield, Lock, Sun, Moon, CheckCheck, Trash2 } from 'lucide-react';
+import { GraduationCap, Menu, X, Lock, Sun, Moon, CheckCheck, Trash2 } from 'lucide-react';
 import Onboarding from './components/Onboarding';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
@@ -17,8 +17,6 @@ import Profile from './components/Profile';
 import AnalyticsView from './components/AnalyticsView';
 import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
-import AdminLogin from './components/AdminLogin';
-import AdminDashboard from './components/AdminDashboard';
 import { ScolarisChatWidget } from './components/ScolarisChatWidget';
 import Auth, { type AuthMode } from './components/Auth';
 import type { Session } from '@supabase/supabase-js';
@@ -86,65 +84,6 @@ const App: React.FC = () => {
   });
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
 
-  // Admin System State with 12-Hour Session Persistence (Requires OTP renewal after 12 hours)
-  const [adminToken, setAdminToken] = useState<string | null>(() => {
-    try {
-      const stored = localStorage.getItem('korsiq_admin_session');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed?.expiresAt && Date.now() < parsed.expiresAt) {
-          return parsed.token;
-        } else {
-          // Expired after 12 hours: clear stored session
-          localStorage.removeItem('korsiq_admin_session');
-          sessionStorage.removeItem('scolaris_admin_token');
-          sessionStorage.removeItem('scolaris_admin_user');
-        }
-      }
-    } catch {}
-    return null;
-  });
-  const [adminUser, setAdminUser] = useState<{ email: string; role: string; fullName?: string } | null>(() => {
-    try {
-      const stored = localStorage.getItem('korsiq_admin_session');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed?.expiresAt && Date.now() < parsed.expiresAt) {
-          return parsed.user;
-        }
-      }
-    } catch {}
-    return null;
-  });
-  const [isClaimAdmin, setIsClaimAdmin] = useState(false);
-  const [showAdminLoginForm, setShowAdminLoginForm] = useState(false);
-
-  // Verify Admin Session validity against server
-  useEffect(() => {
-    if (!adminToken) return;
-    fetch('/api/admin/verify', {
-      headers: { Authorization: `Bearer ${adminToken}` }
-    })
-      .then(res => {
-        if (res.status === 401 || res.status === 403) {
-          handleAdminSignOut();
-        }
-      })
-      .catch(() => {});
-  }, [adminToken]);
-
-  // URL Path Listener for /admin
-  useEffect(() => {
-    const handleLocationChange = () => {
-      if (window.location.pathname === '/admin') {
-        setActiveTab('admin');
-      }
-    };
-    handleLocationChange();
-    window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
-  }, []);
-
   // Update Page Title and Robots Metadata based on Active State
   useEffect(() => {
     let robotsMeta = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
@@ -154,11 +93,6 @@ const App: React.FC = () => {
       document.head.appendChild(robotsMeta);
     }
 
-    if (showAdminLoginForm) {
-      document.title = 'Admin | KorsIQ';
-      robotsMeta.content = 'noindex, nofollow';
-      return;
-    }
     if (!authUser && showAuth) {
       document.title = authMode === 'signup' ? 'Create Account | KorsIQ' : 'Sign In | KorsIQ';
       robotsMeta.content = 'noindex, nofollow';
@@ -183,8 +117,7 @@ const App: React.FC = () => {
       schedule: 'Schedule | KorsIQ',
       groups: 'Study Circles | KorsIQ',
       analytics: 'Analytics | KorsIQ',
-      paid: 'Pro Access | KorsIQ',
-      admin: 'Admin | KorsIQ'
+      paid: 'Pro Access | KorsIQ'
     };
     if (tabTitles[activeTab]) {
       document.title = tabTitles[activeTab];
@@ -192,7 +125,7 @@ const App: React.FC = () => {
       const formatted = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
       document.title = `${formatted} | KorsIQ`;
     }
-  }, [activeTab, authUser, showAuth, authMode, showAdminLoginForm]);
+  }, [activeTab, authUser, showAuth, authMode]);
 
   // Load User Data & Profile from Supabase
   const isInitialDataLoadedRef = useRef(false);
@@ -259,7 +192,6 @@ const App: React.FC = () => {
         setCurrentUserId(undefined);
         setAuthUser(null);
         setProfile(null);
-        setIsClaimAdmin(false);
         setAuthLoading(false);
         return;
       }
@@ -275,14 +207,6 @@ const App: React.FC = () => {
       }
       loadedUidRef.current = user.uid;
       setAuthLoading(true);
-
-      // Admin status comes from the admins table (readable by the user for their own row)
-      try {
-        const { data } = await supabase.from('admins').select('user_id').eq('user_id', user.uid).maybeSingle();
-        if (!cancelled) setIsClaimAdmin(!!data);
-      } catch {
-        if (!cancelled) setIsClaimAdmin(false);
-      }
 
       await loadUserData(user);
       if (!cancelled) setAuthLoading(false);
@@ -408,6 +332,7 @@ const App: React.FC = () => {
   };
 
   const handleSignOut = async () => {
+    const prevUid = authUser?.uid;
     await supabase.auth.signOut().catch(() => {});
     loadedUidRef.current = null;
     setCurrentUserId(undefined);
@@ -421,22 +346,9 @@ const App: React.FC = () => {
     setShowAuth(true);
     setAuthMode('signin');
     setSessionExpiredMsg(null);
-    handleAdminSignOut();
-  };
-
-  const handleAdminSignOut = () => {
-    try {
-      localStorage.removeItem('korsiq_admin_session');
-    } catch {}
-    sessionStorage.removeItem('scolaris_admin_token');
-    sessionStorage.removeItem('scolaris_admin_user');
-    setAdminToken(null);
-    setAdminUser(null);
-    setShowAdminLoginForm(false);
-    if (window.location.pathname === '/admin') {
-      window.history.pushState({}, '', '/');
+    if (prevUid) {
+      DBService.clearUserCache(prevUid);
     }
-    setActiveTab('dashboard');
   };
 
   const deleteAccount = () => {
@@ -616,6 +528,10 @@ const App: React.FC = () => {
       return (
         <Auth 
           onAuthSuccess={() => setSessionExpiredMsg(null)} 
+          onCancel={() => {
+            setShowAuth(false);
+            setSessionExpiredMsg(null);
+          }}
           initialMode={authMode} 
           sessionExpiredMsg={sessionExpiredMsg}
         />
@@ -654,40 +570,8 @@ const App: React.FC = () => {
     return <Onboarding userEmail={profile.email} initialProfile={profile} onComplete={handleOnboardingComplete} />;
   }
 
-  // 6. Main Protected Application View & Admin Router
+  // 6. Main Protected Application View
   const renderContent = () => {
-    // Admin Route Handler (Strict OTP requirement: Only active adminToken grants entry)
-    if (activeTab === 'admin' || window.location.pathname === '/admin') {
-      if (adminToken) {
-        return (
-          <AdminDashboard
-            adminToken={adminToken}
-            adminEmail={adminUser?.email || 'buildsafe247@gmail.com'}
-            onSignOut={handleAdminSignOut}
-            onBackToStudentWorkspace={() => {
-              window.history.pushState({}, '', '/');
-              setActiveTab('dashboard');
-            }}
-          />
-        );
-      }
-
-      return (
-        <AdminLogin
-          onLoginSuccess={(token, user) => {
-            setAdminToken(token);
-            setAdminUser(user);
-            setShowAdminLoginForm(false);
-            setActiveTab('admin');
-          }}
-          onBackToStudentPortal={() => {
-            window.history.pushState({}, '', '/');
-            setActiveTab('dashboard');
-          }}
-        />
-      );
-    }
-
     switch (activeTab) {
       case 'overview':
       case 'dashboard':
@@ -993,19 +877,6 @@ const App: React.FC = () => {
                   {profile?.university || 'Student'}
                 </p>
               </div>
-            </button>
-
-            <button
-              onClick={() => {
-                window.history.pushState({}, '', '/admin');
-                setActiveTab('admin');
-                setShowAdminLoginForm(true);
-              }}
-              title="Admin Portal"
-              aria-label="Admin Portal"
-              className="p-2.5 text-[#5B6472] hover:text-[#111827] dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer ml-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-            >
-              <Shield size={16} />
             </button>
           </div>
         </div>

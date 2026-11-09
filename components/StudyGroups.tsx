@@ -1,18 +1,65 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, StudyGroup, StudyHubData, GroupMessage, AppNotification, AppState, GroupMaterial, GroupDiscussionPost, GroupActivity, GroupMember } from '../types';
+import { 
+  UserProfile, 
+  StudyGroup, 
+  StudyHubData, 
+  GroupMessage, 
+  AppNotification, 
+  AppState, 
+  GroupMaterial, 
+  GroupDiscussionPost, 
+  GroupDiscussionReply,
+  GroupActivity, 
+  GroupMember,
+  SharedMaterial
+} from '../types';
 import { 
   Globe, Lock, Link as LinkIcon, Check, Copy, Upload, Download, FileText, 
   LogOut, Share2, Search, Plus, X, ArrowRight, MessageSquare, Files, Bot, 
   Sparkles, Users, BookOpen, School, ShieldAlert, Award, Send, RefreshCw, 
   HelpCircle, Lightbulb, Trash2, UserX, Info, Activity, Layers, ChevronRight, Hash,
-  KeyRound, AlertCircle, CheckCircle2, Loader2
+  KeyRound, AlertCircle, CheckCircle2, Loader2, CornerDownLeft, ChevronDown, CheckCheck, Clock, RotateCcw
 } from 'lucide-react';
 import { DBService, generateCircleInviteCode } from '../services/db';
 import { getHeaders } from '../services/gemini';
-import { getCurrentUserId, getAccessToken } from '../lib/supabase';
+import { getCurrentUserId, getAccessToken, supabase } from '../lib/supabase';
 
 import { isAiSender } from '../lib/brand';
 import { UserAvatar } from './UserAvatar';
+
+function formatMessageDateHeader(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = today - 86400000;
+  const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+  if (msgDay === today) return 'Today';
+  if (msgDay === yesterday) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+interface MessageDayGroup {
+  dateLabel: string;
+  messages: GroupMessage[];
+}
+
+function groupMessagesByDay(messages: GroupMessage[]): MessageDayGroup[] {
+  const dayGroups: MessageDayGroup[] = [];
+  let currentDay: MessageDayGroup | null = null;
+
+  messages.forEach(msg => {
+    const label = formatMessageDateHeader(msg.timestamp);
+    if (!currentDay || currentDay.dateLabel !== label) {
+      currentDay = { dateLabel: label, messages: [msg] };
+      dayGroups.push(currentDay);
+    } else {
+      currentDay.messages.push(msg);
+    }
+  });
+
+  return dayGroups;
+}
 
 interface StudyGroupsProps {
   profile: UserProfile;
@@ -58,7 +105,15 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
   const [memberToRemove, setMemberToRemove] = useState<{ id: string; name: string } | null>(null);
 
   // Tabs inside Active Group
-  const [activeTab, setActiveTab] = useState<'ai' | 'materials' | 'discussions' | 'overview'>('ai');
+  const [activeTab, setActiveTab] = useState<'chat' | 'discussions' | 'materials' | 'ai' | 'overview'>('chat');
+
+  // Real-time WhatsApp-style Chat State
+  const [circleMessages, setCircleMessages] = useState<GroupMessage[]>([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [newMessagesCount, setNewMessagesCount] = useState<number>(0);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   // AI Assistant Chat State
   const [aiPrompt, setAiPrompt] = useState('');
@@ -66,20 +121,26 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiMode, setAiMode] = useState<'chat' | 'quiz' | 'summarize' | 'topics'>('chat');
 
-  // Discussions State
+  // Discussions Forum State
   const [newDiscussionTitle, setNewDiscussionTitle] = useState('');
   const [newDiscussionContent, setNewDiscussionContent] = useState('');
   const [showNewDiscussion, setShowNewDiscussion] = useState(false);
   const [activeReplyPostId, setActiveReplyPostId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [replyingToReply, setReplyingToReply] = useState<GroupDiscussionReply | null>(null);
 
-  // File Upload State
+  // File Upload State & Material Processing Retry
   const [isUploading, setIsUploading] = useState(false);
+  const [retryingMaterialId, setRetryingMaterialId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const channelRef = useRef<any>(null);
+  const lastTypingSentRef = useRef<number>(0);
 
   const currentUserId = userId || getCurrentUserId() || (profile as any)?.id || profile.email || 'guest_user';
   const activeGroup = groups.find(g => g.id === activeGroupId);
@@ -119,25 +180,150 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
     }
   }, [groups]);
 
+  // Real-time Supabase subscription on active circle
   useEffect(() => {
-    if (activeGroup) {
-      if (activeGroup.messages && activeGroup.messages.length > 0) {
-        setAiMessages(activeGroup.messages.map(m => ({
-          sender: m.sender,
-          text: m.text,
-          timestamp: m.timestamp
-        })));
-      } else {
-        // Initialize default welcome AI chat message for active group
-        setAiMessages([
-          {
-            sender: 'KorsIQ',
-            text: `Welcome to **${activeGroup.name}**! I am your group study companion. Upload course notes in the **Materials** tab, and I will analyze them to answer questions, generate quizzes, or summarize key topics for your study circle.`,
-            timestamp: Date.now()
-          }
+    if (!activeGroupId) return;
+
+    setUnreadCounts(prev => ({ ...prev, [activeGroupId]: 0 }));
+    setNewMessagesCount(0);
+
+    let isCancelled = false;
+
+    // Load initial messages, discussions, materials
+    const loadCircleData = async () => {
+      try {
+        const [msgs, discs, mats] = await Promise.all([
+          DBService.getCircleMessages(activeGroupId),
+          DBService.getCircleDiscussions(activeGroupId),
+          DBService.getCircleMaterials(activeGroupId),
         ]);
+        if (!isCancelled) {
+          setCircleMessages(msgs);
+          setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, discussions: discs, sharedMaterials: mats } : g));
+          setTimeout(() => {
+            if (chatScrollRef.current) {
+              chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+            }
+          }, 80);
+        }
+      } catch (e) {
+        console.warn('Initial circle data load notice:', e);
       }
-    }
+    };
+    loadCircleData();
+
+    // Supabase Realtime Channel
+    const channel = supabase.channel(`circle-room:${activeGroupId}`, {
+      config: { broadcast: { self: false } }
+    })
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'circle_messages', filter: `circle_id=eq.${activeGroupId}` },
+      (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new as any;
+          const newMsg: GroupMessage = {
+            id: newRow.id,
+            sender: newRow.sender_name,
+            senderId: newRow.sender_id,
+            senderAvatar: newRow.sender_avatar,
+            text: newRow.text,
+            timestamp: new Date(newRow.created_at).getTime(),
+            replyToId: newRow.reply_to_id,
+            replyToText: newRow.reply_to_text,
+            replyToSender: newRow.reply_to_sender,
+            clientTempId: newRow.client_temp_id,
+            status: 'sent'
+          };
+
+          setCircleMessages(prev => {
+            if (newMsg.clientTempId && prev.some(m => m.clientTempId === newMsg.clientTempId)) {
+              return prev.map(m => m.clientTempId === newMsg.clientTempId ? newMsg : m);
+            }
+            if (prev.some(m => m.id === newMsg.id)) {
+              return prev;
+            }
+            return [...prev, newMsg];
+          });
+
+          if (isNearBottomRef.current) {
+            setTimeout(() => {
+              if (chatScrollRef.current) {
+                chatScrollRef.current.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+              }
+            }, 40);
+          } else {
+            setNewMessagesCount(c => c + 1);
+          }
+        } else if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as any;
+          setCircleMessages(prev => prev.filter(m => m.id !== oldRow.id));
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = payload.new as any;
+          setCircleMessages(prev => prev.map(m => m.id === updated.id ? { ...m, text: updated.text } : m));
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'circle_discussions', filter: `circle_id=eq.${activeGroupId}` },
+      async () => {
+        const discs = await DBService.getCircleDiscussions(activeGroupId);
+        if (!isCancelled) {
+          setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, discussions: discs } : g));
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'circle_discussion_replies', filter: `circle_id=eq.${activeGroupId}` },
+      async () => {
+        const discs = await DBService.getCircleDiscussions(activeGroupId);
+        if (!isCancelled) {
+          setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, discussions: discs } : g));
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'group_materials', filter: `group_id=eq.${activeGroupId}` },
+      async () => {
+        const mats = await DBService.getCircleMaterials(activeGroupId);
+        if (!isCancelled) {
+          setGroups(prev => prev.map(g => g.id === activeGroupId ? { ...g, sharedMaterials: mats } : g));
+        }
+      }
+    )
+    .on('broadcast', { event: 'typing' }, (payload) => {
+      const typingUser = payload.payload?.name;
+      if (typingUser && typingUser !== profile.name) {
+        setTypingUsers(prev => Array.from(new Set([...prev, typingUser])));
+        setTimeout(() => {
+          setTypingUsers(prev => prev.filter(u => u !== typingUser));
+        }, 3000);
+      }
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        DBService.getCircleMessages(activeGroupId).then(msgs => {
+          if (!isCancelled && msgs.length > 0) {
+            setCircleMessages(prev => {
+              const existingIds = new Set(prev.map(m => m.id));
+              const missing = msgs.filter(m => !existingIds.has(m.id));
+              return missing.length > 0 ? [...prev, ...missing].sort((a, b) => a.timestamp - b.timestamp) : prev;
+            });
+          }
+        });
+      }
+    });
+
+    channelRef.current = channel;
+
+    return () => {
+      isCancelled = true;
+      supabase.removeChannel(channel);
+      channelRef.current = null;
+    };
   }, [activeGroupId]);
 
   useEffect(() => {
@@ -349,6 +535,142 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
     }
   };
 
+  // Chat Scroll & Near-Bottom Tracking
+  const handleChatScroll = () => {
+    if (!chatScrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatScrollRef.current;
+    const distanceToBottom = scrollHeight - (scrollTop + clientHeight);
+    const near = distanceToBottom < 80;
+    isNearBottomRef.current = near;
+    if (near && newMessagesCount > 0) {
+      setNewMessagesCount(0);
+    }
+  };
+
+  // Real-time WhatsApp-style Send Message Handler
+  const handleSendChatMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!inputMessage.trim() || !activeGroup) return;
+
+    const text = inputMessage.trim();
+    setInputMessage('');
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const quoted = replyingTo;
+    setReplyingTo(null);
+
+    const optimisticMsg: GroupMessage = {
+      id: tempId,
+      sender: profile.name,
+      senderId: currentUserId,
+      senderAvatar: profile.avatarIcon,
+      text,
+      timestamp: Date.now(),
+      replyToId: quoted?.id,
+      replyToText: quoted?.text,
+      replyToSender: quoted?.sender,
+      clientTempId: tempId,
+      status: 'sending'
+    };
+
+    setCircleMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => {
+      if (chatScrollRef.current) {
+        chatScrollRef.current.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+      }
+    }, 40);
+
+    try {
+      const res = await DBService.sendCircleMessage(activeGroup.id, currentUserId, profile.name, text, {
+        replyToId: quoted?.id,
+        replyToText: quoted?.text,
+        replyToSender: quoted?.sender,
+        clientTempId: tempId,
+        senderAvatar: profile.avatarIcon
+      });
+
+      if (!res.success || !res.message) {
+        setCircleMessages(prev => prev.map(m => m.clientTempId === tempId ? { ...m, status: 'failed' } : m));
+      } else {
+        const confirmed = res.message;
+        setCircleMessages(prev => prev.map(m => m.clientTempId === tempId ? { ...confirmed, status: 'sent' } : m));
+      }
+    } catch {
+      setCircleMessages(prev => prev.map(m => m.clientTempId === tempId ? { ...m, status: 'failed' } : m));
+    }
+  };
+
+  const handleRetrySend = async (msg: GroupMessage) => {
+    if (!activeGroup) return;
+    setCircleMessages(prev => prev.map(m => m.clientTempId === msg.clientTempId ? { ...m, status: 'sending' } : m));
+    try {
+      const res = await DBService.sendCircleMessage(activeGroup.id, currentUserId, profile.name, msg.text, {
+        replyToId: msg.replyToId,
+        replyToText: msg.replyToText,
+        replyToSender: msg.replyToSender,
+        clientTempId: msg.clientTempId,
+        senderAvatar: profile.avatarIcon
+      });
+      if (res.success && res.message) {
+        setCircleMessages(prev => prev.map(m => m.clientTempId === msg.clientTempId ? { ...res.message!, status: 'sent' } : m));
+      } else {
+        setCircleMessages(prev => prev.map(m => m.clientTempId === msg.clientTempId ? { ...m, status: 'failed' } : m));
+      }
+    } catch {
+      setCircleMessages(prev => prev.map(m => m.clientTempId === msg.clientTempId ? { ...m, status: 'failed' } : m));
+    }
+  };
+
+  const handleDeleteChatMessage = async (msgId: string) => {
+    if (!activeGroup) return;
+    setCircleMessages(prev => prev.filter(m => m.id !== msgId && m.clientTempId !== msgId));
+    await DBService.deleteCircleMessage(msgId, activeGroup.id);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputMessage(e.target.value);
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 2500 && channelRef.current) {
+      lastTypingSentRef.current = now;
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { name: profile.name }
+      }).catch(() => {});
+    }
+  };
+
+  const handleRetryExtraction = async (mat: SharedMaterial) => {
+    if (!mat.id || !mat.storagePath) return;
+    setRetryingMaterialId(mat.id);
+    addNotification('message', 'Retrying Extraction', `Processing "${mat.fileName}" for AI study assistance...`, 'groups');
+
+    try {
+      const res = await DBService.retryMaterialExtraction(
+        mat.id,
+        mat.storagePath,
+        mat.fileName || 'file',
+        mat.fileType || 'application/pdf'
+      );
+
+      if (res.success) {
+        setGroups(prev => prev.map(g => {
+          if (g.id === activeGroupId) {
+            const updated = (g.sharedMaterials || []).map(m => m.id === mat.id ? { ...m, status: 'ready' as const, content: res.extractedText, errorMessage: undefined } : m);
+            return { ...g, sharedMaterials: updated };
+          }
+          return g;
+        }));
+        addNotification('message', 'Extraction Complete', `"${mat.fileName}" is ready for Circle AI queries.`, 'groups');
+      } else {
+        addNotification('message', 'Extraction Notice', res.error || 'Text extraction unsuccessful.', 'groups');
+      }
+    } catch (e: any) {
+      addNotification('message', 'Retry Failed', e?.message || 'Error executing retry.', 'groups');
+    } finally {
+      setRetryingMaterialId(null);
+    }
+  };
+
   // AI Study Assistant Query grounded in group materials
   const handleSendAiPrompt = async (e?: React.FormEvent, customPrompt?: string, modeOverride?: 'chat' | 'quiz' | 'summarize' | 'topics') => {
     e?.preventDefault();
@@ -358,37 +680,12 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
     const userMsgText = promptToUse;
     setAiPrompt('');
     
-    const userMsgObj: GroupMessage = {
-      id: `msg_${Date.now()}_u`,
-      sender: profile.name,
-      text: userMsgText,
-      timestamp: Date.now()
-    };
-
-    // Add user prompt to chat
+    // Add user prompt to AI view
     setAiMessages(prev => [...prev, { sender: profile.name, text: userMsgText, timestamp: Date.now() }]);
     setIsAiThinking(true);
 
-    // Save user message to group state and database
-    setGroups(prev => prev.map(g => {
-      if (g.id === activeGroup.id) {
-        const updatedMsgs = [...(g.messages || []), userMsgObj];
-        const updatedGroup = { ...g, messages: updatedMsgs };
-        DBService.saveGroup(updatedGroup, currentUserId);
-        return updatedGroup;
-      }
-      return g;
-    }));
-
     try {
-      // Gather all text content from group materials
-      const materials = activeGroup.sharedMaterials || [];
-      const combinedMaterialsContent = materials
-        .map(m => `--- DOCUMENT: ${m.fileName} ---\n${m.content || 'No text content available.'}`)
-        .join('\n\n');
-
       const headers = await getHeaders();
-
       const response = await fetch('/api/groups/ai', {
         method: 'POST',
         headers,
@@ -396,24 +693,18 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
           groupId: activeGroup.id,
           groupName: activeGroup.name,
           groupCourse: activeGroup.course,
-          materialsContent: combinedMaterialsContent,
           prompt: userMsgText,
           mode: modeOverride || aiMode
         })
       });
 
-      let aiRespText = "I am ready to help! Ensure your group has uploaded course files under the Materials tab so I can ground my responses in your curriculum.";
-      if (response.ok) {
-        const data = await response.json();
-        aiRespText = data.text || "I have analyzed your group materials.";
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server responded with ${response.status}`);
       }
 
-      const aiMsgObj: GroupMessage = {
-        id: `msg_${Date.now()}_ai`,
-        sender: 'KorsIQ',
-        text: aiRespText,
-        timestamp: Date.now()
-      };
+      const data = await response.json();
+      const aiRespText = data.text || "I have analyzed your group materials.";
 
       setAiMessages(prev => [
         ...prev,
@@ -423,20 +714,9 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
           timestamp: Date.now()
         }
       ]);
-
-      // Save AI message to group state and database
-      setGroups(prev => prev.map(g => {
-        if (g.id === activeGroup.id) {
-          const updatedMsgs = [...(g.messages || []), aiMsgObj];
-          const updatedGroup = { ...g, messages: updatedMsgs };
-          DBService.saveGroup(updatedGroup, currentUserId);
-          return updatedGroup;
-        }
-        return g;
-      }));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Group AI query error:', err);
-      const errMsg = "An internal exception occurred while parsing group files. Please try again.";
+      const errMsg = `[KorsIQ Assistant] ${err?.message || 'Failed to analyze materials. Please ensure resources are uploaded in the Resources tab.'}`;
       setAiMessages(prev => [
         ...prev,
         {
@@ -456,7 +736,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
     if (!newDiscussionContent.trim() || !activeGroup) return;
 
     try {
-      const res = await DBService.createDiscussionPost(activeGroup.id, {
+      const res = await DBService.createCircleDiscussion(activeGroup.id, {
         title: newDiscussionTitle.trim(),
         content: newDiscussionContent.trim(),
         authorId: currentUserId,
@@ -464,10 +744,10 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
         authorAvatar: profile.avatarIcon
       });
 
-      if (res.success && res.discussionPost) {
+      if (res.success && res.post) {
         setGroups(prev => prev.map(g => {
           if (g.id === activeGroup.id) {
-            const updated = [res.discussionPost, ...(g.discussions || [])];
+            const updated = [res.post!, ...(g.discussions || [])];
             return { ...g, discussions: updated };
           }
           return g;
@@ -476,39 +756,34 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
         setNewDiscussionTitle('');
         setNewDiscussionContent('');
         setShowNewDiscussion(false);
-        addNotification('message', 'Discussion Started', 'New topic posted to group forum.', 'groups');
+        addNotification('message', 'Discussion Started', 'New topic posted to circle forum.', 'groups');
       }
     } catch (e) {
       console.error('Discussion creation error:', e);
     }
   };
 
-  const handleAddReply = async (postId: string) => {
+  const handleAddDiscussionReply = async (postId: string, quote?: GroupDiscussionReply) => {
     if (!replyText.trim() || !activeGroup) return;
 
     try {
-      const res = await DBService.addDiscussionReply(activeGroup.id, postId, {
+      const quoteToUse = quote || replyingToReply || undefined;
+      const res = await DBService.addCircleReply(activeGroup.id, postId, {
         authorId: currentUserId,
         authorName: profile.name,
         authorAvatar: profile.avatarIcon,
-        content: replyText.trim()
+        content: replyText.trim(),
+        quoteReplyId: quoteToUse?.id,
+        quoteReplyText: quoteToUse?.content,
+        quoteReplyAuthor: quoteToUse?.authorName
       });
 
-      if (res.success) {
+      if (res.success && res.reply) {
         setGroups(prev => prev.map(g => {
           if (g.id === activeGroup.id) {
             const discussions = (g.discussions || []).map(p => {
               if (p.id === postId) {
-                const newReply = {
-                  id: `reply_${Date.now()}`,
-                  postId,
-                  authorId: currentUserId,
-                  authorName: profile.name,
-                  authorAvatar: profile.avatarIcon,
-                  content: replyText.trim(),
-                  timestamp: Date.now()
-                };
-                return { ...p, replies: [...(p.replies || []), newReply] };
+                return { ...p, replies: [...(p.replies || []), res.reply!] };
               }
               return p;
             });
@@ -519,6 +794,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
 
         setReplyText('');
         setActiveReplyPostId(null);
+        setReplyingToReply(null);
       }
     } catch (e) {
       console.error('Reply submission error:', e);
@@ -686,7 +962,10 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                   <button
                     key={g.id}
                     type="button"
-                    onClick={() => setActiveGroupId(g.id)}
+                    onClick={() => {
+                      setActiveGroupId(g.id);
+                      setUnreadCounts(prev => ({ ...prev, [g.id]: 0 }));
+                    }}
                     className={`w-full text-left p-3 rounded-lg border min-h-[44px] flex items-center justify-between transition-colors cursor-pointer ${
                       isActive
                         ? 'bg-[#EFF6FF] border-[#2563EB] text-[#111827]'
@@ -697,13 +976,20 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                       <p className="font-semibold text-xs truncate text-[#111827] dark:text-white">{g.name}</p>
                       <p className="text-[11px] text-[#5B6472]">{g.course}</p>
                     </div>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
-                      roleLabel === 'Owner'
-                        ? 'bg-[#EFF6FF] text-[#2563EB]'
-                        : 'bg-slate-100 text-[#5B6472]'
-                    }`}>
-                      {roleLabel}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {(unreadCounts[g.id] || 0) > 0 && (
+                        <span className="w-5 h-5 bg-blue-600 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow-xs">
+                          {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wider ${
+                        roleLabel === 'Owner'
+                          ? 'bg-[#EFF6FF] text-[#2563EB]'
+                          : 'bg-slate-100 text-[#5B6472]'
+                      }`}>
+                        {roleLabel}
+                      </span>
+                    </div>
                   </button>
                 );
               })
@@ -711,7 +997,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Selected circle (Spec: Invite code box for owners/mods, tabs: Discussion, Resources, Members) */}
+        {/* RIGHT COLUMN: Selected circle (Spec: Invite code box for owners/mods, tabs: Chat, Discussions, Resources, AI Assistant, Members) */}
         <div className="flex-1 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 rounded-lg flex flex-col overflow-hidden shadow-xs">
           {!activeGroup ? (
             <div className="m-auto text-center p-8 space-y-2">
@@ -727,8 +1013,20 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                     <h2 className="text-base font-bold text-[#111827] dark:text-white">{activeGroup.name}</h2>
                     <p className="text-xs text-[#5B6472]">{activeGroup.course} · {activeGroup.description || 'Collaborative study circle'}</p>
                   </div>
-                  {/* Tabs: Discussion, Resources, Members */}
-                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-semibold">
+                  {/* Tabs: Chat, Discussions, Resources, AI Assistant, Members */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-semibold flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('chat')}
+                      className={`px-3 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        activeTab === 'chat'
+                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                          : 'text-[#5B6472] hover:text-[#111827]'
+                      }`}
+                    >
+                      <MessageSquare size={13} />
+                      <span>Chat</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setActiveTab('discussions')}
@@ -738,7 +1036,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                           : 'text-[#5B6472] hover:text-[#111827]'
                       }`}
                     >
-                      Discussion
+                      Discussions
                     </button>
                     <button
                       type="button"
@@ -753,6 +1051,18 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                     </button>
                     <button
                       type="button"
+                      onClick={() => setActiveTab('ai')}
+                      className={`px-2.5 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer flex items-center gap-1 ${
+                        activeTab === 'ai'
+                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
+                          : 'text-[#5B6472] hover:text-[#111827]'
+                      }`}
+                    >
+                      <Sparkles size={12} className="text-blue-500" />
+                      <span>AI Assistant</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setActiveTab('overview')}
                       className={`px-3 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer ${
                         activeTab === 'overview'
@@ -761,17 +1071,6 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                       }`}
                     >
                       Members ({(activeGroup.members || []).length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('ai')}
-                      className={`px-2.5 py-1.5 rounded-md min-h-[36px] transition-colors cursor-pointer ${
-                        activeTab === 'ai'
-                          ? 'bg-white dark:bg-slate-900 text-[#2563EB] shadow-xs'
-                          : 'text-[#5B6472] hover:text-[#111827]'
-                      }`}
-                    >
-                      AI
                     </button>
                   </div>
                 </div>
@@ -813,125 +1112,235 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
               </div>
 
             {/* TAB CONTENT */}
-            <div className="flex-1 overflow-y-auto p-5 bg-slate-50/40 dark:bg-slate-950/40">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 bg-slate-50/40 dark:bg-slate-950/40 flex flex-col">
               
-              {/* 1. KORSIQ TAB */}
-              {activeTab === 'ai' && (
-                <div className="max-w-4xl mx-auto space-y-4 flex flex-col h-full">
-                  
-                  {/* Preset AI Action Badges */}
-                  <div className="bg-white dark:bg-slate-900 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Sparkles size={14} className="text-blue-600" />
-                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Group AI Study Assistant</span>
-                        <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded font-medium">
-                          Grounded in Uploaded Files
+              {/* 1. WHATSAPP-STYLE REALTIME CHAT TAB */}
+              {activeTab === 'chat' && (
+                <div className="max-w-4xl w-full mx-auto flex flex-col flex-1 h-full min-h-[420px]">
+                  {/* Messages Log Container */}
+                  <div 
+                    ref={chatScrollRef}
+                    onScroll={handleChatScroll}
+                    className="flex-1 overflow-y-auto space-y-4 pr-1 relative"
+                  >
+                    {circleMessages.length === 0 ? (
+                      <div className="h-full min-h-[300px] flex flex-col items-center justify-center p-6 text-center space-y-2">
+                        <div className="w-12 h-12 bg-blue-50 dark:bg-blue-950/60 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                          <MessageSquare size={24} />
+                        </div>
+                        <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          No messages in {activeGroup.name} yet
+                        </h4>
+                        <p className="text-[11px] text-[#5B6472] max-w-xs">
+                          Be the first to say hello, ask a course question, or share study ideas with your peers!
+                        </p>
+                      </div>
+                    ) : (
+                      groupMessagesByDay(circleMessages).map((dayGroup, dIdx) => (
+                        <div key={dIdx} className="space-y-3">
+                          {/* Day Separator Pill */}
+                          <div className="flex items-center justify-center my-3">
+                            <span className="bg-slate-200/80 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-semibold px-2.5 py-0.5 rounded-full shadow-2xs">
+                              {dayGroup.dateLabel}
+                            </span>
+                          </div>
+
+                          {/* Messages for this Day */}
+                          {dayGroup.messages.map(msg => {
+                            const isMe = msg.senderId === currentUserId || msg.sender === profile.name;
+                            const isSending = msg.status === 'sending';
+                            const isFailed = msg.status === 'failed';
+                            const canDelete = isMe || isOwnerOrMod;
+
+                            return (
+                              <div
+                                key={msg.id}
+                                className={`flex gap-2.5 items-end group ${isMe ? 'justify-end' : 'justify-start'}`}
+                              >
+                                {!isMe && (
+                                  <UserAvatar 
+                                    avatarIcon={msg.senderAvatar || 'graduation-cap'} 
+                                    name={msg.sender} 
+                                    size="xs" 
+                                  />
+                                )}
+
+                                <div className={`relative max-w-[82%] sm:max-w-[70%] p-3 rounded-2xl text-xs leading-relaxed shadow-xs ${
+                                  isMe
+                                    ? 'bg-blue-600 text-white rounded-br-xs'
+                                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-bl-xs'
+                                }`}>
+                                  {/* Sender Name (Only on incoming messages) */}
+                                  {!isMe && (
+                                    <span className="font-semibold text-[11px] text-blue-600 dark:text-blue-400 block mb-1">
+                                      {msg.sender}
+                                    </span>
+                                  )}
+
+                                  {/* Quoted Message Preview */}
+                                  {msg.replyToText && (
+                                    <div className={`p-2 rounded-lg mb-2 text-[11px] border-l-3 ${
+                                      isMe
+                                        ? 'bg-blue-700/60 border-white text-blue-100'
+                                        : 'bg-slate-100 dark:bg-slate-800/80 border-blue-600 text-slate-700 dark:text-slate-300'
+                                    }`}>
+                                      <span className="font-bold block text-[10px] opacity-90">
+                                        {msg.replyToSender || 'Replying to message'}
+                                      </span>
+                                      <p className="truncate line-clamp-2 italic opacity-95">
+                                        "{msg.replyToText}"
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {/* Message Text */}
+                                  <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+
+                                  {/* Footer: Timestamp, Delivery Status, Actions */}
+                                  <div className={`flex items-center justify-end gap-1.5 mt-1 pt-0.5 text-[9px] ${
+                                    isMe ? 'text-blue-200' : 'text-slate-400'
+                                  }`}>
+                                    <span>
+                                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+
+                                    {isMe && (
+                                      <span>
+                                        {isSending && <Loader2 size={10} className="animate-spin inline" />}
+                                        {isFailed && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRetrySend(msg)}
+                                            className="text-rose-200 font-bold underline cursor-pointer"
+                                            title="Failed to send. Tap to retry."
+                                          >
+                                            Failed (tap retry)
+                                          </button>
+                                        )}
+                                        {!isSending && !isFailed && <CheckCheck size={12} className="inline" />}
+                                      </span>
+                                    )}
+
+                                    {/* Action Triggers (Quote Reply, Delete) */}
+                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ml-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => setReplyingTo(msg)}
+                                        className={`p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer`}
+                                        title="Reply to this message"
+                                      >
+                                        <CornerDownLeft size={11} />
+                                      </button>
+                                      {canDelete && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteChatMessage(msg.id)}
+                                          className={`p-0.5 rounded hover:bg-rose-500/20 text-rose-300 hover:text-rose-100 cursor-pointer`}
+                                          title="Delete message"
+                                        >
+                                          <Trash2 size={11} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Floating "New messages" pill when scrolled up */}
+                  {newMessagesCount > 0 && (
+                    <div className="sticky bottom-14 flex justify-center z-20 pointer-events-none">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (chatScrollRef.current) {
+                            chatScrollRef.current.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+                          }
+                          setNewMessagesCount(0);
+                        }}
+                        className="pointer-events-auto px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-semibold shadow-lg flex items-center gap-1.5 transition-all transform hover:scale-105 cursor-pointer animate-bounce"
+                      >
+                        <span>{newMessagesCount} new message{newMessagesCount > 1 ? 's' : ''}</span>
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Typing Indicator */}
+                  {typingUsers.length > 0 && (
+                    <div className="px-3 py-1 text-[11px] text-slate-500 italic flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                      <span>{typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...</span>
+                    </div>
+                  )}
+
+                  {/* Quoted Message Preview Bar */}
+                  {replyingTo && (
+                    <div className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900 rounded-t-lg flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <CornerDownLeft size={13} className="text-blue-600 shrink-0" />
+                        <span className="text-[#5B6472]">
+                          Replying to <strong className="text-slate-900 dark:text-white">{replyingTo.sender}</strong>:
+                        </span>
+                        <span className="truncate italic text-slate-600 dark:text-slate-400">
+                          "{replyingTo.text.slice(0, 50)}"
                         </span>
                       </div>
-                      <span className="text-xs text-slate-400">
-                        {(activeGroup.sharedMaterials || []).length} Document(s) Indexed
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
                       <button
-                        onClick={() => handleSendAiPrompt(undefined, "Generate a 5-question study quiz based on all uploaded group notes.", 'quiz')}
-                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+                        type="button"
+                        onClick={() => setReplyingTo(null)}
+                        className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/60 rounded text-slate-500 cursor-pointer"
+                        title="Cancel reply quote"
                       >
-                        <HelpCircle size={12} /> Quiz Practice
-                      </button>
-                      <button
-                        onClick={() => handleSendAiPrompt(undefined, "Synthesize and summarize all uploaded group study materials.", 'summarize')}
-                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
-                      >
-                        <FileText size={12} /> Group Summary
-                      </button>
-                      <button
-                        onClick={() => handleSendAiPrompt(undefined, "Identify top 5 high-yield exam topics from our group materials.", 'topics')}
-                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
-                      >
-                        <Lightbulb size={12} /> High-Yield Revision
+                        <X size={13} />
                       </button>
                     </div>
-                  </div>
+                  )}
 
-                  {/* Chat Messages Log */}
-                  <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-                    {aiMessages.map((msg, idx) => {
-                      const isAi = isAiSender(msg.sender);
-                      return (
-                        <div key={idx} className={`flex gap-2.5 ${isAi ? 'items-start' : 'items-end justify-end'}`}>
-                          {isAi && (
-                            <div className="w-7 h-7 rounded-md bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5">
-                              <Bot size={15} />
-                            </div>
-                          )}
-                          <div className={`p-3.5 rounded-lg max-w-[85%] text-xs leading-relaxed ${
-                            isAi 
-                              ? 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 shadow-xs' 
-                              : 'bg-blue-600 text-white font-medium'
-                          }`}>
-                            <div className="flex items-center justify-between mb-1 pb-1 border-b border-slate-100 dark:border-slate-800">
-                              <span className={`text-[10px] font-semibold uppercase tracking-wider ${isAi ? 'text-blue-600 dark:text-blue-400' : 'text-blue-100'}`}>
-                                {msg.sender}
-                              </span>
-                              <span className={`text-[9px] ${isAi ? 'text-slate-400' : 'text-blue-200'}`}>
-                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                            <div className="whitespace-pre-wrap">{msg.text}</div>
-                          </div>
-                          {!isAi && (
-                            <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="xs" />
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {isAiThinking && (
-                      <div className="flex items-center gap-2 text-blue-600 font-medium text-xs bg-blue-50 dark:bg-blue-950/60 p-3 rounded-lg border border-blue-200 dark:border-blue-900">
-                        <Sparkles size={14} className="animate-spin" />
-                        <span>KorsIQ is analyzing group materials and generating response...</span>
-                      </div>
-                    )}
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  {/* Prompt Input Field */}
-                  <form onSubmit={e => handleSendAiPrompt(e)} className="bg-white dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs flex items-center gap-2">
+                  {/* Realtime Chat Input Form */}
+                  <form 
+                    onSubmit={handleSendChatMessage} 
+                    className={`bg-white dark:bg-slate-900 p-2 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-2 ${
+                      replyingTo ? 'rounded-b-lg border-t-0' : 'rounded-lg'
+                    }`}
+                  >
                     <input
                       type="text"
-                      placeholder={`Ask KorsIQ about materials in "${activeGroup.name}"...`}
-                      value={aiPrompt}
-                      onChange={e => setAiPrompt(e.target.value)}
-                      disabled={isAiThinking}
-                      className="flex-1 px-3 py-2 text-xs outline-none text-slate-800 dark:text-slate-200 placeholder:text-slate-400 bg-transparent"
+                      placeholder={`Message ${activeGroup.name}...`}
+                      value={inputMessage}
+                      onChange={handleInputChange}
+                      className="flex-1 px-3 py-2 text-xs outline-none text-slate-900 dark:text-white placeholder:text-slate-400 bg-transparent"
                     />
                     <button
                       type="submit"
-                      disabled={!aiPrompt.trim() || isAiThinking}
-                      className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+                      disabled={!inputMessage.trim()}
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0"
                     >
-                      <Send size={14} />
+                      <Send size={13} />
+                      <span className="hidden sm:inline">Send</span>
                     </button>
                   </form>
                 </div>
               )}
 
-              {/* 2. SHARED MATERIALS TAB */}
+              {/* 2. SHARED RESOURCES TAB (With Extraction Status & Retry) */}
               {activeTab === 'materials' && (
-                <div className="max-w-4xl mx-auto space-y-4">
+                <div className="max-w-4xl mx-auto space-y-4 w-full">
                   <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Group Learning Repository</h3>
-                      <p className="text-xs text-slate-500">Shared lecture slides, PDF notes, and course documents accessible to circle members.</p>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Circle Study Resources</h3>
+                      <p className="text-xs text-slate-500">Shared lecture slides, PDF notes, and documents accessible to all circle members and KorsIQ AI.</p>
                     </div>
                     <div>
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 min-h-[40px]"
                       >
                         {isUploading ? <Sparkles size={13} className="animate-spin" /> : <Upload size={13} />}
                         <span>{isUploading ? 'Uploading...' : 'Upload Material'}</span>
@@ -950,57 +1359,91 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                         <p className="text-xs text-slate-500">Upload PDF notes or slides to empower KorsIQ AI for all members.</p>
                       </div>
                     ) : (
-                      (activeGroup.sharedMaterials || []).map((mat, idx) => (
-                        <div key={idx} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-3">
-                          <div className="flex items-start gap-2.5">
-                            <div className="w-9 h-9 rounded-md bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 flex items-center justify-center shrink-0 font-semibold text-xs">
-                              PDF
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <h4 className="text-xs font-semibold text-slate-900 dark:text-white truncate" title={mat.fileName}>
-                                {mat.fileName}
-                              </h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
-                                By {mat.sharedBy || mat.uploadedByName || 'Member'}
-                              </p>
-                            </div>
-                          </div>
+                      (activeGroup.sharedMaterials || []).map((mat, idx) => {
+                        const isReady = mat.status === 'ready' || (!mat.status && mat.content);
+                        const isProcessing = mat.status === 'processing';
+                        const isFailed = mat.status === 'failed';
+                        const isRetrying = retryingMaterialId === mat.id;
 
-                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                            <span>{new Date(mat.timestamp || Date.now()).toLocaleDateString()}</span>
-                            {mat.downloadUrl ? (
-                              <a
-                                href={mat.downloadUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium rounded flex items-center gap-1 transition-colors"
-                              >
-                                <Download size={11} /> Download
-                              </a>
-                            ) : (
-                              <span className="text-[10px] text-emerald-600 font-medium">Indexed for AI</span>
-                            )}
+                        return (
+                          <div key={idx} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <div className="w-9 h-9 rounded-md bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 flex items-center justify-center shrink-0 font-semibold text-xs uppercase">
+                                {(mat.fileName || 'PDF').split('.').pop()?.slice(0, 4) || 'FILE'}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <h4 className="text-xs font-semibold text-slate-900 dark:text-white truncate" title={mat.fileName}>
+                                  {mat.fileName}
+                                </h4>
+                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                  Uploaded by {mat.sharedBy || mat.uploadedByName || 'Member'} · {mat.fileSize || ''}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Processing Status Badge per Task 3 */}
+                            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                              <div>
+                                {isReady && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                                    <Check size={11} /> Ready for AI
+                                  </span>
+                                )}
+                                {isProcessing && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800 flex items-center gap-1">
+                                    <Loader2 size={11} className="animate-spin" /> Processing...
+                                  </span>
+                                )}
+                                {isFailed && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRetryExtraction(mat)}
+                                    disabled={isRetrying}
+                                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-200 dark:border-rose-800 hover:bg-rose-100 flex items-center gap-1 cursor-pointer transition-colors"
+                                    title={mat.errorMessage || 'Text extraction unsuccessful. Click to retry.'}
+                                  >
+                                    {isRetrying ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                                    <span>Failed - Tap to retry</span>
+                                  </button>
+                                )}
+                              </div>
+
+                              {mat.downloadUrl ? (
+                                <a
+                                  href={mat.downloadUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium rounded flex items-center gap-1 transition-colors text-xs"
+                                >
+                                  <Download size={11} /> Download
+                                </a>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">
+                                  {new Date(mat.timestamp || Date.now()).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
               )}
 
-              {/* 3. DISCUSSIONS / FORUM TAB */}
+              {/* 3. DISCUSSIONS / FORUM TAB (Live Updating with Quote Replies) */}
               {activeTab === 'discussions' && (
-                <div className="max-w-4xl mx-auto space-y-4">
+                <div className="max-w-4xl mx-auto space-y-4 w-full">
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Academic Forum</h3>
-                      <p className="text-xs text-slate-500">Ask questions, share study tips, and collaborate on assignments.</p>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Academic Forum & Questions</h3>
+                      <p className="text-xs text-slate-500">Ask questions, start threads, and reply to your study peers live.</p>
                     </div>
                     <button
                       onClick={() => setShowNewDiscussion(!showNewDiscussion)}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer min-h-[38px]"
                     >
-                      <Plus size={13} /> New Post
+                      <Plus size={13} /> New Topic
                     </button>
                   </div>
 
@@ -1065,41 +1508,84 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                           {post.title && <h4 className="text-xs font-semibold text-slate-900 dark:text-white">{post.title}</h4>}
                           <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{post.content}</p>
 
-                          {/* Replies */}
+                          {/* Nested Replies with Quote Support */}
                           {(post.replies || []).length > 0 && (
-                            <div className="pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-1.5 pt-1">
-                              {post.replies.map(reply => (
-                                <div key={reply.id} className="bg-slate-50 dark:bg-slate-800 p-2 rounded-lg text-xs space-y-0.5">
+                            <div className="pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-2 pt-1">
+                              {post.replies.map((reply: any) => (
+                                <div key={reply.id} className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-lg text-xs space-y-1">
                                   <div className="flex items-center justify-between">
                                     <span className="font-semibold text-slate-800 dark:text-slate-200 text-[11px]">{reply.authorName}</span>
-                                    <span className="text-[9px] text-slate-400">{new Date(reply.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[9px] text-slate-400">{new Date(reply.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveReplyPostId(post.id);
+                                          setReplyingToReply(reply);
+                                        }}
+                                        className="text-[10px] text-blue-600 hover:underline cursor-pointer"
+                                      >
+                                        Quote
+                                      </button>
+                                    </div>
                                   </div>
-                                  <p className="text-slate-600 dark:text-slate-300">{reply.content}</p>
+
+                                  {reply.quoteReplyText && (
+                                    <div className="p-1.5 bg-white dark:bg-slate-900 rounded border-l-2 border-blue-500 text-[10px] italic text-slate-500">
+                                      <strong>{reply.quoteReplyAuthor || 'Reply'}:</strong> "{reply.quoteReplyText.slice(0, 50)}"
+                                    </div>
+                                  )}
+
+                                  <p className="text-slate-700 dark:text-slate-300">{reply.content}</p>
                                 </div>
                               ))}
                             </div>
                           )}
 
-                          {/* Reply Trigger */}
+                          {/* Reply Trigger & Form */}
                           {activeReplyPostId === post.id ? (
-                            <div className="flex gap-2 pt-1">
-                              <input
-                                type="text"
-                                placeholder="Write a reply..."
-                                value={replyText}
-                                onChange={e => setReplyText(e.target.value)}
-                                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200"
-                              />
-                              <button
-                                onClick={() => handleAddReply(post.id)}
-                                className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                              >
-                                Reply
-                              </button>
+                            <div className="space-y-1.5 pt-2">
+                              {replyingToReply && (
+                                <div className="p-1.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded flex items-center justify-between text-[11px]">
+                                  <span className="truncate text-slate-600 dark:text-slate-300">
+                                    Quoting <strong>{replyingToReply.authorName}</strong>: "{replyingToReply.content.slice(0, 40)}"
+                                  </span>
+                                  <button onClick={() => setReplyingToReply(null)} className="text-slate-400 hover:text-slate-600 p-0.5">
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              )}
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  placeholder={replyingToReply ? `Reply to ${replyingToReply.authorName}...` : "Write a reply to this thread..."}
+                                  value={replyText}
+                                  onChange={e => setReplyText(e.target.value)}
+                                  className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs outline-none focus:border-blue-600 text-slate-800 dark:text-slate-200"
+                                />
+                                <button
+                                  onClick={() => handleAddDiscussionReply(post.id)}
+                                  className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg cursor-pointer"
+                                >
+                                  Reply
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setActiveReplyPostId(null);
+                                    setReplyingToReply(null);
+                                  }}
+                                  className="px-2 py-1 text-slate-500 text-xs rounded-lg hover:bg-slate-100"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <button
-                              onClick={() => setActiveReplyPostId(post.id)}
+                              onClick={() => {
+                                setActiveReplyPostId(post.id);
+                                setReplyingToReply(null);
+                              }}
                               className="text-xs font-semibold text-blue-600 hover:text-blue-700 pt-0.5 cursor-pointer"
                             >
                               + Reply to thread
@@ -1112,9 +1598,124 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({ profile, userId, group
                 </div>
               )}
 
-              {/* 4. OVERVIEW / MEMBERS TAB */}
+              {/* 4. GROUNDED CIRCLE AI ASSISTANT TAB */}
+              {activeTab === 'ai' && (
+                <div className="max-w-4xl mx-auto space-y-4 flex flex-col h-full w-full">
+                  {/* Preset AI Action Badges */}
+                  <div className="bg-white dark:bg-slate-900 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={14} className="text-blue-600" />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Circle AI Study Assistant</span>
+                        <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded font-medium">
+                          Grounded in Uploaded Files
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-400">
+                        {(activeGroup.sharedMaterials || []).length} Document(s) Indexed
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      <button
+                        onClick={() => handleSendAiPrompt(undefined, "Generate a 5-question study quiz based on all uploaded group notes.", 'quiz')}
+                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+                      >
+                        <HelpCircle size={12} /> Quiz Practice
+                      </button>
+                      <button
+                        onClick={() => handleSendAiPrompt(undefined, "Synthesize and summarize all uploaded group study materials.", 'summarize')}
+                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+                      >
+                        <FileText size={12} /> Group Summary
+                      </button>
+                      <button
+                        onClick={() => handleSendAiPrompt(undefined, "Identify top 5 high-yield exam topics from our group materials.", 'topics')}
+                        className="px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+                      >
+                        <Lightbulb size={12} /> High-Yield Revision
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Chat Messages Log */}
+                  <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+                    {aiMessages.length === 0 ? (
+                      <div className="py-12 text-center space-y-2">
+                        <Bot size={28} className="text-blue-500 mx-auto" />
+                        <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Circle AI Study Assistant Ready
+                        </h4>
+                        <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                          Ask questions, generate practice quizzes, or synthesize notes from the files uploaded to this circle.
+                        </p>
+                      </div>
+                    ) : (
+                      aiMessages.map((msg, idx) => {
+                        const isAi = isAiSender(msg.sender);
+                        return (
+                          <div key={idx} className={`flex gap-2.5 ${isAi ? 'items-start' : 'items-end justify-end'}`}>
+                            {isAi && (
+                              <div className="w-7 h-7 rounded-md bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                                <Bot size={15} />
+                              </div>
+                            )}
+                            <div className={`p-3.5 rounded-lg max-w-[85%] text-xs leading-relaxed ${
+                              isAi 
+                                ? 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 shadow-xs' 
+                                : 'bg-blue-600 text-white font-medium'
+                            }`}>
+                              <div className="flex items-center justify-between mb-1 pb-1 border-b border-slate-100 dark:border-slate-800">
+                                <span className={`text-[10px] font-semibold uppercase tracking-wider ${isAi ? 'text-blue-600 dark:text-blue-400' : 'text-blue-100'}`}>
+                                  {msg.sender}
+                                </span>
+                                <span className={`text-[9px] ${isAi ? 'text-slate-400' : 'text-blue-200'}`}>
+                                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <div className="whitespace-pre-wrap">{msg.text}</div>
+                            </div>
+                            {!isAi && (
+                              <UserAvatar avatarIcon={profile.avatarIcon || 'graduation-cap'} name={profile.name} size="xs" />
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+
+                    {isAiThinking && (
+                      <div className="flex items-center gap-2 text-blue-600 font-medium text-xs bg-blue-50 dark:bg-blue-950/60 p-3 rounded-lg border border-blue-200 dark:border-blue-900">
+                        <Sparkles size={14} className="animate-spin" />
+                        <span>KorsIQ is analyzing circle materials and citing resources...</span>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Prompt Input Field */}
+                  <form onSubmit={e => handleSendAiPrompt(e)} className="bg-white dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={`Ask KorsIQ about materials in "${activeGroup.name}"...`}
+                      value={aiPrompt}
+                      onChange={e => setAiPrompt(e.target.value)}
+                      disabled={isAiThinking}
+                      className="flex-1 px-3 py-2 text-xs outline-none text-slate-800 dark:text-slate-200 placeholder:text-slate-400 bg-transparent"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!aiPrompt.trim() || isAiThinking}
+                      className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+                    >
+                      <Send size={14} />
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* 5. OVERVIEW / MEMBERS TAB */}
               {activeTab === 'overview' && (
-                <div className="max-w-3xl mx-auto space-y-4">
+                <div className="max-w-3xl mx-auto space-y-4 w-full">
                   {/* Members List */}
                   <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4">
                     <div className="flex items-center justify-between pb-2 border-b border-[#E5E7EB] dark:border-slate-800">

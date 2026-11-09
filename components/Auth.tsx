@@ -10,7 +10,8 @@ import {
   Mail, 
   ArrowLeft, 
   RefreshCw, 
-  KeyRound 
+  KeyRound,
+  X 
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { EmailVerification } from './EmailVerification';
@@ -20,6 +21,7 @@ export type AuthMode = 'signin' | 'signup' | 'forgot_password' | 'reset_password
 
 interface AuthProps {
   onAuthSuccess: () => void;
+  onCancel?: () => void;
   initialMode?: AuthMode;
   sessionExpiredMsg?: string | null;
   isDirectRecovery?: boolean;
@@ -30,6 +32,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const Auth: React.FC<AuthProps> = ({ 
   onAuthSuccess, 
+  onCancel,
   initialMode = 'signin',
   sessionExpiredMsg,
   isDirectRecovery = false,
@@ -365,6 +368,7 @@ export const Auth: React.FC<AuthProps> = ({
       <EmailVerification
         email={pendingEmail}
         onVerified={onAuthSuccess}
+        onCancel={onCancel}
         onBack={() => {
           setPendingEmail(null);
           setPassword('');
@@ -377,6 +381,27 @@ export const Auth: React.FC<AuthProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center py-8 px-4 sm:px-6 relative overflow-y-auto font-sans text-slate-900">
+      {onCancel && (
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setSuccessMessage(null);
+            setEmail('');
+            setPassword('');
+            setConfirmPassword('');
+            setFullName('');
+            onCancel();
+          }}
+          className="fixed top-4 right-4 sm:top-6 sm:right-6 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-sm transition-all flex items-center gap-1.5 text-xs font-semibold z-30 cursor-pointer min-h-[44px]"
+          title="Cancel and return to home page"
+          aria-label="Cancel and return to home page"
+        >
+          <X size={16} />
+          <span>Cancel</span>
+        </button>
+      )}
+
       <motion.div 
         layout="position"
         initial={{ opacity: 0, y: 10 }}
