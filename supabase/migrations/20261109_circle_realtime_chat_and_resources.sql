@@ -24,13 +24,14 @@ RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
+SET search_path = public
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.circle_members
     WHERE circle_id = p_circle_id AND user_id = p_user_id
   ) OR EXISTS (
     SELECT 1 FROM public.study_groups
-    WHERE id = p_circle_id AND (type = 'general' OR visibility = 'public' OR owner_id = p_user_id::text)
+    WHERE id = p_circle_id AND (type = 'general' OR visibility = 'public' OR owner_id = p_user_id)
   );
 $$;
 
@@ -118,7 +119,7 @@ DO $$ BEGIN
     CREATE POLICY "User can leave or owner remove" ON public.circle_members
       FOR DELETE USING (
         auth.uid() = user_id OR 
-        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_members.circle_id AND owner_id = auth.uid()::text)
+        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_members.circle_id AND owner_id = auth.uid())
       );
   END IF;
 END $$;
@@ -144,7 +145,7 @@ DO $$ BEGIN
     CREATE POLICY "Author or owner can delete message" ON public.circle_messages
       FOR DELETE USING (
         auth.uid() = sender_id OR 
-        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_messages.circle_id AND owner_id = auth.uid()::text)
+        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_messages.circle_id AND owner_id = auth.uid())
       );
   END IF;
 END $$;
@@ -165,7 +166,7 @@ DO $$ BEGIN
     CREATE POLICY "Author or owner delete discussion" ON public.circle_discussions
       FOR DELETE USING (
         auth.uid() = author_id OR 
-        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_discussions.circle_id AND owner_id = auth.uid()::text)
+        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_discussions.circle_id AND owner_id = auth.uid())
       );
   END IF;
 
@@ -183,7 +184,7 @@ DO $$ BEGIN
     CREATE POLICY "Author or owner delete reply" ON public.circle_discussion_replies
       FOR DELETE USING (
         auth.uid() = author_id OR 
-        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_discussion_replies.circle_id AND owner_id = auth.uid()::text)
+        EXISTS (SELECT 1 FROM public.study_groups WHERE id = circle_discussion_replies.circle_id AND owner_id = auth.uid())
       );
   END IF;
 END $$;
@@ -204,7 +205,7 @@ DO $$ BEGIN
     CREATE POLICY "Uploader or owner can delete material" ON public.group_materials
       FOR DELETE USING (
         auth.uid() = uploader_id OR 
-        EXISTS (SELECT 1 FROM public.study_groups WHERE id = group_materials.group_id AND owner_id = auth.uid()::text)
+        EXISTS (SELECT 1 FROM public.study_groups WHERE id = group_materials.group_id AND owner_id = auth.uid())
       );
   END IF;
 END $$;
