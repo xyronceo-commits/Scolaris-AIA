@@ -3627,31 +3627,59 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
     try {
       if (!supabaseAdmin || !supabaseAuthClient) {
-        console.warn('[Admin Auth] Supabase admin or auth client unavailable');
+        console.error(
+          '[Admin Auth] Cannot process OTP request: SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing in server environment variables.'
+        );
         return res.json(GENERIC_SUCCESS_RESPONSE);
       }
 
-      // Check allowlist table `admin_users`
+      // Check allowlist table `admin_users` (case-insensitive)
       const { data: adminRow, error: adminErr } = await supabaseAdmin
         .from('admin_users')
         .select('id, email, role, active')
-        .eq('email', rawEmail)
+        .ilike('email', rawEmail)
         .eq('active', true)
         .maybeSingle();
 
-      if (adminErr || !adminRow) {
+      if (adminErr) {
+        console.error('[Admin Auth] Error querying admin_users table (ensure migration 20261109_admin_and_circles_reddit.sql was applied):', adminErr.message);
+        return res.json(GENERIC_SUCCESS_RESPONSE);
+      }
+
+      if (!adminRow) {
         // Unknown or inactive email: do not send code, return identical message
         await logAdminAction(rawEmail, 'admin_otp_requested_unauthorized', { ip }, ip);
         return res.json(GENERIC_SUCCESS_RESPONSE);
       }
 
       // Authorized admin: trigger Supabase email OTP
-      const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
+      let { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
         email: rawEmail,
         options: {
           shouldCreateUser: false
         }
       });
+
+      // If the allowlisted admin email does not yet have a row in auth.users,
+      // provision their auth.users record via service role and re-send the OTP.
+      if (otpError) {
+        console.warn('[Admin Auth] Initial signInWithOtp failed for allowlisted admin, ensuring auth.users account exists:', otpError.message);
+        const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
+          email: rawEmail,
+          email_confirm: true
+        });
+        if (createErr && !createErr.message?.toLowerCase().includes('already')) {
+          console.error('[Admin Auth] Failed to auto-provision auth.users record for admin:', createErr.message);
+        } else {
+          const retryOtp = await supabaseAuthClient.auth.signInWithOtp({
+            email: rawEmail,
+            options: {
+              shouldCreateUser: false
+            }
+          });
+          otpError = retryOtp.error;
+        }
+      }
 
       if (otpError) {
         console.error('[Admin Auth] Supabase signInWithOtp error:', otpError.message);
@@ -3678,6 +3706,9 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
 
     if (!supabaseAdmin || !supabaseAuthClient) {
+      console.error(
+        '[Admin Auth] Cannot verify OTP: SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing in server environment variables.'
+      );
       return res.status(503).json({ success: false, error: 'Authentication service unavailable.' });
     }
 
@@ -3694,11 +3725,11 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         return res.status(401).json({ success: false, error: 'Invalid or expired 6-digit verification code.' });
       }
 
-      // 2. Cryptographically re-verify against admin_users allowlist
+      // 2. Cryptographically re-verify against admin_users allowlist (case-insensitive)
       const { data: adminRow, error: allowErr } = await supabaseAdmin
         .from('admin_users')
         .select('id, email, role, active')
-        .eq('email', rawEmail)
+        .ilike('email', rawEmail)
         .eq('active', true)
         .maybeSingle();
 
@@ -3713,7 +3744,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         success: true,
         user: {
           id: adminRow.id,
-          email: adminRow.email,
+          email: adminRow.email.toLowerCase(),
           role: adminRow.role
         },
         session: data.session
@@ -3749,11 +3780,11 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
       const email = data.user.email.toLowerCase().trim();
 
-      // Re-check active admin status in admin_users
+      // Re-check active admin status in admin_users (case-insensitive)
       const { data: adminRow, error: allowErr } = await supabaseAdmin
         .from('admin_users')
         .select('id, email, role, active')
-        .eq('email', email)
+        .ilike('email', email)
         .eq('active', true)
         .maybeSingle();
 
