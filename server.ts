@@ -14,6 +14,7 @@ import {
   selectRelevantChunks 
 } from './lib/documentProcessor';
 import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
+import { buildStudentContext } from './lib/studentContext';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -230,11 +231,26 @@ export async function createExpressApp() {
         console.warn('[Auth Middleware] Token verification failed:', error?.message || 'User not found');
         return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
       }
-      req.user = { uid: data.user.id, email: data.user.email };
+      req.user = { uid: data.user.id, id: data.user.id, email: data.user.email };
       next();
     } catch (err: any) {
       console.warn('[Auth Middleware] Error verifying token:', err?.message || err);
       return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
+    }
+  };
+
+  // Helper to fetch server-authenticated student profile & courses for AI tailoring
+  const getStudentContextForUser = async (userId?: string): Promise<string> => {
+    if (!supabaseAdmin || !userId) return buildStudentContext(null, []);
+    try {
+      const [profileRes, coursesRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('department, major, level, university, name').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('courses').select('code, title, units').eq('user_id', userId)
+      ]);
+      return buildStudentContext(profileRes.data, coursesRes.data || []);
+    } catch (err) {
+      console.warn('Failed to fetch student context for AI:', err);
+      return buildStudentContext(null, []);
     }
   };
 
@@ -1864,8 +1880,8 @@ Synthesizing these insights underscores the necessity of continuous recalibratio
       .trim();
   }
 
-  async function generateGeminiPodcastScript(studyMaterial: string): Promise<string> {
-    const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
+  async function generateGeminiPodcastScript(studyMaterial: string, studentContext: string = ''): Promise<string> {
+    const systemInstruction = `${studentContext ? `${studentContext}\n\n` : ''}You are an expert producer for KorsIQ Academic Podcasts.
 Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
 Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
 Host 2 (Dr. Taylor): Analytical, friendly, explanatory professor host who breaks down complex concepts with clear real-world examples.
@@ -2074,8 +2090,11 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
       if (!apiKey) {
         return res.json(getScheduleFallback(courses, university));
       }
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
       const aiContent = await runAICall({
-        systemInstruction: `Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
+        systemInstruction: `${studentContext}
+
+Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
         You must return a valid JSON object with a "schedule" key containing an array of sessions. 
         Each session object must have:
         - "courseId": string (id/code of course)
@@ -2154,6 +2173,8 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
         return res.json({ success: true, analysis: mathFallback });
       }
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       const promptContext = `
 STUDENT ACADEMIC CONTEXT:
 - Current CGPA: ${baseData.currentCgpa.toFixed(2)}
@@ -2171,7 +2192,9 @@ STUDENT ACADEMIC CONTEXT:
 `;
 
       const aiContent = await runAICall({
-        systemInstruction: `You are KorsIQ Academic Reasoning Advisor.
+        systemInstruction: `${studentContext}
+
+You are KorsIQ Academic Reasoning Advisor.
 Evaluate the student's target CGPA using rigorous academic math and pedagogical wisdom.
 Be honest, constructive, and highly encouraging.
 Return a valid JSON object matching:
@@ -2221,8 +2244,12 @@ Target CGPA: ${targetCgpa || 0}, Current CGPA: ${currentCgpa || 0}.
 Preferred daily study hours: ${preferredStudyHours || 2}.
 Upcoming Examination Date: ${examDate || 'Not set'}.`;
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       const aiContent = await runAICall({
-        systemInstruction: `You are KorsIQ Personalized Timetable and Revision Architect.
+        systemInstruction: `${studentContext}
+
+You are KorsIQ Personalized Timetable and Revision Architect.
 Create:
 1. "timetable": Array of 7 weekly study sessions (Monday-Sunday) tailored to the student's actual courses.
 Each session object:
@@ -2278,7 +2305,11 @@ Return JSON with "timetable" and "revisionPlans" arrays.`,
         });
       }
 
-      const systemInstruction = `You are KorsIQ Academic Adviser, a brilliant, compassionate, and mathematically precise academic mentor.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Adviser, a brilliant, compassionate, and mathematically precise academic mentor.
 You guide university and college students toward intellectual mastery and achieving their target CGPA.
 
 STUDENT ACADEMIC PROFILE:
@@ -2332,7 +2363,11 @@ RULES:
         .map((r: any, idx: number) => `[Source ${idx + 1}] "${r.title}" by ${r.authors || 'Unknown'} (${r.year || 'n.d.'}): ${r.contentSnippet ? r.contentSnippet.slice(0, 300) : ''}`)
         .join('\n');
 
-      const systemInstruction = `You are KorsIQ Academic Studio Planning Engine, an expert academic advisor, curriculum specialist, and research director.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Studio Planning Engine, an expert academic advisor, curriculum specialist, and research director.
 Your goal is to formulate an evidence-based, logically coherent, and tailored academic outline for a student's paper.
 
 CRITICAL RULES:
@@ -2453,7 +2488,11 @@ Output JSON format:
         instructionModifier = `INSERT CITATIONS: Seamlessly integrate precise in-text citations using ${style} style based on the provided reference materials. Never fabricate fake citations.`;
       }
 
-      const systemInstruction = `You are KorsIQ Academic Writing Engine, a world-class academic scholar and writer.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Writing Engine, a world-class academic scholar and writer.
 You generate rigorous, publication-grade academic prose for university students.
 
 CRITICAL INTEGRITY & CITATION RULES:
@@ -2511,7 +2550,11 @@ Return your response in clean Markdown formatting ready for direct insertion int
         return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
       }
 
-      const systemInstruction = `You are KorsIQ Academic Reviewer, an exacting academic editor and peer-review referee.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Reviewer, an exacting academic editor and peer-review referee.
 Audit the submitted academic draft across 9 dimensions:
 1. Grammar, spelling and mechanics.
 2. Academic tone and formal scholarly register.
@@ -2584,7 +2627,11 @@ Output JSON schema:
         });
       }
 
-      const systemInstruction = `You are KorsIQ In-Context Academic Assistant.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ In-Context Academic Assistant.
 The student has selected a piece of text from their academic paper ("${docTitle || 'Academic Paper'}", Section: "${sectionTitle || 'General'}") and asked you to transform it according to their instructions.
 Maintain formal academic diction, clear syntax, and objective reasoning. Return ONLY the transformed text with no conversational preamble.`;
 
@@ -2616,11 +2663,13 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         return res.status(503).json({ error: "Our AI service is temporarily unavailable. Please try again shortly." });
       }
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       let systemPrompt = "";
       let userPrompt = "";
 
       if (mode === "quiz") {
-        systemPrompt = "You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.";
+        systemPrompt = `${studentContext}\n\nYou are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.`;
         
         userPrompt = `Analyze the following study text and generate a comprehensive multiple-choice quiz containing exactly 5 challenging questions.
         
@@ -2641,7 +2690,7 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         "${studyMaterial}"`;
 
       } else if (mode === "flashcards") {
-        systemPrompt = "You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.";
+        systemPrompt = `${studentContext}\n\nYou are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
         
         userPrompt = `Analyze the following study text and extract key terms, concepts, or formulas to generate exactly 8 high-quality study flashcards.
         
@@ -2865,7 +2914,7 @@ You MUST return a JSON object containing structured study assets with this exact
 
   // Advanced Academic AI Companion / tutoring endpoint
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
-    const { messages, courseContext, fileContent, academicProfile } = req.body;
+    const { messages, courseContext, fileContent } = req.body;
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
@@ -2874,34 +2923,11 @@ You MUST return a JSON object containing structured study assets with this exact
         });
       }
 
-      const dept = academicProfile?.department?.trim() || '';
-      const uni = academicProfile?.university?.trim() || academicProfile?.institution?.trim() || '';
-      const level = academicProfile?.level?.trim() || 'Undergraduate';
-      const registeredCourses = Array.isArray(academicProfile?.registeredCourses) && academicProfile.registeredCourses.length > 0 
-        ? academicProfile.registeredCourses.join(', ')
-        : '';
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
 
-      let systemPrompt = `You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.`;
+      let systemPrompt = `${studentContext}
 
-      if (dept) {
-        systemPrompt += `\n\nDISCIPLINE & ACADEMIC SPECIALIZATION:
-You are assisting a university student specializing in ${dept}${uni ? ` at ${uni}` : ''} at the ${level} level.
-${registeredCourses ? `Registered Courses: ${registeredCourses}` : ''}
-
-ACADEMIC RIGOR & INSTRUCTIONAL STANDARDS:
-1. Department-Specific Reasoning: Demonstrate deep, subject-specific expertise in ${dept}. Adapt explanations, terminology, methodologies, and technical formulations directly to this discipline (e.g. for Building Technology, ground explanations in structural mechanics, construction management, materials science, and building services; for Computer Science, ground in algorithms, computational complexity, systems architecture, and engineering patterns; for Law, ground in jurisprudence, statutory interpretation, case law, and procedural doctrine; for Medicine/Nursing, ground in pathophysiology, clinical pharmacology, and evidence-based practice).
-2. Intellectual Depth: Never provide shallow, generic, or conversational filler responses. Provide thorough, step-by-step academic analysis with rigorous conceptual foundations.
-3. Practical Application & Case Examples: Illustrate abstract concepts with practical, discipline-specific applications and real-world scenarios relevant to the student's field.
-4. Diagnostic Pedagogical Support: Probe conceptual misunderstandings, highlight common student misconceptions in the subject, and ask incisive clarification questions when an academic question lacks necessary parameters.
-5. Absolute Academic Integrity: Clearly distinguish established empirical facts/laws from theoretical assumptions. Never fabricate citations, data, or experimental results. If a reference or specific campus guideline is unknown, explicitly state what is verifiable.
-6. Contextual Balance: Use the student's discipline as foundational academic context without forcing unrelated general questions into an artificial department framing.`;
-      } else {
-        systemPrompt += `\n\nACADEMIC RIGOR & INSTRUCTIONAL STANDARDS:
-1. Intellectual Depth: Guide university students to intellectual mastery through deep conceptual explanation, clear step-by-step logic, and rigorous academic reasoning.
-2. Subject Precision: Use precise academic terminology and avoid shallow, generic summaries.
-3. Practical Application: Illustrate abstract theories with concrete, structured examples.
-4. Academic Integrity: Always distinguish established facts from assumptions; never invent citations or unverified data.`;
-      }
+You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.`;
 
       if (courseContext) {
         systemPrompt += `\n\nACTIVE COURSE CONTEXT:
@@ -2966,11 +2992,15 @@ Always refer to this context when answering questions about the material, explai
         return res.json(getMaterialsFallback(cleanContent, type));
       }
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       let systemInstruction = "";
       let userContent = "";
 
       if (type === 'summary') {
-        systemInstruction = `You are an elite, student-friendly academic tutor.
+        systemInstruction = `${studentContext}
+
+You are an elite, student-friendly academic tutor.
 Generate a clear, clean, highly readable Markdown summary of the provided study material.
 
 CRITICAL WRITING RULES:
@@ -2980,7 +3010,9 @@ CRITICAL WRITING RULES:
 - Focus on practical understanding, real-world examples, and maximum clarity.`;
         userContent = content;
       } else if (type === 'flashcards') {
-        systemInstruction = 'You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.';
+        systemInstruction = `${studentContext}
+
+You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
         userContent = `Analyze the following study text and extract key terms, concepts, or formulas to generate exactly 8 high-quality study flashcards.
       
       You MUST strictly return a JSON object containing an array named "flashcards" matching this schema format exactly:
@@ -2997,7 +3029,9 @@ CRITICAL WRITING RULES:
       Study Text:
       "${content}"`;
       } else if (type === 'quiz') {
-        systemInstruction = 'You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.';
+        systemInstruction = `${studentContext}
+
+You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.`;
         userContent = `Analyze the following study text and generate a comprehensive multiple-choice quiz containing exactly 5 challenging questions.
       
       You MUST strictly return a JSON object containing an array named "quiz" matching this schema format exactly:
@@ -3016,7 +3050,9 @@ CRITICAL WRITING RULES:
       Study Text:
       "${content}"`;
       } else if (type === 'test') {
-        systemInstruction = `Generate a comprehensive exam simulation with 8 questions from the provided text content.
+        systemInstruction = `${studentContext}
+
+Generate a comprehensive exam simulation with 8 questions from the provided text content.
             You must return a valid JSON object with key "test" containing an array of 8 questions.
             Include 4 Multiple-Choice questions and 4 True/False questions.
             Make sure the True/False questions have exactly two options: ["True", "False"].
@@ -3063,10 +3099,13 @@ CRITICAL WRITING RULES:
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
 
     try {
+      // Fetch server-authenticated student context
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       // Generate script using Google Gemini
       let rawScript = '';
       try {
-        rawScript = await generateGeminiPodcastScript(studyText);
+        rawScript = await generateGeminiPodcastScript(studyText, studentContext);
       } catch (geminiErr: any) {
         console.warn('Gemini podcast generation error:', geminiErr?.message || geminiErr);
       }

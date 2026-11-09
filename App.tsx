@@ -748,6 +748,7 @@ const App: React.FC = () => {
           schedule={schedule} 
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }} 
           onNavigate={(tab) => { setActiveTab(tab); }}
+          onUpdateProfile={handleSaveProfile}
         />;
     }
   };
