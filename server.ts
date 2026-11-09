@@ -14,6 +14,7 @@ import {
   selectRelevantChunks 
 } from './lib/documentProcessor';
 import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
+import { buildStudentContext } from './lib/studentContext';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -165,7 +166,16 @@ export async function createExpressApp() {
 
   // URL normalizer: ensure incoming paths match Express /api routes on all hosting providers
   app.use((req, _res, next) => {
-    if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/assets') && req.url !== '/' && req.url !== '/index.html' && !req.url.startsWith('/vite')) {
+    if (
+      req.url && 
+      !req.url.startsWith('/api') && 
+      !req.url.startsWith('/assets') && 
+      req.url !== '/' && 
+      req.url !== '/index.html' && 
+      !req.url.startsWith('/vite') &&
+      req.url !== '/admin' &&
+      !req.url.startsWith('/admin')
+    ) {
       req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
     }
     next();
@@ -221,11 +231,26 @@ export async function createExpressApp() {
         console.warn('[Auth Middleware] Token verification failed:', error?.message || 'User not found');
         return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
       }
-      req.user = { uid: data.user.id, email: data.user.email };
+      req.user = { uid: data.user.id, id: data.user.id, email: data.user.email };
       next();
     } catch (err: any) {
       console.warn('[Auth Middleware] Error verifying token:', err?.message || err);
       return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
+    }
+  };
+
+  // Helper to fetch server-authenticated student profile & courses for AI tailoring
+  const getStudentContextForUser = async (userId?: string): Promise<string> => {
+    if (!supabaseAdmin || !userId) return buildStudentContext(null, []);
+    try {
+      const [profileRes, coursesRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('department, major, level, university, name').eq('id', userId).maybeSingle(),
+        supabaseAdmin.from('courses').select('code, title, units').eq('user_id', userId)
+      ]);
+      return buildStudentContext(profileRes.data, coursesRes.data || []);
+    } catch (err) {
+      console.warn('Failed to fetch student context for AI:', err);
+      return buildStudentContext(null, []);
     }
   };
 
@@ -1855,8 +1880,8 @@ Synthesizing these insights underscores the necessity of continuous recalibratio
       .trim();
   }
 
-  async function generateGeminiPodcastScript(studyMaterial: string): Promise<string> {
-    const systemInstruction = `You are an expert producer for KorsIQ Academic Podcasts.
+  async function generateGeminiPodcastScript(studyMaterial: string, studentContext: string = ''): Promise<string> {
+    const systemInstruction = `${studentContext ? `${studentContext}\n\n` : ''}You are an expert producer for KorsIQ Academic Podcasts.
 Create a natural, highly engaging, exam-focused dialogue conversation (4 to 6 exchanges) between two podcast hosts:
 Host 1 (Alex): Curious, intelligent, engaging student host who asks thoughtful questions and summarizes key takeaways.
 Host 2 (Dr. Taylor): Analytical, friendly, explanatory professor host who breaks down complex concepts with clear real-world examples.
@@ -2036,135 +2061,6 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
     reason: "KorsIQ Academic Integrity Validation passed in preview mode."
   });
 
-  // Proxy Groq / Gemini Chat
-  app.post('/api/ai/chat', requireAuth, apiRateLimiter, async (req, res) => {
-    const { messages, groupName, groupDesc } = req.body;
-    try {
-      const apiKey = getAIKey();
-      if (!apiKey) {
-        return res.json(getChatFallback(groupName));
-      }
-      const prompt = `You are the KorsIQ Study Bot assigned to the group "${groupName}". 
-      Group Purpose: ${groupDesc}. 
-      Conversation History: ${JSON.stringify(messages)}. 
-      Respond to the latest query as a helpful, academic, and slightly tactical AI assistant.`;
-      
-      const aiContent = await runAICall({
-        messages: [{ role: 'user', content: prompt }]
-      });
-      res.json({ text: aiContent });
-    } catch (error: any) {
-      console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
-      res.json(getChatFallback(groupName));
-    }
-  });
-
-  // Dedicated Group AI Study Endpoint (Grounded strictly in group materials)
-  app.post('/api/groups/ai', requireAuth, apiRateLimiter, async (req, res) => {
-    const { groupId, groupName, groupCourse, prompt, mode, materialsContent } = req.body;
-    const requestingUserId = (req as any).user?.id;
-
-    try {
-      if (!groupId) {
-        return res.status(400).json({ error: 'groupId parameter is required' });
-      }
-
-      // Check circle membership & authorization
-      if (supabaseAdmin && requestingUserId) {
-        const { data: memberRow } = await supabaseAdmin
-          .from('circle_members')
-          .select('id')
-          .eq('circle_id', groupId)
-          .eq('user_id', requestingUserId)
-          .maybeSingle();
-
-        if (!memberRow) {
-          const { data: grp } = await supabaseAdmin
-            .from('study_groups')
-            .select('owner_id, type, visibility, members')
-            .eq('id', groupId)
-            .maybeSingle();
-
-          const isOwner = grp?.owner_id === requestingUserId;
-          const isPublic = grp?.type === 'general' || grp?.visibility === 'public';
-          const isInMembers = Array.isArray(grp?.members) && grp.members.some((m: any) =>
-            typeof m === 'string' ? m === requestingUserId : m.userId === requestingUserId
-          );
-
-          if (!isOwner && !isPublic && !isInMembers) {
-            return res.status(403).json({ error: 'You must be a member of this study circle to access its AI assistant.' });
-          }
-        }
-      }
-
-      // Gather materials context strictly for this circle
-      let materialsContext = '';
-      const indexedResources: string[] = [];
-
-      if (supabaseAdmin) {
-        const { data: mats } = await supabaseAdmin
-          .from('group_materials')
-          .select('file_name, extracted_text, content, status')
-          .eq('group_id', groupId);
-
-        if (mats && mats.length > 0) {
-          const validMats = mats.filter((m: any) => (m.extracted_text || m.content) && m.status !== 'failed');
-          validMats.forEach((m: any) => {
-            indexedResources.push(m.file_name);
-            const text = m.extracted_text || m.content || '';
-            materialsContext += `\n\n--- RESOURCE: "${m.file_name}" ---\n${text.slice(0, 14000)}\n--- END RESOURCE ---`;
-          });
-        }
-      }
-
-      // Fallback to client-provided materials text if DB query returned none
-      if (!materialsContext && materialsContent && typeof materialsContent === 'string') {
-        materialsContext = materialsContent.slice(0, 20000);
-      }
-
-      const apiKey = getAIKey();
-      if (!apiKey) {
-        return res.status(503).json({
-          error: 'AI service is currently unavailable. Please verify GEMINI_API_KEY is configured in your server environment.'
-        });
-      }
-
-      let systemInstruction = `You are KorsIQ Academic Assistant, assigned exclusively to the Study Circle: "${groupName || 'Study Circle'}" (Course: ${groupCourse || 'Curriculum'}).
-
-CRITICAL GROUNDING RULES:
-1. You MUST ground all explanations, answers, and summaries strictly in the uploaded Circle Resources below.
-2. For EVERY answer, explanation, or key point, you MUST cite the exact resource file you used, formatted as [Resource: filename].
-3. STRICT ISOLATION: Do NOT use or reference materials from outside this study circle.
-4. If the question cannot be answered using the uploaded circle materials, say clearly: "The uploaded circle materials do not contain sufficient information on this topic. Please upload relevant lecture slides or notes to the Resources tab."
-5. Format your response cleanly using student-friendly Markdown with headings and bullet points.`;
-
-      if (materialsContext.trim().length > 0) {
-        systemInstruction += `\n\nUPLOADED CIRCLE RESOURCES:\n${materialsContext}`;
-      } else {
-        systemInstruction += `\n\nNOTE: No documents are currently uploaded or indexed for this circle. Inform the student to upload study materials in the Resources tab so you can analyze them.`;
-      }
-
-      if (mode === 'quiz') {
-        systemInstruction += `\n\nSPECIAL TASK: Generate a 5-question multiple choice practice quiz based strictly on the uploaded materials. For each question, cite [Resource: filename] and provide an explanation.`;
-      } else if (mode === 'summarize') {
-        systemInstruction += `\n\nSPECIAL TASK: Provide a structured academic summary of the uploaded resources, citing [Resource: filename] for each topic.`;
-      } else if (mode === 'topics') {
-        systemInstruction += `\n\nSPECIAL TASK: Identify high-yield exam topics and definitions from the uploaded resources, citing [Resource: filename].`;
-      }
-
-      const aiContent = await runAICall({
-        systemInstruction,
-        messages: [{ role: 'user', content: prompt || 'Analyze and summarize the group study materials.' }],
-        temperature: 0.3
-      });
-
-      res.json({ text: aiContent, indexedResources });
-    } catch (error: any) {
-      console.error('Circle AI study endpoint error:', error?.message || error);
-      res.status(500).json({ error: error?.message || 'Failed to process circle AI request.' });
-    }
-  });
-
   // Magic Import
   app.post('/api/ai/import', requireAuth, apiRateLimiter, async (req, res) => {
     const { text } = req.body;
@@ -2194,8 +2090,11 @@ CRITICAL GROUNDING RULES:
       if (!apiKey) {
         return res.json(getScheduleFallback(courses, university));
       }
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
       const aiContent = await runAICall({
-        systemInstruction: `Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
+        systemInstruction: `${studentContext}
+
+Create a weekly study schedule (Monday-Sunday) for a student at ${university}. 
         You must return a valid JSON object with a "schedule" key containing an array of sessions. 
         Each session object must have:
         - "courseId": string (id/code of course)
@@ -2274,6 +2173,8 @@ CRITICAL GROUNDING RULES:
         return res.json({ success: true, analysis: mathFallback });
       }
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       const promptContext = `
 STUDENT ACADEMIC CONTEXT:
 - Current CGPA: ${baseData.currentCgpa.toFixed(2)}
@@ -2291,7 +2192,9 @@ STUDENT ACADEMIC CONTEXT:
 `;
 
       const aiContent = await runAICall({
-        systemInstruction: `You are KorsIQ Academic Reasoning Advisor.
+        systemInstruction: `${studentContext}
+
+You are KorsIQ Academic Reasoning Advisor.
 Evaluate the student's target CGPA using rigorous academic math and pedagogical wisdom.
 Be honest, constructive, and highly encouraging.
 Return a valid JSON object matching:
@@ -2341,8 +2244,12 @@ Target CGPA: ${targetCgpa || 0}, Current CGPA: ${currentCgpa || 0}.
 Preferred daily study hours: ${preferredStudyHours || 2}.
 Upcoming Examination Date: ${examDate || 'Not set'}.`;
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       const aiContent = await runAICall({
-        systemInstruction: `You are KorsIQ Personalized Timetable and Revision Architect.
+        systemInstruction: `${studentContext}
+
+You are KorsIQ Personalized Timetable and Revision Architect.
 Create:
 1. "timetable": Array of 7 weekly study sessions (Monday-Sunday) tailored to the student's actual courses.
 Each session object:
@@ -2398,7 +2305,11 @@ Return JSON with "timetable" and "revisionPlans" arrays.`,
         });
       }
 
-      const systemInstruction = `You are KorsIQ Academic Adviser, a brilliant, compassionate, and mathematically precise academic mentor.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Adviser, a brilliant, compassionate, and mathematically precise academic mentor.
 You guide university and college students toward intellectual mastery and achieving their target CGPA.
 
 STUDENT ACADEMIC PROFILE:
@@ -2452,7 +2363,11 @@ RULES:
         .map((r: any, idx: number) => `[Source ${idx + 1}] "${r.title}" by ${r.authors || 'Unknown'} (${r.year || 'n.d.'}): ${r.contentSnippet ? r.contentSnippet.slice(0, 300) : ''}`)
         .join('\n');
 
-      const systemInstruction = `You are KorsIQ Academic Studio Planning Engine, an expert academic advisor, curriculum specialist, and research director.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Studio Planning Engine, an expert academic advisor, curriculum specialist, and research director.
 Your goal is to formulate an evidence-based, logically coherent, and tailored academic outline for a student's paper.
 
 CRITICAL RULES:
@@ -2573,7 +2488,11 @@ Output JSON format:
         instructionModifier = `INSERT CITATIONS: Seamlessly integrate precise in-text citations using ${style} style based on the provided reference materials. Never fabricate fake citations.`;
       }
 
-      const systemInstruction = `You are KorsIQ Academic Writing Engine, a world-class academic scholar and writer.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Writing Engine, a world-class academic scholar and writer.
 You generate rigorous, publication-grade academic prose for university students.
 
 CRITICAL INTEGRITY & CITATION RULES:
@@ -2631,7 +2550,11 @@ Return your response in clean Markdown formatting ready for direct insertion int
         return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
       }
 
-      const systemInstruction = `You are KorsIQ Academic Reviewer, an exacting academic editor and peer-review referee.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ Academic Reviewer, an exacting academic editor and peer-review referee.
 Audit the submitted academic draft across 9 dimensions:
 1. Grammar, spelling and mechanics.
 2. Academic tone and formal scholarly register.
@@ -2704,7 +2627,11 @@ Output JSON schema:
         });
       }
 
-      const systemInstruction = `You are KorsIQ In-Context Academic Assistant.
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
+      const systemInstruction = `${studentContext}
+
+You are KorsIQ In-Context Academic Assistant.
 The student has selected a piece of text from their academic paper ("${docTitle || 'Academic Paper'}", Section: "${sectionTitle || 'General'}") and asked you to transform it according to their instructions.
 Maintain formal academic diction, clear syntax, and objective reasoning. Return ONLY the transformed text with no conversational preamble.`;
 
@@ -2736,11 +2663,13 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         return res.status(503).json({ error: "Our AI service is temporarily unavailable. Please try again shortly." });
       }
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       let systemPrompt = "";
       let userPrompt = "";
 
       if (mode === "quiz") {
-        systemPrompt = "You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.";
+        systemPrompt = `${studentContext}\n\nYou are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.`;
         
         userPrompt = `Analyze the following study text and generate a comprehensive multiple-choice quiz containing exactly 5 challenging questions.
         
@@ -2761,7 +2690,7 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         "${studyMaterial}"`;
 
       } else if (mode === "flashcards") {
-        systemPrompt = "You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.";
+        systemPrompt = `${studentContext}\n\nYou are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
         
         userPrompt = `Analyze the following study text and extract key terms, concepts, or formulas to generate exactly 8 high-quality study flashcards.
         
@@ -2985,7 +2914,7 @@ You MUST return a JSON object containing structured study assets with this exact
 
   // Advanced Academic AI Companion / tutoring endpoint
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
-    const { messages, courseContext, fileContent, academicProfile } = req.body;
+    const { messages, courseContext, fileContent } = req.body;
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
@@ -2994,34 +2923,11 @@ You MUST return a JSON object containing structured study assets with this exact
         });
       }
 
-      const dept = academicProfile?.department?.trim() || '';
-      const uni = academicProfile?.university?.trim() || academicProfile?.institution?.trim() || '';
-      const level = academicProfile?.level?.trim() || 'Undergraduate';
-      const registeredCourses = Array.isArray(academicProfile?.registeredCourses) && academicProfile.registeredCourses.length > 0 
-        ? academicProfile.registeredCourses.join(', ')
-        : '';
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
 
-      let systemPrompt = `You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.`;
+      let systemPrompt = `${studentContext}
 
-      if (dept) {
-        systemPrompt += `\n\nDISCIPLINE & ACADEMIC SPECIALIZATION:
-You are assisting a university student specializing in ${dept}${uni ? ` at ${uni}` : ''} at the ${level} level.
-${registeredCourses ? `Registered Courses: ${registeredCourses}` : ''}
-
-ACADEMIC RIGOR & INSTRUCTIONAL STANDARDS:
-1. Department-Specific Reasoning: Demonstrate deep, subject-specific expertise in ${dept}. Adapt explanations, terminology, methodologies, and technical formulations directly to this discipline (e.g. for Building Technology, ground explanations in structural mechanics, construction management, materials science, and building services; for Computer Science, ground in algorithms, computational complexity, systems architecture, and engineering patterns; for Law, ground in jurisprudence, statutory interpretation, case law, and procedural doctrine; for Medicine/Nursing, ground in pathophysiology, clinical pharmacology, and evidence-based practice).
-2. Intellectual Depth: Never provide shallow, generic, or conversational filler responses. Provide thorough, step-by-step academic analysis with rigorous conceptual foundations.
-3. Practical Application & Case Examples: Illustrate abstract concepts with practical, discipline-specific applications and real-world scenarios relevant to the student's field.
-4. Diagnostic Pedagogical Support: Probe conceptual misunderstandings, highlight common student misconceptions in the subject, and ask incisive clarification questions when an academic question lacks necessary parameters.
-5. Absolute Academic Integrity: Clearly distinguish established empirical facts/laws from theoretical assumptions. Never fabricate citations, data, or experimental results. If a reference or specific campus guideline is unknown, explicitly state what is verifiable.
-6. Contextual Balance: Use the student's discipline as foundational academic context without forcing unrelated general questions into an artificial department framing.`;
-      } else {
-        systemPrompt += `\n\nACADEMIC RIGOR & INSTRUCTIONAL STANDARDS:
-1. Intellectual Depth: Guide university students to intellectual mastery through deep conceptual explanation, clear step-by-step logic, and rigorous academic reasoning.
-2. Subject Precision: Use precise academic terminology and avoid shallow, generic summaries.
-3. Practical Application: Illustrate abstract theories with concrete, structured examples.
-4. Academic Integrity: Always distinguish established facts from assumptions; never invent citations or unverified data.`;
-      }
+You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.`;
 
       if (courseContext) {
         systemPrompt += `\n\nACTIVE COURSE CONTEXT:
@@ -3086,11 +2992,15 @@ Always refer to this context when answering questions about the material, explai
         return res.json(getMaterialsFallback(cleanContent, type));
       }
 
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       let systemInstruction = "";
       let userContent = "";
 
       if (type === 'summary') {
-        systemInstruction = `You are an elite, student-friendly academic tutor.
+        systemInstruction = `${studentContext}
+
+You are an elite, student-friendly academic tutor.
 Generate a clear, clean, highly readable Markdown summary of the provided study material.
 
 CRITICAL WRITING RULES:
@@ -3100,7 +3010,9 @@ CRITICAL WRITING RULES:
 - Focus on practical understanding, real-world examples, and maximum clarity.`;
         userContent = content;
       } else if (type === 'flashcards') {
-        systemInstruction = 'You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.';
+        systemInstruction = `${studentContext}
+
+You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
         userContent = `Analyze the following study text and extract key terms, concepts, or formulas to generate exactly 8 high-quality study flashcards.
       
       You MUST strictly return a JSON object containing an array named "flashcards" matching this schema format exactly:
@@ -3117,7 +3029,9 @@ CRITICAL WRITING RULES:
       Study Text:
       "${content}"`;
       } else if (type === 'quiz') {
-        systemInstruction = 'You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.';
+        systemInstruction = `${studentContext}
+
+You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.`;
         userContent = `Analyze the following study text and generate a comprehensive multiple-choice quiz containing exactly 5 challenging questions.
       
       You MUST strictly return a JSON object containing an array named "quiz" matching this schema format exactly:
@@ -3136,7 +3050,9 @@ CRITICAL WRITING RULES:
       Study Text:
       "${content}"`;
       } else if (type === 'test') {
-        systemInstruction = `Generate a comprehensive exam simulation with 8 questions from the provided text content.
+        systemInstruction = `${studentContext}
+
+Generate a comprehensive exam simulation with 8 questions from the provided text content.
             You must return a valid JSON object with key "test" containing an array of 8 questions.
             Include 4 Multiple-Choice questions and 4 True/False questions.
             Make sure the True/False questions have exactly two options: ["True", "False"].
@@ -3183,10 +3099,13 @@ CRITICAL WRITING RULES:
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
 
     try {
+      // Fetch server-authenticated student context
+      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+
       // Generate script using Google Gemini
       let rawScript = '';
       try {
-        rawScript = await generateGeminiPodcastScript(studyText);
+        rawScript = await generateGeminiPodcastScript(studyText, studentContext);
       } catch (geminiErr: any) {
         console.warn('Gemini podcast generation error:', geminiErr?.message || geminiErr);
       }
@@ -3218,40 +3137,370 @@ CRITICAL WRITING RULES:
   app.post('/api/ai/podcast', requireAuth, apiRateLimiter, handlePodcastGeneration);
   app.post('/api/podcast/generate', requireAuth, apiRateLimiter, handlePodcastGeneration);
 
-  // Message Validation Route
-  app.post('/api/ai/validate', requireAuth, apiRateLimiter, async (req, res) => {
-    const { text, message, groupName, groupDesc } = req.body;
-    const msgText = text || message || '';
-    try {
-      const apiKey = getAIKey();
-      if (!apiKey) {
-        return res.json(getValidateFallback());
+  // ==========================================
+  // OTP-ONLY ADMIN AUTH & MANAGEMENT API
+  // ==========================================
+
+  const adminOtpCooldowns = new Map<string, number>();
+  const adminIpRateLimits = new Map<string, number[]>();
+
+  async function logAdminAction(adminEmail: string, action: string, details: any = {}, ipAddress: string = '') {
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('admin_audit_log').insert({
+          admin_email: adminEmail,
+          action,
+          details,
+          ip_address: ipAddress
+        });
+      } catch (err) {
+        console.warn('[Admin Audit] Failed to record audit log:', err);
       }
-      const rawContent = await runAICall({
-        systemInstruction: 'Evaluate if the message is relevant to the purpose of the study group. You must return a valid JSON object: { "isRelevant": boolean, "reason": string }',
-        messages: [
-          {
-            role: 'user',
-            content: `Group Name: "${groupName}"
-            Group Description: ${groupDesc}
-            Message: "${msgText}"`
-          }
-        ],
-        jsonMode: true
+    }
+  }
+
+  // 1. Submit email to request 6-digit OTP
+  app.post('/api/admin/auth/request-otp', async (req, res) => {
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+    if (!rawEmail || !rawEmail.includes('@')) {
+      return res.status(400).json({ success: false, error: 'A valid email address is required.' });
+    }
+
+    // Rate limit per IP: max 10 requests per 15 minutes
+    const now = Date.now();
+    const ipTimes = (adminIpRateLimits.get(ip) || []).filter(t => now - t < 15 * 60 * 1000);
+    if (ipTimes.length >= 10) {
+      return res.status(429).json({ success: false, error: 'Too many requests. Please wait a few minutes before trying again.' });
+    }
+    ipTimes.push(now);
+    adminIpRateLimits.set(ip, ipTimes);
+
+    // Rate limit per email: 60-second cooldown
+    const lastSent = adminOtpCooldowns.get(rawEmail) || 0;
+    if (now - lastSent < 60 * 1000) {
+      const waitSec = Math.ceil((60 * 1000 - (now - lastSent)) / 1000);
+      return res.status(429).json({ success: false, error: `Please wait ${waitSec} seconds before requesting a new code.` });
+    }
+
+    // Generic response identical whether authorized or not
+    const GENERIC_SUCCESS_RESPONSE = {
+      success: true,
+      message: 'If this email is authorized, a 6-digit verification code has been sent.'
+    };
+
+    try {
+      if (!supabaseAdmin || !supabaseAuthClient) {
+        console.warn('[Admin Auth] Supabase admin or auth client unavailable');
+        return res.json(GENERIC_SUCCESS_RESPONSE);
+      }
+
+      // Check allowlist table `admin_users`
+      const { data: adminRow, error: adminErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .eq('email', rawEmail)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (adminErr || !adminRow) {
+        // Unknown or inactive email: do not send code, return identical message
+        await logAdminAction(rawEmail, 'admin_otp_requested_unauthorized', { ip }, ip);
+        return res.json(GENERIC_SUCCESS_RESPONSE);
+      }
+
+      // Authorized admin: trigger Supabase email OTP
+      const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
+        email: rawEmail,
+        options: {
+          shouldCreateUser: false
+        }
       });
-      
-      res.json(JSON.parse(rawContent || '{}'));
-    } catch (error: any) {
-      console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
-      res.json(getValidateFallback());
+
+      if (otpError) {
+        console.error('[Admin Auth] Supabase signInWithOtp error:', otpError.message);
+      }
+
+      adminOtpCooldowns.set(rawEmail, now);
+      await logAdminAction(rawEmail, 'admin_otp_sent', { role: adminRow.role, ip }, ip);
+
+      return res.json(GENERIC_SUCCESS_RESPONSE);
+    } catch (err: any) {
+      console.error('[Admin Auth] Request OTP error:', err);
+      return res.json(GENERIC_SUCCESS_RESPONSE);
     }
   });
 
-  // ==========================================
-  // ADMIN ACCESS & AUTHORIZATION
-  // Legacy admin endpoints deleted for planned rebuild.
-  // See architectural specification at docs/specs/admin-dashboard-plan.md
-  // ==========================================
+  // 2. Verify 6-digit OTP
+  app.post('/api/admin/auth/verify-otp', async (req, res) => {
+    const ip = req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+
+    if (!rawEmail || !token) {
+      return res.status(400).json({ success: false, error: 'Email and 6-digit verification code are required.' });
+    }
+
+    if (!supabaseAdmin || !supabaseAuthClient) {
+      return res.status(503).json({ success: false, error: 'Authentication service unavailable.' });
+    }
+
+    try {
+      // 1. Verify code via Supabase Auth
+      const { data, error } = await supabaseAuthClient.auth.verifyOtp({
+        email: rawEmail,
+        token,
+        type: 'email'
+      });
+
+      if (error || !data.user) {
+        await logAdminAction(rawEmail, 'admin_otp_verify_failed', { error: error?.message, ip }, ip);
+        return res.status(401).json({ success: false, error: 'Invalid or expired 6-digit verification code.' });
+      }
+
+      // 2. Cryptographically re-verify against admin_users allowlist
+      const { data: adminRow, error: allowErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .eq('email', rawEmail)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (allowErr || !adminRow) {
+        await logAdminAction(rawEmail, 'admin_access_denied_not_allowlisted', { ip }, ip);
+        return res.status(403).json({ success: false, error: 'Access denied: Email is not an authorized administrator.' });
+      }
+
+      await logAdminAction(rawEmail, 'admin_sign_in_success', { role: adminRow.role, ip }, ip);
+
+      return res.json({
+        success: true,
+        user: {
+          id: adminRow.id,
+          email: adminRow.email,
+          role: adminRow.role
+        },
+        session: data.session
+      });
+    } catch (err: any) {
+      console.error('[Admin Auth] Verify error:', err);
+      return res.status(500).json({ success: false, error: 'Failed to verify admin code.' });
+    }
+  });
+
+  // 3. Strict Admin Authorization Middleware for Protected Admin API
+  const requireAdminAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!supabaseAdmin || !supabaseAuthClient) {
+      return res.status(503).json({ success: false, error: 'Admin service unavailable: Supabase credentials unconfigured.' });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing admin authorization token.' });
+    }
+
+    const token = authHeader.substring(7).trim();
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Missing access token.' });
+    }
+
+    try {
+      // Cryptographically validate JWT against Supabase Auth
+      const { data, error } = await supabaseAuthClient.auth.getUser(token);
+      if (error || !data.user || !data.user.email) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Admin session expired or invalid.' });
+      }
+
+      const email = data.user.email.toLowerCase().trim();
+
+      // Re-check active admin status in admin_users
+      const { data: adminRow, error: allowErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .eq('email', email)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (allowErr || !adminRow) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Admin privileges inactive or revoked.' });
+      }
+
+      (req as any).adminUser = adminRow;
+      next();
+    } catch (err: any) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Token validation failed.' });
+    }
+  };
+
+  // 4. Admin Dashboard API: Overview
+  app.get('/api/admin/overview', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const [profilesRes, subsRes, groupsRes, logsRes] = await Promise.all([
+        supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }),
+        supabaseAdmin.from('subscriptions').select('id, amount_paid, status, created_at').eq('status', 'active'),
+        supabaseAdmin.from('study_groups').select('id', { count: 'exact', head: true }),
+        supabaseAdmin.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(10)
+      ]);
+
+      const now = new Date();
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const monthRevenue = (subsRes.data || [])
+        .filter((s: any) => s.created_at >= firstOfMonth)
+        .reduce((sum: number, s: any) => sum + (Number(s.amount_paid) || 0), 0);
+
+      res.json({
+        success: true,
+        data: {
+          totalUsers: profilesRes.count || 0,
+          activeSubscriptions: subsRes.data?.length || 0,
+          monthRevenue,
+          totalCircles: groupsRes.count || 0,
+          recentLogs: logsRes.data || []
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch overview metrics.' });
+    }
+  });
+
+  // 5. Admin Dashboard API: Users search
+  app.get('/api/admin/users', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+    try {
+      let query = supabaseAdmin
+        .from('profiles')
+        .select('id, email, name, university, department, level, tier, is_pro, subscription_status, created_at')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (search) {
+        query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, users: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch users.' });
+    }
+  });
+
+  // 6. Admin Dashboard API: Subscriptions / Transactions
+  app.get('/api/admin/subscriptions', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('subscriptions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json({ success: true, subscriptions: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch subscriptions.' });
+    }
+  });
+
+  // 7. Admin Dashboard API: Manual Grant / Revoke Subscription
+  app.post('/api/admin/subscriptions/grant-tier', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const { userId, targetTier } = req.body;
+    const admin = (req as any).adminUser;
+
+    if (!userId || !targetTier) {
+      return res.status(400).json({ success: false, error: 'userId and targetTier are required.' });
+    }
+
+    try {
+      const isPro = targetTier === 'plus' || targetTier === 'studio';
+      const status = isPro ? 'active' : 'inactive';
+
+      // Update profile
+      await supabaseAdmin
+        .from('profiles')
+        .update({
+          tier: targetTier,
+          is_pro: isPro,
+          subscription_tier: targetTier,
+          subscription_status: status
+        })
+        .eq('id', userId);
+
+      // Record in subscriptions
+      await supabaseAdmin.from('subscriptions').insert({
+        user_id: userId,
+        plan_tier: targetTier,
+        billing_cycle: 'monthly',
+        status,
+        payment_provider: 'manual_admin',
+        payment_status: isPro ? 'paid' : 'none',
+        amount_paid: 0,
+        currency: 'NGN',
+        current_period_start: new Date().toISOString()
+      });
+
+      await logAdminAction(admin.email, 'admin_grant_tier', { userId, targetTier });
+
+      res.json({ success: true, message: `Successfully updated user tier to ${targetTier}.` });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to update user tier.' });
+    }
+  });
+
+  // 8. Admin Dashboard API: Circles list
+  app.get('/api/admin/circles', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('study_groups')
+        .select('id, name, course, type, owner_id, member_count, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json({ success: true, circles: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to list circles.' });
+    }
+  });
+
+  // 9. Admin Dashboard API: Remove inappropriate Circle Post
+  app.delete('/api/admin/circles/posts/:postId', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const postId = req.params.postId;
+    const admin = (req as any).adminUser;
+
+    try {
+      const { error } = await supabaseAdmin.from('circle_discussions').delete().eq('id', postId);
+      if (error) throw error;
+      await logAdminAction(admin.email, 'admin_delete_circle_post', { postId });
+      res.json({ success: true, message: 'Circle post deleted.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to delete post.' });
+    }
+  });
+
+  // 10. Admin Dashboard API: Audit log
+  app.get('/api/admin/audit-log', requireAdminAuth, async (_req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('admin_audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      res.json({ success: true, logs: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit log.' });
+    }
+  });
 
   // ==========================================
   // PUBLIC / STUDENT CIRCLES API ENDPOINTS

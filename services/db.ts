@@ -1480,6 +1480,13 @@ export const DBService = {
           authorAvatar: d.author_avatar,
           title: d.title,
           content: d.content,
+          postType: d.post_type || 'thread',
+          isPinned: Boolean(d.is_pinned),
+          fileUrl: d.file_url,
+          fileName: d.file_name,
+          fileSize: d.file_size,
+          fileType: d.file_type,
+          repliesCount: d.replies_count || (repliesByDisc[d.id] || []).length,
           timestamp: new Date(d.created_at).getTime(),
           replies: repliesByDisc[d.id] || [],
         }));
@@ -1495,7 +1502,19 @@ export const DBService = {
 
   async createCircleDiscussion(
     circleId: string,
-    post: { title?: string; content: string; authorId: string; authorName: string; authorAvatar?: string }
+    post: {
+      title?: string;
+      content: string;
+      authorId: string;
+      authorName: string;
+      authorAvatar?: string;
+      postType?: 'thread' | 'material';
+      isPinned?: boolean;
+      fileUrl?: string;
+      fileName?: string;
+      fileSize?: number;
+      fileType?: string;
+    }
   ): Promise<{ success: boolean; post?: GroupDiscussionPost; error?: string }> {
     try {
       const { data, error } = await supabase
@@ -1507,6 +1526,12 @@ export const DBService = {
           author_avatar: post.authorAvatar || 'user',
           title: (post.title || '').trim(),
           content: post.content.trim(),
+          post_type: post.postType || 'thread',
+          is_pinned: post.isPinned || false,
+          file_url: post.fileUrl || null,
+          file_name: post.fileName || null,
+          file_size: post.fileSize || 0,
+          file_type: post.fileType || null
         })
         .select('*')
         .single();
@@ -1525,6 +1550,13 @@ export const DBService = {
         authorAvatar: data.author_avatar,
         title: data.title,
         content: data.content,
+        postType: data.post_type || 'thread',
+        isPinned: Boolean(data.is_pinned),
+        fileUrl: data.file_url,
+        fileName: data.file_name,
+        fileSize: data.file_size,
+        fileType: data.file_type,
+        repliesCount: 0,
         timestamp: new Date(data.created_at).getTime(),
         replies: [],
       };
@@ -1543,6 +1575,56 @@ export const DBService = {
     } catch (err: any) {
       console.error('createCircleDiscussion error:', err);
       return { success: false, error: err?.message || 'Failed to post discussion.' };
+    }
+  },
+
+  async togglePinPost(postId: string, isPinned: boolean): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase
+        .from('circle_discussions')
+        .update({ is_pinned: isPinned })
+        .eq('id', postId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to toggle pin state.' };
+    }
+  },
+
+  async savePost(circleId: string, postId: string, userId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('circle_saved_posts')
+        .upsert({ circle_id: circleId, post_id: postId, user_id: userId }, { onConflict: 'user_id,post_id' });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async unsavePost(postId: string, userId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('circle_saved_posts')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', userId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async getSavedPostIds(userId: string): Promise<string[]> {
+    try {
+      const { data, error } = await supabase
+        .from('circle_saved_posts')
+        .select('post_id')
+        .eq('user_id', userId);
+      if (error || !data) return [];
+      return data.map((r: any) => r.post_id);
+    } catch {
+      return [];
     }
   },
 

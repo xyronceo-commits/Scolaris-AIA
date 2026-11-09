@@ -26,8 +26,22 @@ import { cleanupLegacyApiKeyStorage } from './services/gemini';
 import KorsIQLogo from './components/KorsIQLogo';
 import StudyPlannerView from './components/StudyPlannerView';
 import ResourcesView from './components/ResourcesView';
+import AdminApp from './components/AdminApp';
 
 const App: React.FC = () => {
+  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin');
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setIsAdminRoute(window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin'));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
   const [courses, setCourses] = useState<Course[]>([]);
   const [schedule, setSchedule] = useState<StudySession[]>([]);
@@ -522,6 +536,18 @@ const App: React.FC = () => {
     );
   }
 
+  // Admin Portal Route Handling (/admin)
+  if (isAdminRoute) {
+    return (
+      <AdminApp 
+        onExit={() => {
+          window.history.pushState({}, '', '/');
+          setIsAdminRoute(false);
+        }} 
+      />
+    );
+  }
+
   // 2. Unauthenticated State
   if (!authUser) {
     if (showAuth) {
@@ -691,6 +717,7 @@ const App: React.FC = () => {
           profile={profile}
           addNotification={addNotification}
           onCourseIdChange={setSelectedCourseId}
+          onNavigate={(tab) => { setActiveTab(tab as AppState); }}
         />;
       case 'circles':
       case 'groups':
@@ -721,35 +748,38 @@ const App: React.FC = () => {
           schedule={schedule} 
           onOpenHub={(id) => { setSelectedCourseId(id); setActiveTab('hub'); }} 
           onNavigate={(tab) => { setActiveTab(tab); }}
+          onUpdateProfile={handleSaveProfile}
         />;
     }
   };
 
-  // Spec Desktop Sidebar (Exactly 6 destinations)
+  // Desktop Sidebar Navigation Items
   const desktopNavItems = [
     { id: 'overview', label: 'Overview', icon: ICONS.Dashboard },
     { id: 'planner', label: 'Study Planner', icon: ICONS.Courses },
+    { id: 'hub', label: 'Study Hub', icon: ICONS.StudyHub },
+    { id: 'circles', label: 'Study Circles', icon: ICONS.Groups },
     { id: 'studio', label: 'Academic Studio', icon: ICONS.Studio },
-    { id: 'circles', label: 'Private Circles', icon: ICONS.Groups },
-    { id: 'resources', label: 'Resources', icon: ICONS.Library },
+    { id: 'resources', label: 'Library', icon: ICONS.Library },
     { id: 'settings', label: 'Settings', icon: ICONS.Settings },
   ];
 
-  // Spec Mobile Bottom Bar (Exactly 5 destinations)
+  // Mobile Bottom Bar (Exactly 5 destinations per spec: Home, Planner, Study Hub, Circles, Studio)
   const mobileNavItems = [
     { id: 'overview', label: 'Home', icon: ICONS.Dashboard },
     { id: 'planner', label: 'Planner', icon: ICONS.Courses },
-    { id: 'studio', label: 'Studio', icon: ICONS.Studio },
+    { id: 'hub', label: 'Study Hub', icon: ICONS.StudyHub },
     { id: 'circles', label: 'Circles', icon: ICONS.Groups },
-    { id: 'resources', label: 'Library', icon: ICONS.Library },
+    { id: 'studio', label: 'Studio', icon: ICONS.Studio },
   ];
 
   const isNavActive = (id: string) => {
     if (id === 'overview') return activeTab === 'overview' || activeTab === 'dashboard';
     if (id === 'planner') return ['planner', 'courses', 'schedule', 'timetable', 'calculator', 'analytics'].includes(activeTab);
+    if (id === 'hub') return activeTab === 'hub';
     if (id === 'studio') return activeTab === 'studio';
     if (id === 'circles') return activeTab === 'circles' || activeTab === 'groups';
-    if (id === 'resources') return activeTab === 'resources' || activeTab === 'library' || activeTab === 'hub';
+    if (id === 'resources') return activeTab === 'resources' || activeTab === 'library';
     if (id === 'settings') return activeTab === 'settings' || activeTab === 'profile';
     return activeTab === id;
   };

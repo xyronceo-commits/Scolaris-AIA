@@ -227,33 +227,6 @@ export const GeminiService = {
     return { script, wavUrl };
   },
 
-  async groupChat(messages: any[], groupName: string, groupDesc: string) {
-    try {
-      const data = await safeFetchJson('/api/ai/chat', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify({ messages, groupName, groupDesc })
-      }, 'Group chat failed');
-      return data.text;
-    } catch (err: any) {
-      console.warn("Group chat warning:", err?.message || err);
-      return `[KorsIQ Tutor] I encountered an issue connecting to the AI service (${err?.message || 'Connection error'}). Please verify GEMINI_API_KEY in your hosting environment variables.`;
-    }
-  },
-
-  async validateGroupMessage(text: string, groupName: string, groupDesc: string) {
-    try {
-      return await safeFetchJson('/api/ai/validate', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify({ text, groupName, groupDesc })
-      }, 'Validation failed');
-    } catch (err) {
-      console.warn("Validation fallback active:", err);
-      return { isValid: true, explanation: "Message verified." };
-    }
-  },
-
   async scolarisGenerate(studyMaterial: string, mode: 'quiz' | 'flashcards') {
     return await safeFetchJson('/api/scolaris/generate', {
       method: 'POST',

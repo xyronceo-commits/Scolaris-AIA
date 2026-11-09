@@ -28,6 +28,7 @@ interface DashboardProps {
   onOpenHub: (courseId: string) => void;
   onNavigate?: (tab: any) => void;
   onTasksUpdated?: (tasks: AcademicTask[]) => void;
+  onUpdateProfile?: (updatedProfile: UserProfile) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -36,7 +37,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   schedule,
   onOpenHub,
   onNavigate,
-  onTasksUpdated
+  onTasksUpdated,
+  onUpdateProfile
 }) => {
   const userId = getCurrentUserId() || (profile as any)?.id || (profile as any)?.userId || '';
   const dayIndex = new Date().getDay();
@@ -53,6 +55,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<AcademicTask | null>(null);
   const [taskFilter, setTaskFilter] = useState<'today' | 'pending' | 'all' | 'completed'>('today');
+
+  // Inline department prompt for discipline-tailored AI
+  const [departmentInput, setDepartmentInput] = useState('');
+  const [isSavingDept, setIsSavingDept] = useState(false);
+  const [deptPromptDismissed, setDeptPromptDismissed] = useState(false);
+  const [deptSavedSuccess, setDeptSavedSuccess] = useState(false);
+
+  const hasMissingDepartment = !(profile?.department?.trim() || profile?.major?.trim());
+
+  const handleSaveDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!departmentInput.trim() || !userId) return;
+    setIsSavingDept(true);
+    try {
+      const updated = {
+        ...profile,
+        department: departmentInput.trim(),
+        major: departmentInput.trim()
+      };
+      await DBService.saveProfile(userId, updated);
+      onUpdateProfile?.(updated);
+      setDeptSavedSuccess(true);
+      setTimeout(() => {
+        setDeptPromptDismissed(true);
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to save department:', err);
+    } finally {
+      setIsSavingDept(false);
+    }
+  };
 
   // Load real documents
   useEffect(() => {
@@ -286,6 +319,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <span>Add task</span>
         </button>
       </div>
+
+      {/* Inline Department Prompt for discipline-tailored AI */}
+      {hasMissingDepartment && !deptPromptDismissed && (
+        <div className="bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-lg p-4 transition-all">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-900 dark:text-blue-200">
+                <GraduationCap size={15} className="text-[#2563EB]" />
+                <span>Tailor AI to your course of study</span>
+              </div>
+              <p className="text-xs text-blue-800/80 dark:text-blue-300/80">
+                Enter your department so all AI explanations, case studies, and exam hints match your discipline.
+              </p>
+            </div>
+            {deptSavedSuccess ? (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={16} /> Saved!
+              </span>
+            ) : (
+              <form onSubmit={handleSaveDepartment} className="flex items-center gap-2 w-full sm:w-auto">
+                <input
+                  type="text"
+                  value={departmentInput}
+                  onChange={(e) => setDepartmentInput(e.target.value)}
+                  placeholder="e.g. Building Technology, Law, Nursing..."
+                  className="w-full sm:w-64 px-3 py-2 text-xs bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-800 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-900 dark:text-white min-h-[40px]"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isSavingDept || !departmentInput.trim()}
+                  className="px-3.5 py-2 text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-md transition-colors shrink-0 min-h-[40px] cursor-pointer"
+                >
+                  {isSavingDept ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeptPromptDismissed(true)}
+                  className="px-2 py-2 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 shrink-0 cursor-pointer min-h-[40px]"
+                  title="Dismiss for now"
+                >
+                  Later
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 2. Two Columns Layout on Desktop, Single Column on Mobile */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
