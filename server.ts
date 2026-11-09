@@ -3235,6 +3235,116 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     }
   });
 
+  // Authenticated profile update endpoint (saves department, major, institution, level, target_cgpa, etc. via service_role)
+  const handleProfileSave = async (req: any, res: any) => {
+    const userId = req.user?.uid || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Database service is not configured on the server.' });
+    }
+
+    try {
+      const body = req.body || {};
+      const baseFields: Record<string, any> = {};
+      if (typeof body.name === 'string') baseFields.name = body.name.trim();
+      if (typeof body.email === 'string' && body.email.trim()) baseFields.email = body.email.trim();
+      if (typeof body.university === 'string') baseFields.institution = body.university.trim();
+      else if (typeof body.institution === 'string') baseFields.institution = body.institution.trim();
+      if (typeof body.level === 'string') baseFields.level = body.level.trim();
+      if (typeof body.age === 'number' && !isNaN(body.age)) baseFields.age = body.age;
+      if (typeof body.semesterEnd === 'string') baseFields.semester_end = body.semesterEnd;
+      else if (typeof body.semester_end === 'string') baseFields.semester_end = body.semester_end;
+      if (typeof body.targetCGPA === 'number' && !isNaN(body.targetCGPA)) baseFields.target_cgpa = body.targetCGPA;
+      else if (typeof body.target_cgpa === 'number' && !isNaN(body.target_cgpa)) baseFields.target_cgpa = body.target_cgpa;
+      if (typeof body.avatarIcon === 'string' && body.avatarIcon) baseFields.avatar_icon = body.avatarIcon;
+      else if (typeof body.avatar_icon === 'string' && body.avatar_icon) baseFields.avatar_icon = body.avatar_icon;
+      if (typeof body.onboarded === 'boolean') baseFields.onboarded = body.onboarded;
+      if (typeof body.tutorialSeen === 'boolean') baseFields.tutorial_seen = body.tutorialSeen;
+      else if (typeof body.tutorial_seen === 'boolean') baseFields.tutorial_seen = body.tutorial_seen;
+      if (body.notifications && typeof body.notifications === 'object') baseFields.notifications = body.notifications;
+
+      const extendedFields: Record<string, any> = {};
+      if (typeof body.department === 'string') extendedFields.department = body.department.trim();
+      if (typeof body.major === 'string') extendedFields.major = body.major.trim();
+      else if (typeof body.department === 'string') extendedFields.major = body.department.trim();
+      if (typeof body.academicGoals === 'string') extendedFields.academic_goals = body.academicGoals;
+      else if (typeof body.academic_goals === 'string') extendedFields.academic_goals = body.academic_goals;
+      if (typeof body.studyStyle === 'string') extendedFields.study_style = body.studyStyle;
+      else if (typeof body.study_style === 'string') extendedFields.study_style = body.study_style;
+      if (Array.isArray(body.assistanceAreas)) extendedFields.assistance_areas = body.assistanceAreas;
+      else if (Array.isArray(body.assistance_areas)) extendedFields.assistance_areas = body.assistance_areas;
+
+      const fullUpdate = { ...baseFields, ...extendedFields };
+      if (Object.keys(fullUpdate).length === 0) {
+        return res.status(400).json({ error: 'No profile fields provided to update.' });
+      }
+
+      let { data: updated, error: updateErr } = await supabaseAdmin
+        .from('profiles')
+        .update(fullUpdate)
+        .eq('id', userId)
+        .select('*')
+        .maybeSingle();
+
+      let droppedExtendedFields = false;
+      if (updateErr && (updateErr.code === 'PGRST204' || updateErr.message?.includes('column') || updateErr.message?.includes('schema cache'))) {
+        // Try with just department & major if academic_goals/study_style/assistance_areas are missing
+        const deptOnlyUpdate: Record<string, any> = { ...baseFields };
+        if (extendedFields.department !== undefined) deptOnlyUpdate.department = extendedFields.department;
+        if (extendedFields.major !== undefined) deptOnlyUpdate.major = extendedFields.major;
+        const retryDept = await supabaseAdmin
+          .from('profiles')
+          .update(deptOnlyUpdate)
+          .eq('id', userId)
+          .select('*')
+          .maybeSingle();
+        if (!retryDept.error) {
+          updated = retryDept.data;
+          updateErr = null;
+        } else {
+          const retryBase = await supabaseAdmin
+            .from('profiles')
+            .update(baseFields)
+            .eq('id', userId)
+            .select('*')
+            .maybeSingle();
+          updated = retryBase.data;
+          updateErr = retryBase.error;
+          droppedExtendedFields = true;
+        }
+      }
+
+      // If row did not exist yet, insert it with Free plan defaults
+      if (!updateErr && !updated) {
+        const insertPayload = {
+          id: userId,
+          email: req.user?.email || baseFields.email || '',
+          tier: 'free',
+          is_pro: false,
+          ...fullUpdate
+        };
+        const ins = await supabaseAdmin.from('profiles').insert(insertPayload).select('*').maybeSingle();
+        updated = ins.data;
+        updateErr = ins.error;
+      }
+
+      if (updateErr) {
+        console.error('[Profile Save] Failed to save profile for user', userId, updateErr);
+        return res.status(500).json({ error: updateErr.message || 'Failed to save profile.', droppedExtendedFields });
+      }
+
+      return res.json({ success: true, profile: updated, droppedExtendedFields });
+    } catch (err: any) {
+      console.error('[Profile Save] Unexpected error:', err?.message || err);
+      return res.status(500).json({ error: err?.message || 'Failed to save profile.' });
+    }
+  };
+
+  app.patch('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
+  app.post('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
+
   // Helper: Download a file buffer directly from Supabase Storage (bypasses Vercel 4.5MB body limit)
   async function downloadStorageBufferForUser(
     userId: string,

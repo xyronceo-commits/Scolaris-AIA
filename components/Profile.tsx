@@ -189,13 +189,59 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
     loadAiCreditsUsage();
   }, [profile.email, profile.tier, profile.subscriptionTier]);
 
-  const handleSaveIdentity = async () => {
-    setProfile(editedProfile);
-    const uid = getCurrentUserId();
-    if (uid) {
-      await DBService.saveProfile(uid, editedProfile).catch(() => {});
+  const [isSavingIdentity, setIsSavingIdentity] = useState(false);
+  const [identityFeedback, setIdentityFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setEditedProfile(profile);
     }
-    setIsEditing(false);
+  }, [profile, isEditing]);
+
+  const handleSaveIdentity = async () => {
+    const uid = getCurrentUserId() || (profile as any)?.id || '';
+    const trimmedDept = (editedProfile.department ?? editedProfile.major ?? '').trim();
+    const normalizedProfile: UserProfile = {
+      ...editedProfile,
+      department: trimmedDept,
+      major: trimmedDept || editedProfile.major || '',
+    };
+
+    if (!uid) {
+      setProfile(normalizedProfile);
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSavingIdentity(true);
+    setIdentityFeedback(null);
+    try {
+      const result = await DBService.saveProfile(uid, normalizedProfile);
+      if (result?.error || result?.droppedExtendedFields) {
+        setIdentityFeedback({
+          type: 'error',
+          message: "Could not save your profile changes. Please check your connection and try again."
+        });
+        return;
+      }
+      setProfile(normalizedProfile);
+      setIsEditing(false);
+      setIdentityFeedback({
+        type: 'success',
+        message: 'Academic profile saved.'
+      });
+      setTimeout(() => setIdentityFeedback(null), 3000);
+    } catch (err) {
+      setIdentityFeedback({
+        type: 'error',
+        message: "Could not save your profile changes. Please try again."
+      });
+    } finally {
+      setIsSavingIdentity(false);
+    }
   };
 
   const parseBytes = (fileSizeStr: string): number => {
@@ -248,14 +294,15 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
           {activeTab === 'identity' && (
             <button 
               type="button"
+              disabled={isSavingIdentity}
               onClick={() => isEditing ? handleSaveIdentity() : setIsEditing(true)}
-              className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer min-h-[44px] ${
+              className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer min-h-[44px] disabled:opacity-60 ${
                 isEditing 
                 ? 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm' 
                 : 'bg-white dark:bg-slate-800 text-[#111827] dark:text-white border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50'
               }`}
             >
-              {isEditing ? 'Save Changes' : 'Edit Profile'}
+              {isEditing ? (isSavingIdentity ? 'Saving...' : 'Save Changes') : 'Edit Profile'}
             </button>
           )}
         </div>
@@ -623,6 +670,45 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 )}
               </div>
             </div>
+
+            {identityFeedback && (
+              <div
+                role="status"
+                className={`p-3 rounded-lg border text-xs font-medium flex items-center gap-2 ${
+                  identityFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300'
+                }`}
+              >
+                {identityFeedback.type === 'success' ? <Check size={14} /> : <AlertCircle size={14} />}
+                <span>{identityFeedback.message}</span>
+              </div>
+            )}
+
+            {isEditing && (
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                <button
+                  type="button"
+                  disabled={isSavingIdentity}
+                  onClick={() => {
+                    setEditedProfile(profile);
+                    setIsEditing(false);
+                    setIdentityFeedback(null);
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5B6472] hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[44px] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingIdentity}
+                  onClick={handleSaveIdentity}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm min-h-[44px] disabled:opacity-60 cursor-pointer"
+                >
+                  {isSavingIdentity ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

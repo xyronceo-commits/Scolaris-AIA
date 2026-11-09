@@ -286,8 +286,7 @@ export const DBService = {
   async saveProfile(userId: string, profile: UserProfile) {
     writeCache('profile', userId, profile);
     try {
-      const basePayload: Record<string, any> = {
-        id: userId,
+      const baseUpdate: Record<string, any> = {
         name: profile.name,
         email: profile.email,
         institution: profile.university,
@@ -298,27 +297,67 @@ export const DBService = {
         avatar_icon: profile.avatarIcon || 'graduation-cap',
         onboarded: profile.onboarded,
         tutorial_seen: profile.tutorialSeen,
-        is_pro: profile.isPro,
-        tier: profile.tier,
         notifications: profile.notifications,
       };
 
-      const fullPayload = { ...basePayload };
-      if (profile.department !== undefined) fullPayload.department = profile.department;
-      if (profile.major !== undefined) fullPayload.major = profile.major;
-      if (profile.academicGoals !== undefined) fullPayload.academic_goals = profile.academicGoals;
-      if (profile.studyStyle !== undefined) fullPayload.study_style = profile.studyStyle;
-      if (profile.assistanceAreas !== undefined) fullPayload.assistance_areas = profile.assistanceAreas;
+      const fullUpdate: Record<string, any> = { ...baseUpdate };
+      if (profile.department !== undefined) fullUpdate.department = profile.department;
+      if (profile.major !== undefined) fullUpdate.major = profile.major;
+      else if (profile.department !== undefined) fullUpdate.major = profile.department;
+      if (profile.academicGoals !== undefined) fullUpdate.academic_goals = profile.academicGoals;
+      if (profile.studyStyle !== undefined) fullUpdate.study_style = profile.studyStyle;
+      if (profile.assistanceAreas !== undefined) fullUpdate.assistance_areas = profile.assistanceAreas;
 
-      let { error } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+      // 1. Prefer UPDATE on existing row (checks UPDATE RLS policy only, not INSERT, and avoids touching tier/is_pro)
+      const { data: updatedRows, error: updateErr } = await supabase
+        .from('profiles')
+        .update(fullUpdate)
+        .eq('id', userId)
+        .select('id');
+
+      if (!updateErr && Array.isArray(updatedRows) && updatedRows.length > 0) {
+        return { error: null, droppedExtendedFields: false };
+      }
+
+      // 2. Fall back to authenticated server endpoint (/api/profile via service_role) to handle RLS or missing row
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const res = await fetch('/api/profile', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              ...profile,
+              department: profile.department,
+              major: profile.major || profile.department,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok && body.success) {
+            return { error: null, droppedExtendedFields: !!body.droppedExtendedFields };
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Server /api/profile fallback error:', apiErr);
+      }
+
+      // 3. Final client fallback if server route was unreachable
+      let error = updateErr;
       let droppedExtendedFields = false;
+      if (!error && (!updatedRows || updatedRows.length === 0)) {
+        const upsertRes = await supabase
+          .from('profiles')
+          .upsert({ id: userId, ...fullUpdate }, { onConflict: 'id' });
+        error = upsertRes.error;
+      }
 
-      // If database table doesn't have the extended columns yet, fall back gracefully to base columns
       if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
         console.warn('Extended profile columns missing from remote DB, saving core profile fields:', error.message);
-        const retry = await supabase.from('profiles').upsert(basePayload, { onConflict: 'id' });
+        const retry = await supabase.from('profiles').update(baseUpdate).eq('id', userId);
         error = retry.error;
-        // department/major etc. were NOT saved; callers must not report success for those fields
         droppedExtendedFields = true;
       }
 
