@@ -64,12 +64,6 @@ function getSupabasePublicObjectBase(): string {
   return s3 ? s3.replace(/\/s3$/, '/object/public') : '';
 }
 
-// Server-side Secret for Administrator Access
-function getAdminSecret(): string {
-  const secret = process.env.ADMIN_PASSWORD || process.env.SCOLARIS_ADMIN_PASSWORD || cleanEnvKey('SUPABASE_SERVICE_ROLE_KEY') || 'korsiq_secure_admin_portal_secret_2026';
-  return secret.trim();
-}
-
 function safeCompareStrings(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const bufA = Buffer.from(a, 'utf8');
@@ -79,40 +73,6 @@ function safeCompareStrings(a: string, b: string): boolean {
     return false;
   }
   return crypto.timingSafeEqual(bufA, bufB);
-}
-
-function generateAdminToken(email: string, role: string = 'admin', fullName?: string): string {
-  const secret = getAdminSecret();
-  const cleanEmail = email.toLowerCase().trim();
-  const payload = {
-    email: cleanEmail,
-    role,
-    fullName: fullName || (cleanEmail === 'buildsafe247@gmail.com' ? 'Super Administrator' : 'Administrator'),
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + (12 * 60 * 60) // 12-hour session maximum
-  };
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
-  return `${header}.${body}.${signature}`;
-}
-
-function verifyAdminToken(token: string): { email: string; role: string; fullName?: string; exp?: number } | null {
-  const secret = getAdminSecret();
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const [header, body, signature] = parts;
-    const expectedSig = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
-    if (!safeCompareStrings(signature, expectedSig)) return null;
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
-    const validRoles = ['super_admin', 'admin', 'finance_admin', 'support_admin'];
-    if (!validRoles.includes(payload.role)) return null;
-    return payload;
-  } catch {
-    return null;
-  }
 }
 
 const OCR_MODEL = 'gemini-3.5-flash';
@@ -2097,50 +2057,107 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
 
   // Dedicated Group AI Study Endpoint (Grounded strictly in group materials)
   app.post('/api/groups/ai', requireAuth, apiRateLimiter, async (req, res) => {
-    const { groupId, groupName, groupCourse, materialsContent, prompt, mode } = req.body;
+    const { groupId, groupName, groupCourse, prompt, mode, materialsContent } = req.body;
+    const requestingUserId = (req as any).user?.id;
 
     try {
-      const apiKey = getAIKey();
-      
-      let systemInstruction = `You are KorsIQ, an intelligent academic study companion assigned exclusively to the Study Group: "${groupName || 'Academic Study Group'}" (Course: ${groupCourse || 'General'}).
-      
-CRITICAL SECURITY & CONTEXT RULES:
-1. You MUST ONLY use information from the uploaded study materials provided in the context below for this group.
-2. STRICT ISOLATION: Do NOT reference materials, documents, or data from any other group or user.
-3. If the group has no uploaded materials yet, politely inform the members to upload course notes or lecture slides so you can assist them.
-4. Format all responses clearly with clean Markdown, headings, bullet points, and bolded terms for student study clarity.`;
+      if (!groupId) {
+        return res.status(400).json({ error: 'groupId parameter is required' });
+      }
 
-      if (materialsContent && typeof materialsContent === 'string' && materialsContent.trim().length > 0) {
-        systemInstruction += `\n\nSHARED GROUP MATERIALS CONTEXT:\n---\n${materialsContent.slice(0, 16000)}\n---`;
+      // Check circle membership & authorization
+      if (supabaseAdmin && requestingUserId) {
+        const { data: memberRow } = await supabaseAdmin
+          .from('circle_members')
+          .select('id')
+          .eq('circle_id', groupId)
+          .eq('user_id', requestingUserId)
+          .maybeSingle();
+
+        if (!memberRow) {
+          const { data: grp } = await supabaseAdmin
+            .from('study_groups')
+            .select('owner_id, type, visibility, members')
+            .eq('id', groupId)
+            .maybeSingle();
+
+          const isOwner = grp?.owner_id === requestingUserId;
+          const isPublic = grp?.type === 'general' || grp?.visibility === 'public';
+          const isInMembers = Array.isArray(grp?.members) && grp.members.some((m: any) =>
+            typeof m === 'string' ? m === requestingUserId : m.userId === requestingUserId
+          );
+
+          if (!isOwner && !isPublic && !isInMembers) {
+            return res.status(403).json({ error: 'You must be a member of this study circle to access its AI assistant.' });
+          }
+        }
+      }
+
+      // Gather materials context strictly for this circle
+      let materialsContext = '';
+      const indexedResources: string[] = [];
+
+      if (supabaseAdmin) {
+        const { data: mats } = await supabaseAdmin
+          .from('group_materials')
+          .select('file_name, extracted_text, content, status')
+          .eq('group_id', groupId);
+
+        if (mats && mats.length > 0) {
+          const validMats = mats.filter((m: any) => (m.extracted_text || m.content) && m.status !== 'failed');
+          validMats.forEach((m: any) => {
+            indexedResources.push(m.file_name);
+            const text = m.extracted_text || m.content || '';
+            materialsContext += `\n\n--- RESOURCE: "${m.file_name}" ---\n${text.slice(0, 14000)}\n--- END RESOURCE ---`;
+          });
+        }
+      }
+
+      // Fallback to client-provided materials text if DB query returned none
+      if (!materialsContext && materialsContent && typeof materialsContent === 'string') {
+        materialsContext = materialsContent.slice(0, 20000);
+      }
+
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        return res.status(503).json({
+          error: 'AI service is currently unavailable. Please verify GEMINI_API_KEY is configured in your server environment.'
+        });
+      }
+
+      let systemInstruction = `You are KorsIQ Academic Assistant, assigned exclusively to the Study Circle: "${groupName || 'Study Circle'}" (Course: ${groupCourse || 'Curriculum'}).
+
+CRITICAL GROUNDING RULES:
+1. You MUST ground all explanations, answers, and summaries strictly in the uploaded Circle Resources below.
+2. For EVERY answer, explanation, or key point, you MUST cite the exact resource file you used, formatted as [Resource: filename].
+3. STRICT ISOLATION: Do NOT use or reference materials from outside this study circle.
+4. If the question cannot be answered using the uploaded circle materials, say clearly: "The uploaded circle materials do not contain sufficient information on this topic. Please upload relevant lecture slides or notes to the Resources tab."
+5. Format your response cleanly using student-friendly Markdown with headings and bullet points.`;
+
+      if (materialsContext.trim().length > 0) {
+        systemInstruction += `\n\nUPLOADED CIRCLE RESOURCES:\n${materialsContext}`;
       } else {
-        systemInstruction += `\n\nNOTE: No document contents are currently uploaded for this group. Suggest members upload PDFs, lecture notes, or slides in the Shared Materials tab!`;
+        systemInstruction += `\n\nNOTE: No documents are currently uploaded or indexed for this circle. Inform the student to upload study materials in the Resources tab so you can analyze them.`;
       }
 
       if (mode === 'quiz') {
-        systemInstruction += `\n\nSPECIAL TASK: Generate 5-10 practice questions with multiple choice options or active recall questions based on these group materials. Provide answer keys with detailed explanations.`;
+        systemInstruction += `\n\nSPECIAL TASK: Generate a 5-question multiple choice practice quiz based strictly on the uploaded materials. For each question, cite [Resource: filename] and provide an explanation.`;
       } else if (mode === 'summarize') {
-        systemInstruction += `\n\nSPECIAL TASK: Provide a comprehensive, structured academic summary of all materials uploaded to this group. Break down into key modules, definitions, and core takeaways.`;
+        systemInstruction += `\n\nSPECIAL TASK: Provide a structured academic summary of the uploaded resources, citing [Resource: filename] for each topic.`;
       } else if (mode === 'topics') {
-        systemInstruction += `\n\nSPECIAL TASK: Identify and rank the top high-yield revision topics and exam questions most likely to appear from these uploaded group materials.`;
-      }
-
-      if (!apiKey) {
-        const fallbackText = `Analysis for group "${groupName}":\n\n### Group Study Synthesis\n- Materials Analyzed: ${materialsContent ? '1+ group documents' : 'No documents uploaded yet.'}\n\n**Query:** "${prompt || 'General Study Overview'}"\n\nI am ready to help! Upload lecture slides or notes in the Shared Materials tab to analyze concepts.`;
-        return res.json({ text: fallbackText });
+        systemInstruction += `\n\nSPECIAL TASK: Identify high-yield exam topics and definitions from the uploaded resources, citing [Resource: filename].`;
       }
 
       const aiContent = await runAICall({
         systemInstruction,
-        messages: [{ role: 'user', content: prompt || 'Synthesize and analyze the group study materials.' }],
-        temperature: 0.4
+        messages: [{ role: 'user', content: prompt || 'Analyze and summarize the group study materials.' }],
+        temperature: 0.3
       });
 
-      res.json({ text: aiContent });
+      res.json({ text: aiContent, indexedResources });
     } catch (error: any) {
-      console.warn("Group AI study endpoint error:", error?.message || error);
-      res.json({
-        text: `I'm ready to help your study group! ${materialsContent ? 'I have indexed your group materials.' : 'Upload lecture notes to the Shared Materials tab to get started.'} What concept or topic should we explore?`
-      });
+      console.error('Circle AI study endpoint error:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'Failed to process circle AI request.' });
     }
   });
 
@@ -3227,1406 +3244,10 @@ CRITICAL WRITING RULES:
   });
 
   // ==========================================
-  // ADMIN ACCESS & AUTHORIZATION ROUTES
+  // ADMIN ACCESS & AUTHORIZATION
+  // Legacy admin endpoints deleted for planned rebuild.
+  // See architectural specification at docs/specs/admin-dashboard-plan.md
   // ==========================================
-
-  // ==========================================
-  // ADMIN ACCESS & AUTHORIZATION ROUTES
-  // ==========================================
-
-  const SUPER_ADMIN_EMAIL = 'buildsafe247@gmail.com';
-
-  // In-memory audit logs cache (provides instant resilience even before Supabase table is migrated)
-  const inMemoryAdminLogs: Array<{
-    id: string;
-    event: string;
-    status: string;
-    timestamp: string;
-    details: string;
-    ip: string;
-    userAgent: string;
-    actor: string;
-  }> = [];
-
-  // Audit Log Helper Function
-  async function recordAdminAuditLog(
-    event: string, 
-    details: string, 
-    status: 'SUCCESS' | 'FAILURE' = 'SUCCESS',
-    req?: express.Request,
-    actorEmail?: string
-  ) {
-    try {
-      const rawIp = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1') : '127.0.0.1';
-      const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-      const userAgent = req ? (req.headers['user-agent'] || 'Unknown Client') : 'Internal';
-      const actor = actorEmail || (req as any)?.adminUser?.email || 'admin';
-
-      const logEntry = {
-        id: crypto.randomUUID(),
-        event,
-        status,
-        timestamp: new Date().toISOString(),
-        details,
-        ip,
-        userAgent,
-        actor
-      };
-
-      inMemoryAdminLogs.unshift(logEntry);
-      if (inMemoryAdminLogs.length > 500) {
-        inMemoryAdminLogs.pop();
-      }
-
-      if (supabaseAdmin) {
-        const { error } = await supabaseAdmin.from('admin_logs').insert({
-          action: event,
-          actor,
-          details: { status, message: details, ip, userAgent },
-        });
-        if (error) console.warn('Audit log write warning:', error.message);
-      }
-    } catch (err) {
-      console.warn("Failed to record admin audit log:", err);
-    }
-  }
-
-  // Authorised Administrator Check
-  async function isAuthorizedAdminEmail(rawEmail: string): Promise<{ authorized: boolean; role: 'super_admin' | 'admin' | 'finance_admin' | 'support_admin'; fullName: string }> {
-    const cleanEmail = String(rawEmail || '').trim().toLowerCase();
-    if (!cleanEmail) return { authorized: false, role: 'admin', fullName: '' };
-
-    // Designated Super Admin is always authorized with super_admin privileges
-    if (cleanEmail === SUPER_ADMIN_EMAIL) {
-      return { authorized: true, role: 'super_admin', fullName: 'Super Administrator' };
-    }
-
-    // Check database `admins` table
-    if (supabaseAdmin) {
-      try {
-        const { data, error } = await supabaseAdmin
-          .from('admins')
-          .select('email, role, full_name, is_active')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-        if (data && data.is_active !== false) {
-          const validRole = ['super_admin', 'admin', 'finance_admin', 'support_admin'].includes(data.role)
-            ? (data.role as any)
-            : 'admin';
-          return { authorized: true, role: validRole, fullName: data.full_name || 'Administrator' };
-        }
-      } catch (e: any) {
-        console.warn('Admins table lookup warning:', e?.message || e);
-      }
-    }
-
-    return { authorized: false, role: 'admin', fullName: '' };
-  }
-
-  // In-memory OTP storage & Rate Limiting
-  const adminOtpStore = new Map<string, { code: string; expiresAt: number; attempts: number }>();
-  const adminOtpRequestRateLimit = new Map<string, number[]>();
-  const adminOtpVerifyRateLimit = new Map<string, number[]>();
-
-  const checkOtpRequestRateLimit = (key: string): boolean => {
-    const windowMs = 15 * 60 * 1000; // 15 minutes
-    const maxAttempts = 3;
-    const now = Date.now();
-    const attempts = (adminOtpRequestRateLimit.get(key) || []).filter(ts => now - ts < windowMs);
-    if (attempts.length >= maxAttempts) {
-      adminOtpRequestRateLimit.set(key, attempts);
-      return false;
-    }
-    attempts.push(now);
-    adminOtpRequestRateLimit.set(key, attempts);
-    return true;
-  };
-
-  const checkOtpVerifyRateLimit = (key: string): boolean => {
-    const windowMs = 15 * 60 * 1000; // 15 minutes
-    const maxAttempts = 5;
-    const now = Date.now();
-    const attempts = (adminOtpVerifyRateLimit.get(key) || []).filter(ts => now - ts < windowMs);
-    if (attempts.length >= maxAttempts) {
-      adminOtpVerifyRateLimit.set(key, attempts);
-      return false;
-    }
-    attempts.push(now);
-    adminOtpVerifyRateLimit.set(key, attempts);
-    return true;
-  };
-
-  // 1. Request Admin OTP Endpoint
-  app.post('/api/admin/request-otp', async (req, res) => {
-    try {
-      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-      const rawEmail = req.body?.email;
-      const cleanEmail = String(rawEmail || '').trim().toLowerCase();
-
-      if (!cleanEmail || !cleanEmail.includes('@')) {
-        return res.status(400).json({ success: false, error: 'A valid email address is required.' });
-      }
-
-      // Enforce rate limiting per email and IP
-      const rateLimitKey = `${cleanEmail}:${clientIp}`;
-      if (!checkOtpRequestRateLimit(rateLimitKey)) {
-        await recordAdminAuditLog(
-          'ADMIN_OTP_RATE_LIMITED',
-          `Too many OTP requests for ${cleanEmail}. Rate limited for 15 minutes.`,
-          'FAILURE',
-          req,
-          cleanEmail
-        );
-        return res.status(429).json({
-          success: false,
-          error: 'Too many OTP requests. Please wait 15 minutes before requesting a new code.'
-        });
-      }
-
-      // Check if email belongs to an authorised administrator
-      const authCheck = await isAuthorizedAdminEmail(cleanEmail);
-      if (!authCheck.authorized) {
-        await recordAdminAuditLog(
-          'ADMIN_OTP_UNAUTHORIZED_REQUEST',
-          `Unauthorized OTP request attempt for non-admin email: ${cleanEmail}`,
-          'FAILURE',
-          req,
-          cleanEmail
-        );
-        return res.status(403).json({
-          success: false,
-          error: 'Access denied: This email address is not registered as an authorized administrator.'
-        });
-      }
-
-      // Generate a cryptographically secure 6-digit numeric OTP
-      const otpCode = crypto.randomInt(100000, 999999).toString();
-      const expiresAt = Date.now() + (10 * 60 * 1000); // 10 minutes expiry
-
-      // Save to in-memory store
-      adminOtpStore.set(cleanEmail, {
-        code: otpCode,
-        expiresAt,
-        attempts: 0
-      });
-
-      // Also persist to DB admin_otps if available
-      if (supabaseAdmin) {
-        try {
-          const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
-          await supabaseAdmin.from('admin_otps').insert({
-            email: cleanEmail,
-            otp_hash: otpHash,
-            expires_at: new Date(expiresAt).toISOString(),
-            attempts: 0,
-            used: false
-          });
-        } catch (dbErr) {
-          // Non-fatal fallback to in-memory store
-        }
-      }
-
-      await recordAdminAuditLog(
-        'ADMIN_OTP_REQUESTED',
-        `Security OTP requested and dispatched for administrator ${cleanEmail}`,
-        'SUCCESS',
-        req,
-        cleanEmail
-      );
-
-      // Log clearly to server terminal for administrative visibility
-      console.log(`[Admin Security] One-Time Password (OTP) for ${cleanEmail}: ${otpCode} (Valid for 10 minutes)`);
-
-      res.json({
-        success: true,
-        message: 'Security OTP has been generated. Please check your admin inbox.',
-        expiresInSeconds: 600,
-        // Include devOtp in local development or staging to facilitate immediate testing
-        devOtp: process.env.NODE_ENV !== 'production' ? otpCode : undefined
-      });
-    } catch (err: any) {
-      await recordAdminAuditLog('ADMIN_OTP_REQUEST_ERROR', `Error requesting OTP: ${err?.message}`, 'FAILURE', req);
-      res.status(500).json({ success: false, error: err?.message || 'Failed to process administrator OTP request.' });
-    }
-  });
-
-  // 2. Verify Admin OTP Endpoint (Grants 12-Hour Session)
-  app.post('/api/admin/verify-otp', async (req, res) => {
-    try {
-      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-      const rawEmail = req.body?.email;
-      const rawCode = req.body?.otp;
-      const cleanEmail = String(rawEmail || '').trim().toLowerCase();
-      const cleanCode = String(rawCode || '').trim();
-
-      if (!cleanEmail || !cleanCode) {
-        return res.status(400).json({ success: false, error: 'Both email and 6-digit OTP code are required.' });
-      }
-
-      const rateLimitKey = `${cleanEmail}:${clientIp}`;
-      if (!checkOtpVerifyRateLimit(rateLimitKey)) {
-        await recordAdminAuditLog(
-          'ADMIN_VERIFY_RATE_LIMITED',
-          `Too many OTP verification attempts for ${cleanEmail}. Rate limited.`,
-          'FAILURE',
-          req,
-          cleanEmail
-        );
-        return res.status(429).json({
-          success: false,
-          error: 'Too many failed verification attempts. Please wait 15 minutes before trying again.'
-        });
-      }
-
-      const stored = adminOtpStore.get(cleanEmail);
-      if (!stored) {
-        await recordAdminAuditLog(
-          'ADMIN_VERIFY_NO_OTP',
-          `No active OTP request found for ${cleanEmail}`,
-          'FAILURE',
-          req,
-          cleanEmail
-        );
-        return res.status(400).json({
-          success: false,
-          error: 'No active OTP request found for this email, or the code has expired. Please request a new code.'
-        });
-      }
-
-      // Check expiration (5-10 minutes window)
-      if (Date.now() > stored.expiresAt) {
-        adminOtpStore.delete(cleanEmail);
-        await recordAdminAuditLog(
-          'ADMIN_VERIFY_EXPIRED',
-          `Expired OTP presented for ${cleanEmail}`,
-          'FAILURE',
-          req,
-          cleanEmail
-        );
-        return res.status(400).json({
-          success: false,
-          error: 'Security OTP has expired. Please request a fresh OTP.'
-        });
-      }
-
-      // Validate code (timing-safe comparison)
-      if (!safeCompareStrings(cleanCode, stored.code)) {
-        stored.attempts += 1;
-        if (stored.attempts >= 5) {
-          adminOtpStore.delete(cleanEmail);
-          await recordAdminAuditLog(
-            'ADMIN_VERIFY_MAX_ATTEMPTS',
-            `Maximum OTP attempts exceeded for ${cleanEmail}. Code invalidated.`,
-            'FAILURE',
-            req,
-            cleanEmail
-          );
-          return res.status(400).json({
-            success: false,
-            error: 'Too many invalid attempts. This OTP has been invalidated. Please request a new code.'
-          });
-        }
-        await recordAdminAuditLog(
-          'ADMIN_VERIFY_INVALID_CODE',
-          `Invalid OTP attempt (${stored.attempts}/5) for ${cleanEmail}`,
-          'FAILURE',
-          req,
-          cleanEmail
-        );
-        return res.status(400).json({
-          success: false,
-          error: `Invalid OTP code. ${5 - stored.attempts} attempts remaining.`
-        });
-      }
-
-      // Valid OTP: Single-use invalidation
-      adminOtpStore.delete(cleanEmail);
-
-      // Verify admin role
-      const authInfo = await isAuthorizedAdminEmail(cleanEmail);
-      if (!authCheckAllowed(authInfo)) {
-        return res.status(403).json({ success: false, error: 'User is not an authorized administrator.' });
-      }
-
-      // Mark used in DB if available
-      if (supabaseAdmin) {
-        try {
-          await supabaseAdmin
-            .from('admin_otps')
-            .update({ used: true })
-            .eq('email', cleanEmail);
-        } catch { /* non-blocking */ }
-      }
-
-      // Generate 12-Hour Session Token
-      const adminToken = generateAdminToken(cleanEmail, authInfo.role, authInfo.fullName);
-      const expiresAt = Date.now() + (12 * 60 * 60 * 1000); // 12 hours from now
-
-      await recordAdminAuditLog(
-        'ADMIN_LOGIN_SUCCESS',
-        `Administrator ${cleanEmail} authenticated via OTP. 12-hour session granted (Role: ${authInfo.role}).`,
-        'SUCCESS',
-        req,
-        cleanEmail
-      );
-
-      res.json({
-        success: true,
-        adminToken,
-        user: {
-          email: cleanEmail,
-          role: authInfo.role,
-          fullName: authInfo.fullName,
-          expiresAt
-        }
-      });
-    } catch (err: any) {
-      await recordAdminAuditLog('ADMIN_VERIFY_ERROR', `Error during OTP verification: ${err?.message}`, 'FAILURE', req);
-      res.status(500).json({ success: false, error: err?.message || 'Server error during OTP verification.' });
-    }
-  });
-
-  function authCheckAllowed(info: { authorized: boolean }): boolean {
-    return info.authorized;
-  }
-
-  // Admin Verification Middleware (Enforces 12-hour session expiry server-side)
-  const authenticateAdminToken = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'Administrator authorization token required.' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    
-    // 1. Verify server HMAC token (with 12-hour expiration check)
-    const serverVerified = verifyAdminToken(token);
-    if (serverVerified) {
-      (req as any).adminUser = serverVerified;
-      return next();
-    }
-
-    // 2. Fallback: verify Supabase user token for listed admin
-    if (supabaseAuthClient && supabaseAdmin) {
-      try {
-        const { data: userData, error: userError } = await supabaseAuthClient.auth.getUser(token);
-        if (!userError && userData.user && userData.user.email) {
-          const authCheck = await isAuthorizedAdminEmail(userData.user.email);
-          if (authCheck.authorized) {
-            (req as any).adminUser = {
-              email: userData.user.email,
-              role: authCheck.role,
-              fullName: authCheck.fullName
-            };
-            return next();
-          }
-        }
-      } catch (err) {
-        // Fallback check failed
-      }
-    }
-
-    return res.status(403).json({ success: false, error: 'Access denied: Valid administrator privileges required or session expired.' });
-  };
-
-  // Helper middleware for role-based restrictions
-  const requireAdminRole = (roles: string[]) => {
-    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-      const user = (req as any).adminUser;
-      if (!user) return res.status(401).json({ success: false, error: 'Not authenticated.' });
-      if (user.role === 'super_admin' || user.email === SUPER_ADMIN_EMAIL) {
-        return next();
-      }
-      if (roles.includes(user.role)) {
-        return next();
-      }
-      return res.status(403).json({ success: false, error: `Action restricted. Required role: ${roles.join(' or ')}.` });
-    };
-  };
-
-  // Admin Session Verification Endpoint
-  app.get('/api/admin/verify', authenticateAdminToken, (req, res) => {
-    const adminUser = (req as any).adminUser;
-    const nowSec = Math.floor(Date.now() / 1000);
-    const remainingSeconds = adminUser?.exp ? Math.max(0, adminUser.exp - nowSec) : 12 * 3600;
-
-    res.json({
-      success: true,
-      verified: true,
-      admin: adminUser,
-      remainingSeconds
-    });
-  });
-
-  // Admin Logout Endpoint
-  app.post('/api/admin/logout', authenticateAdminToken, async (req, res) => {
-    const admin = (req as any).adminUser;
-    await recordAdminAuditLog(
-      'ADMIN_LOGOUT',
-      `Administrator ${admin?.email || 'admin'} logged out securely`,
-      'SUCCESS',
-      req
-    );
-    res.json({ success: true, message: 'Logged out successfully.' });
-  });
-
-  // Fetch every row of a table with the service role (paged past the 1000-row API limit)
-  async function fetchTableRows(table: string): Promise<any[]> {
-    if (!supabaseAdmin) return [];
-    const pageSize = 1000;
-    const rows: any[] = [];
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabaseAdmin.from(table).select('*').range(from, from + pageSize - 1);
-      if (error) {
-        // If table doesn't exist yet, warn and return collected rows
-        console.warn(`Admin fetch for ${table} warning:`, error.message);
-        break;
-      }
-      rows.push(...(data || []));
-      if (!data || data.length < pageSize) break;
-    }
-    return rows;
-  }
-
-  // ==========================================
-  // DOMAIN 1: OVERVIEW METRICS & TELEMETRY
-  // ==========================================
-  app.get('/api/admin/stats', authenticateAdminToken, async (req, res) => {
-    try {
-      await recordAdminAuditLog('DASHBOARD_OVERVIEW_VIEW', 'Viewed system overview metrics and user telemetry', 'SUCCESS', req);
-
-      const [profiles, subscriptions, courses, hubs, groups, sessions, userFiles] = await Promise.all([
-        fetchTableRows('profiles'),
-        fetchTableRows('subscriptions'),
-        fetchTableRows('courses'),
-        fetchTableRows('study_hubs'),
-        fetchTableRows('study_groups'),
-        fetchTableRows('study_sessions'),
-        fetchTableRows('user_files')
-      ]);
-
-      const now = Date.now();
-      const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
-
-      const totalUsers = profiles.length;
-      const activeUsers = profiles.filter(p => {
-        if (!p.updated_at && !p.created_at) return false;
-        const time = new Date(p.updated_at || p.created_at).getTime();
-        return time >= thirtyDaysAgo;
-      }).length;
-
-      // Tier Breakdown (Free, Plus, Academic Studio)
-      let freeCount = 0;
-      let plusCount = 0;
-      let studioCount = 0;
-
-      profiles.forEach(p => {
-        const tier = (p.tier || '').toLowerCase();
-        if (tier === 'studio' || tier === 'academic_studio') {
-          studioCount++;
-        } else if (tier === 'plus' || p.is_pro) {
-          plusCount++;
-        } else {
-          freeCount++;
-        }
-      });
-
-      // Verified Subscriptions & Payment Metrics
-      const verifiedSubs = subscriptions.filter(s => s.status === 'verified' || s.status === 'success' || s.status === 'active');
-      const totalRevenueNgn = verifiedSubs.reduce((sum, s) => {
-        const amt = Number(s.amount || 0);
-        return sum + (isNaN(amt) ? 0 : amt);
-      }, 0);
-
-      // AI Usage Breakdown
-      let summariesCount = 0;
-      let flashcardsCount = 0;
-      let quizzesCount = 0;
-      let podcastCount = 0;
-      let totalMaterials = 0;
-      let totalStorageBytes = 0;
-
-      hubs.forEach(h => {
-        if (h.summary) summariesCount++;
-        if (Array.isArray(h.flashcards)) flashcardsCount += h.flashcards.length;
-        if (Array.isArray(h.quizzes)) quizzesCount += h.quizzes.length;
-        if (h.podcast_url || h.transcript) podcastCount++;
-        if (h.file_name || h.file_content) totalMaterials++;
-        if (h.file_size) totalStorageBytes += Number(h.file_size) || 0;
-      });
-
-      userFiles.forEach(f => {
-        totalMaterials++;
-        if (f.file_size) totalStorageBytes += Number(f.file_size) || 0;
-      });
-
-      const totalAiRequests = summariesCount + flashcardsCount + quizzesCount + podcastCount;
-      // Gemini 2.0 Flash pricing estimate: avg ~2,500 input + 1,000 output tokens per request
-      const estimatedTokens = totalAiRequests * 3500;
-      const estimatedCostUsd = (estimatedTokens / 1_000_000) * 0.15; // ~$0.15 per 1M blended tokens
-      const estimatedCostNgn = estimatedCostUsd * 1550; // Current NGN/USD benchmark
-
-      res.json({
-        success: true,
-        stats: {
-          totalUsers,
-          activeUsers: Math.max(activeUsers, totalUsers > 0 ? 1 : 0),
-          freeUsers: freeCount,
-          plusUsers: plusCount,
-          studioUsers: studioCount,
-          totalSubscriptions: subscriptions.length,
-          verifiedPaymentsCount: verifiedSubs.length,
-          totalRevenueNgn,
-          totalCourses: courses.length,
-          totalStudyHubs: hubs.length,
-          totalStudyGroups: groups.length,
-          totalStudySessions: sessions.length,
-          totalUploadedMaterials: totalMaterials,
-          storageBytes: totalStorageBytes,
-          storageFormattedMB: (totalStorageBytes / (1024 * 1024)).toFixed(2),
-          ai: {
-            totalRequests: totalAiRequests,
-            summariesCount,
-            flashcardsCount,
-            quizzesCount,
-            podcastCount,
-            estimatedTokens,
-            estimatedCostUsd: Number(estimatedCostUsd.toFixed(2)),
-            estimatedCostNgn: Math.round(estimatedCostNgn)
-          },
-          updatedAt: new Date().toISOString()
-        }
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch admin stats.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 2: USER MANAGEMENT
-  // ==========================================
-  app.get('/api/admin/users', authenticateAdminToken, async (req, res) => {
-    try {
-      await recordAdminAuditLog('USERS_DIRECTORY_VIEW', 'Accessed user accounts directory', 'SUCCESS', req);
-
-      const [profiles, courses, hubs] = await Promise.all([
-        fetchTableRows('profiles'),
-        fetchTableRows('courses'),
-        fetchTableRows('study_hubs')
-      ]);
-
-      const courseCounts = new Map<string, number>();
-      courses.forEach(c => {
-        if (c.user_id) courseCounts.set(c.user_id, (courseCounts.get(c.user_id) || 0) + 1);
-      });
-
-      const hubCounts = new Map<string, number>();
-      hubs.forEach(h => {
-        if (h.user_id) hubCounts.set(h.user_id, (hubCounts.get(h.user_id) || 0) + 1);
-      });
-
-      const userList = profiles.map(p => ({
-        uid: p.id || 'unknown',
-        name: p.name || 'Student Scholar',
-        email: p.email || 'N/A',
-        institution: p.institution || 'Not Specified',
-        level: p.level || 'Undergraduate',
-        tier: p.tier || 'free',
-        isPro: p.is_pro ?? false,
-        isSuspended: p.is_suspended ?? false,
-        suspensionReason: p.suspension_reason || '',
-        onboarded: p.onboarded ?? false,
-        courseCount: courseCounts.get(p.id) || 0,
-        materialsCount: hubCounts.get(p.id) || 0,
-        createdAt: p.created_at || p.updated_at || new Date().toISOString(),
-        updatedAt: p.updated_at || new Date().toISOString()
-      }));
-
-      res.json({
-        success: true,
-        users: userList
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch user list.' });
-    }
-  });
-
-  // Suspend / Reactivate User
-  app.post('/api/admin/users/suspend', authenticateAdminToken, requireAdminRole(['super_admin', 'admin', 'support_admin']), async (req, res) => {
-    try {
-      const { userId, suspend, reason } = req.body;
-      if (!userId) return res.status(400).json({ success: false, error: 'User ID is required.' });
-
-      if (supabaseAdmin) {
-        const { error } = await supabaseAdmin
-          .from('profiles')
-          .update({
-            is_suspended: Boolean(suspend),
-            suspension_reason: suspend ? (reason || 'Account suspended by administrator.') : null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', userId);
-
-        if (error) throw error;
-      }
-
-      await recordAdminAuditLog(
-        suspend ? 'USER_SUSPENDED' : 'USER_REACTIVATED',
-        `User ${userId} was ${suspend ? 'suspended' : 'reactivated'}. Reason: ${reason || 'None provided'}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: `User account successfully ${suspend ? 'suspended' : 'reactivated'}.` });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to update user suspension state.' });
-    }
-  });
-
-  // Delete User (Super Admin Only Safeguard)
-  app.post('/api/admin/users/delete', authenticateAdminToken, requireAdminRole(['super_admin']), async (req, res) => {
-    try {
-      const { userId } = req.body;
-      if (!userId) return res.status(400).json({ success: false, error: 'User ID is required.' });
-
-      if (supabaseAdmin) {
-        // Cascade cleanup in profiles and associated user materials
-        await supabaseAdmin.from('study_hubs').delete().eq('user_id', userId);
-        await supabaseAdmin.from('courses').delete().eq('user_id', userId);
-        const { error } = await supabaseAdmin.from('profiles').delete().eq('id', userId);
-        if (error) throw error;
-      }
-
-      await recordAdminAuditLog(
-        'USER_ACCOUNT_DELETED',
-        `User ${userId} and all related workspaces were permanently deleted by Super Admin`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'User account permanently deleted.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to delete user account.' });
-    }
-  });
-
-  // Change User Subscription Tier (Authorised Administrative Action)
-  app.post('/api/admin/users/change-tier', authenticateAdminToken, requireAdminRole(['super_admin', 'admin', 'finance_admin']), async (req, res) => {
-    try {
-      const { userId, tier, reason } = req.body;
-      const cleanTier = String(tier || '').toLowerCase().trim();
-      const validTiers = ['free', 'plus', 'studio'];
-
-      if (!userId || !validTiers.includes(cleanTier)) {
-        return res.status(400).json({ success: false, error: `Invalid tier. Must be one of: ${validTiers.join(', ')}` });
-      }
-
-      const isPro = cleanTier !== 'free';
-
-      if (supabaseAdmin) {
-        const { error: profileErr } = await supabaseAdmin
-          .from('profiles')
-          .update({
-            tier: cleanTier,
-            is_pro: isPro,
-            subscription_tier: cleanTier,
-            subscription_status: isPro ? 'manual_active' : 'inactive',
-            payment_status: isPro ? 'paid' : 'none',
-            subscription_end: isPro ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', userId);
-
-        if (profileErr) throw profileErr;
-
-        // Record override subscription record with unified schema
-        await supabaseAdmin.from('subscriptions').insert({
-          user_id: userId,
-          plan_tier: cleanTier,
-          status: isPro ? 'manual_active' : 'inactive',
-          amount_paid: 0,
-          currency: 'NGN',
-          payment_reference: `ADMIN_OVERRIDE_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-          payment_provider: 'manual_admin',
-          payment_status: isPro ? 'paid' : 'none',
-          current_period_start: new Date().toISOString(),
-          current_period_end: isPro ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null,
-          metadata: { reason: reason || 'Administrative tier adjustment', adminEmail: (req as any).adminUser?.email }
-        });
-      }
-
-      await recordAdminAuditLog(
-        'USER_TIER_OVERRIDE',
-        `Subscription tier for user ${userId} adjusted to ${cleanTier.toUpperCase()}. Reason: ${reason || 'Admin action'}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: `User tier successfully updated to ${cleanTier}.` });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to update user tier.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 3: SUBSCRIPTIONS & PAYMENT MANAGEMENT
-  // ==========================================
-  app.get('/api/admin/subscriptions', authenticateAdminToken, async (req, res) => {
-    try {
-      await recordAdminAuditLog('SUBSCRIPTION_DIRECTORY_VIEW', 'Viewed subscription and payment ledger', 'SUCCESS', req);
-
-      const [subs, profiles] = await Promise.all([
-        fetchTableRows('subscriptions'),
-        fetchTableRows('profiles')
-      ]);
-
-      const profileMap = new Map<string, { email: string; name: string }>();
-      profiles.forEach(p => {
-        if (p.id) profileMap.set(p.id, { email: p.email || 'N/A', name: p.name || 'Scholar' });
-      });
-
-      const subscriptionRecords = subs.map(s => {
-        const user = profileMap.get(s.user_id) || { email: 'Unknown User', name: 'Unknown' };
-        return {
-          id: s.id,
-          userId: s.user_id,
-          userEmail: user.email,
-          userName: user.name,
-          plan: s.plan_tier || s.plan || 'free',
-          status: s.status || 'pending',
-          amount: Number(s.amount_paid ?? s.amount) || 0,
-          currency: s.currency || 'NGN',
-          reference: s.payment_reference || s.reference || 'N/A',
-          channel: s.payment_provider || s.channel || 'paystack',
-          paidAt: s.current_period_start || s.paid_at || s.created_at,
-          createdAt: s.created_at
-        };
-      }).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-
-      res.json({
-        success: true,
-        subscriptions: subscriptionRecords
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch subscriptions.' });
-    }
-  });
-
-  // Manual Payment Investigation & Override
-  app.post('/api/admin/subscriptions/override', authenticateAdminToken, requireAdminRole(['super_admin', 'finance_admin']), async (req, res) => {
-    try {
-      const { userId, plan, reference, reason, amount } = req.body;
-      if (!userId || !plan) {
-        return res.status(400).json({ success: false, error: 'User ID and plan are required.' });
-      }
-
-      if (supabaseAdmin) {
-        const isPro = plan !== 'free';
-        const endDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-        await supabaseAdmin.from('profiles').update({
-          tier: plan,
-          is_pro: isPro,
-          subscription_tier: plan,
-          subscription_status: 'manual_active',
-          payment_status: 'paid',
-          subscription_end: endDate,
-          updated_at: new Date().toISOString()
-        }).eq('id', userId);
-
-        await supabaseAdmin.from('subscriptions').insert({
-          user_id: userId,
-          plan_tier: plan,
-          status: 'manual_active',
-          amount_paid: Number(amount) || 0,
-          currency: 'NGN',
-          payment_reference: reference || `MANUAL_VERIFY_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-          payment_provider: 'manual_admin',
-          payment_status: 'paid',
-          current_period_start: new Date().toISOString(),
-          current_period_end: endDate,
-          metadata: { verifiedBy: (req as any).adminUser?.email, reason: reason || 'Manual administrative override' }
-        });
-      }
-
-      await recordAdminAuditLog(
-        'PAYMENT_MANUAL_OVERRIDE',
-        `Manual payment verification override applied for user ${userId} on plan ${plan}. Reason: ${reason}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'Subscription successfully verified and applied to user profile.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to apply subscription override.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 4: NIGERIAN UNIVERSITY DIRECTORY
-  // ==========================================
-  app.get('/api/admin/universities', authenticateAdminToken, async (req, res) => {
-    try {
-      const dbUnis = await fetchTableRows('universities');
-      const baseUnis = NIGERIAN_UNIVERSITIES.map(u => ({
-        id: `builtin_${u.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
-        name: u.name,
-        abbreviation: u.acronym,
-        state: u.state,
-        type: u.type,
-        isActive: true,
-        isBuiltin: true
-      }));
-
-      // Merge database modifications / additions
-      const customUnis = dbUnis.map(u => ({
-        id: u.id,
-        name: u.name,
-        abbreviation: u.acronym,
-        state: u.state,
-        type: u.type,
-        isActive: u.is_active ?? true,
-        isBuiltin: false
-      }));
-
-      const combined = [...customUnis, ...baseUnis];
-      // Deduplicate by name
-      const seenNames = new Set<string>();
-      const uniqueUnis = combined.filter(u => {
-        const lower = u.name.toLowerCase().trim();
-        if (seenNames.has(lower)) return false;
-        seenNames.add(lower);
-        return true;
-      }).sort((a, b) => a.name.localeCompare(b.name));
-
-      res.json({
-        success: true,
-        universities: uniqueUnis,
-        totalCount: uniqueUnis.length
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch universities.' });
-    }
-  });
-
-  app.post('/api/admin/universities', authenticateAdminToken, requireAdminRole(['super_admin', 'admin']), async (req, res) => {
-    try {
-      const { action, university } = req.body;
-      if (!university || !university.name) {
-        return res.status(400).json({ success: false, error: 'University details are required.' });
-      }
-
-      if (action === 'create') {
-        if (supabaseAdmin) {
-          const { error } = await supabaseAdmin.from('universities').insert({
-            name: university.name.trim(),
-            abbreviation: university.abbreviation?.trim() || null,
-            state: university.state?.trim() || 'FCT',
-            type: university.type || 'Federal',
-            is_active: true
-          });
-          if (error) throw error;
-        }
-
-        await recordAdminAuditLog('UNIVERSITY_CREATED', `Added new university: ${university.name}`, 'SUCCESS', req);
-        return res.json({ success: true, message: 'University created successfully.' });
-      }
-
-      if (action === 'toggle' || action === 'update') {
-        if (supabaseAdmin && university.id && !university.id.startsWith('builtin_')) {
-          await supabaseAdmin.from('universities').update({
-            is_active: university.isActive ?? true,
-            updated_at: new Date().toISOString()
-          }).eq('id', university.id);
-        }
-        await recordAdminAuditLog('UNIVERSITY_UPDATED', `Updated university status: ${university.name}`, 'SUCCESS', req);
-        return res.json({ success: true, message: 'University status updated.' });
-      }
-
-      res.status(400).json({ success: false, error: 'Unsupported university action.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to manage university directory.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 5: AI USAGE MANAGEMENT & ANALYTICS
-  // ==========================================
-  app.get('/api/admin/ai-analytics', authenticateAdminToken, async (req, res) => {
-    try {
-      await recordAdminAuditLog('AI_ANALYTICS_VIEW', 'Viewed AI model analytics, token consumption, and cost estimates', 'SUCCESS', req);
-
-      const [hubs, profiles] = await Promise.all([
-        fetchTableRows('study_hubs'),
-        fetchTableRows('profiles')
-      ]);
-
-      let summaries = 0;
-      let flashcards = 0;
-      let quizzes = 0;
-      let podcasts = 0;
-
-      const userAiCounts = new Map<string, number>();
-
-      hubs.forEach(h => {
-        let countForHub = 0;
-        if (h.summary) { summaries++; countForHub++; }
-        if (Array.isArray(h.flashcards)) { flashcards += h.flashcards.length; countForHub += h.flashcards.length; }
-        if (Array.isArray(h.quizzes)) { quizzes += h.quizzes.length; countForHub += h.quizzes.length; }
-        if (h.podcast_url || h.transcript) { podcasts++; countForHub++; }
-
-        if (h.user_id) {
-          userAiCounts.set(h.user_id, (userAiCounts.get(h.user_id) || 0) + countForHub);
-        }
-      });
-
-      const totalRequests = summaries + flashcards + quizzes + podcasts;
-      const estimatedTokens = totalRequests * 3500;
-      const costUsd = Number(((estimatedTokens / 1_000_000) * 0.15).toFixed(2));
-      const costNgn = Math.round(costUsd * 1550);
-
-      const profileMap = new Map<string, string>();
-      profiles.forEach(p => { if (p.id) profileMap.set(p.id, p.email || p.name || 'Student'); });
-
-      // Identify high usage accounts
-      const topUsers = Array.from(userAiCounts.entries())
-        .map(([uid, count]) => ({
-          userId: uid,
-          userEmail: profileMap.get(uid) || 'Unknown User',
-          requestCount: count
-        }))
-        .sort((a, b) => b.requestCount - a.requestCount)
-        .slice(0, 10);
-
-      res.json({
-        success: true,
-        analytics: {
-          totalRequests,
-          summariesGenerated: summaries,
-          flashcardsGenerated: flashcards,
-          quizzesGenerated: quizzes,
-          podcastsGenerated: podcasts,
-          estimatedTokens,
-          estimatedCostUsd: costUsd,
-          estimatedCostNgn: costNgn,
-          topUsers,
-          activeModel: OCR_MODEL,
-          modelProvider: 'Google Gemini'
-        }
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch AI usage analytics.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 6: FILE & STORAGE MANAGEMENT
-  // ==========================================
-  app.get('/api/admin/files', authenticateAdminToken, async (req, res) => {
-    try {
-      const [hubs, userFiles, profiles] = await Promise.all([
-        fetchTableRows('study_hubs'),
-        fetchTableRows('user_files'),
-        fetchTableRows('profiles')
-      ]);
-
-      const profileMap = new Map<string, string>();
-      profiles.forEach(p => { if (p.id) profileMap.set(p.id, p.email || 'N/A'); });
-
-      const filesList: any[] = [];
-
-      hubs.forEach(h => {
-        if (h.file_name || h.file_content) {
-          filesList.push({
-            id: h.id,
-            source: 'study_hub',
-            name: h.file_name || h.title || 'Document',
-            sizeBytes: Number(h.file_size) || 0,
-            fileType: h.file_name?.split('.').pop() || 'pdf',
-            userId: h.user_id,
-            userEmail: profileMap.get(h.user_id) || 'N/A',
-            createdAt: h.created_at || new Date().toISOString()
-          });
-        }
-      });
-
-      userFiles.forEach(f => {
-        filesList.push({
-          id: f.id,
-          source: 'user_file',
-          name: f.name || f.filename || 'File',
-          sizeBytes: Number(f.file_size) || 0,
-          fileType: f.mime_type || 'file',
-          userId: f.user_id,
-          userEmail: profileMap.get(f.user_id) || 'N/A',
-          createdAt: f.created_at || new Date().toISOString()
-        });
-      });
-
-      res.json({
-        success: true,
-        files: filesList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch files directory.' });
-    }
-  });
-
-  app.post('/api/admin/files/delete', authenticateAdminToken, requireAdminRole(['super_admin', 'admin']), async (req, res) => {
-    try {
-      const { fileId, source, reason } = req.body;
-      if (!fileId) return res.status(400).json({ success: false, error: 'File ID is required.' });
-
-      if (supabaseAdmin) {
-        if (source === 'study_hub') {
-          await supabaseAdmin.from('study_hubs').delete().eq('id', fileId);
-        } else {
-          await supabaseAdmin.from('user_files').delete().eq('id', fileId);
-        }
-      }
-
-      await recordAdminAuditLog(
-        'FILE_DELETED_MODERATION',
-        `Admin removed problematic file ${fileId} (${source}). Reason: ${reason || 'Inappropriate content'}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'File deleted from platform storage.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to delete file.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 7: STUDY CIRCLES MANAGEMENT
-  // ==========================================
-  app.get('/api/admin/circles', authenticateAdminToken, async (req, res) => {
-    try {
-      const [groups, profiles] = await Promise.all([
-        fetchTableRows('study_groups'),
-        fetchTableRows('profiles')
-      ]);
-
-      const profileMap = new Map<string, string>();
-      profiles.forEach(p => { if (p.id) profileMap.set(p.id, p.email || p.name || 'Scholar'); });
-
-      const circles = groups.map(g => ({
-        id: g.id,
-        name: g.name || 'Study Circle',
-        description: g.description || '',
-        creatorId: g.creator_id || g.user_id,
-        creatorEmail: profileMap.get(g.creator_id || g.user_id) || 'N/A',
-        isPrivate: Boolean(g.is_private),
-        memberCount: Array.isArray(g.members) ? g.members.length : (g.member_count || 1),
-        courseCode: g.course_code || '',
-        createdAt: g.created_at || new Date().toISOString()
-      }));
-
-      res.json({
-        success: true,
-        circles: circles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch study circles.' });
-    }
-  });
-
-  app.post('/api/admin/circles/delete', authenticateAdminToken, requireAdminRole(['super_admin', 'admin']), async (req, res) => {
-    try {
-      const { circleId, reason } = req.body;
-      if (!circleId) return res.status(400).json({ success: false, error: 'Circle ID is required.' });
-
-      if (supabaseAdmin) {
-        await supabaseAdmin.from('study_groups').delete().eq('id', circleId);
-      }
-
-      await recordAdminAuditLog(
-        'STUDY_CIRCLE_REMOVED',
-        `Admin removed study circle ${circleId}. Reason: ${reason || 'Community violation'}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'Study circle removed successfully.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to delete study circle.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 8: NOTIFICATIONS & ANNOUNCEMENTS
-  // ==========================================
-  app.get('/api/admin/announcements', authenticateAdminToken, async (req, res) => {
-    try {
-      const announcements = await fetchTableRows('announcements');
-      res.json({
-        success: true,
-        announcements: announcements.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch announcements.' });
-    }
-  });
-
-  app.post('/api/admin/announcements', authenticateAdminToken, requireAdminRole(['super_admin', 'admin']), async (req, res) => {
-    try {
-      const { title, message, targetGroup, priority } = req.body;
-      if (!title || !message) {
-        return res.status(400).json({ success: false, error: 'Title and message are required.' });
-      }
-
-      if (supabaseAdmin) {
-        await supabaseAdmin.from('announcements').insert({
-          title,
-          message,
-          target_group: targetGroup || 'all',
-          priority: priority || 'normal',
-          created_by: (req as any).adminUser?.email || 'admin'
-        });
-      }
-
-      await recordAdminAuditLog(
-        'ANNOUNCEMENT_PUBLISHED',
-        `Published announcement: "${title}" (Target: ${targetGroup || 'all'})`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'Announcement dispatched successfully.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to publish announcement.' });
-    }
-  });
-
-  app.delete('/api/admin/announcements/:id', authenticateAdminToken, requireAdminRole(['super_admin', 'admin']), async (req, res) => {
-    try {
-      const id = req.params.id;
-      if (supabaseAdmin) {
-        await supabaseAdmin.from('announcements').delete().eq('id', id);
-      }
-      res.json({ success: true, message: 'Announcement deleted.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to delete announcement.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 9: ADMINISTRATOR MANAGEMENT
-  // ==========================================
-  app.get('/api/admin/administrators', authenticateAdminToken, requireAdminRole(['super_admin']), async (req, res) => {
-    try {
-      const dbAdmins = await fetchTableRows('admins');
-      const hasSuper = dbAdmins.some(a => a.email === SUPER_ADMIN_EMAIL);
-      const list = [...dbAdmins];
-
-      if (!hasSuper) {
-        list.unshift({
-          id: 'super_admin_primary',
-          email: SUPER_ADMIN_EMAIL,
-          role: 'super_admin',
-          full_name: 'Super Administrator',
-          is_active: true,
-          created_at: new Date().toISOString()
-        });
-      }
-
-      res.json({
-        success: true,
-        administrators: list
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch administrators.' });
-    }
-  });
-
-  app.post('/api/admin/administrators', authenticateAdminToken, requireAdminRole(['super_admin']), async (req, res) => {
-    try {
-      const { email, fullName, role } = req.body;
-      const cleanEmail = String(email || '').toLowerCase().trim();
-      const validRoles = ['admin', 'finance_admin', 'support_admin'];
-
-      if (!cleanEmail || !validRoles.includes(role)) {
-        return res.status(400).json({ success: false, error: 'Valid email and role are required.' });
-      }
-
-      if (cleanEmail === SUPER_ADMIN_EMAIL) {
-        return res.status(400).json({ success: false, error: 'Cannot re-create primary Super Admin.' });
-      }
-
-      if (supabaseAdmin) {
-        const { error } = await supabaseAdmin.from('admins').insert({
-          email: cleanEmail,
-          full_name: fullName || 'KorsIQ Admin',
-          role,
-          is_active: true
-        });
-        if (error) throw error;
-      }
-
-      await recordAdminAuditLog(
-        'ADMIN_USER_CREATED',
-        `Super Admin granted ${role} role to ${cleanEmail}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: `Administrator ${cleanEmail} registered successfully.` });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to register administrator.' });
-    }
-  });
-
-  app.post('/api/admin/administrators/role', authenticateAdminToken, requireAdminRole(['super_admin']), async (req, res) => {
-    try {
-      const { email, role, isActive } = req.body;
-      const cleanEmail = String(email || '').toLowerCase().trim();
-
-      if (cleanEmail === SUPER_ADMIN_EMAIL) {
-        return res.status(403).json({ success: false, error: 'Cannot modify or revoke Super Admin privileges.' });
-      }
-
-      if (supabaseAdmin) {
-        await supabaseAdmin.from('admins').update({
-          role: role || undefined,
-          is_active: isActive !== undefined ? Boolean(isActive) : undefined,
-          updated_at: new Date().toISOString()
-        }).eq('email', cleanEmail);
-      }
-
-      await recordAdminAuditLog(
-        'ADMIN_PRIVILEGES_MODIFIED',
-        `Super Admin updated permissions for ${cleanEmail} (Role: ${role}, Active: ${isActive})`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'Administrator permissions updated successfully.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to update administrator.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 10: SYSTEM LOGS & SECURITY AUDIT
-  // ==========================================
-  app.get('/api/admin/logs', authenticateAdminToken, async (req, res) => {
-    try {
-      const rawLogs = await fetchTableRows('admin_logs');
-      const dbLogs = rawLogs.map((l) => ({
-        id: l.id,
-        event: l.action,
-        status: l.details?.status || 'SUCCESS',
-        timestamp: l.created_at,
-        details: l.details?.message || '',
-        ip: l.details?.ip || '',
-        userAgent: l.details?.userAgent || '',
-        actor: l.actor || 'admin'
-      }));
-
-      // Combine DB logs with recent in-memory logs
-      const combined = [...inMemoryAdminLogs, ...dbLogs];
-      const seenIds = new Set<string>();
-      const dedupedLogs = combined.filter(l => {
-        if (!l.id || seenIds.has(l.id)) return false;
-        seenIds.add(l.id);
-        return true;
-      }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-      res.json({
-        success: true,
-        logs: dedupedLogs.slice(0, 200)
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit logs.' });
-    }
-  });
-
-  // ==========================================
-  // DOMAIN 11: PLATFORM SETTINGS
-  // ==========================================
-  app.get('/api/admin/settings', authenticateAdminToken, async (req, res) => {
-    try {
-      const settingsRows = await fetchTableRows('platform_settings');
-      const current = settingsRows[0] || {
-        maintenance_mode: false,
-        registrations_enabled: true,
-        notice_message: null
-      };
-
-      res.json({
-        success: true,
-        settings: {
-          maintenanceMode: Boolean(current.maintenance_mode),
-          registrationsEnabled: current.registrations_enabled !== false,
-          noticeMessage: current.notice_message || ''
-        }
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch platform settings.' });
-    }
-  });
-
-  app.post('/api/admin/settings', authenticateAdminToken, requireAdminRole(['super_admin']), async (req, res) => {
-    try {
-      const { maintenanceMode, registrationsEnabled, noticeMessage } = req.body;
-
-      if (supabaseAdmin) {
-        const { data: existing } = await supabaseAdmin.from('platform_settings').select('id').limit(1);
-        if (existing && existing.length > 0) {
-          await supabaseAdmin.from('platform_settings').update({
-            maintenance_mode: Boolean(maintenanceMode),
-            registrations_enabled: Boolean(registrationsEnabled),
-            notice_message: noticeMessage || null,
-            updated_at: new Date().toISOString()
-          }).eq('id', existing[0].id);
-        } else {
-          await supabaseAdmin.from('platform_settings').insert({
-            maintenance_mode: Boolean(maintenanceMode),
-            registrations_enabled: Boolean(registrationsEnabled),
-            notice_message: noticeMessage || null
-          });
-        }
-      }
-
-      await recordAdminAuditLog(
-        'PLATFORM_SETTINGS_UPDATED',
-        `Super Admin updated settings: Maintenance=${maintenanceMode}, Registrations=${registrationsEnabled}`,
-        'SUCCESS',
-        req
-      );
-
-      res.json({ success: true, message: 'Platform settings updated.' });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to update platform settings.' });
-    }
-  });
-
-  // System Health Status
-  app.get('/api/admin/status', authenticateAdminToken, async (req, res) => {
-    const memory = process.memoryUsage();
-    res.json({
-      success: true,
-      status: {
-        server: 'Operational',
-        uptimeSeconds: Math.floor(process.uptime()),
-        nodeVersion: process.version,
-        memoryUsageMB: {
-          rss: Math.round(memory.rss / (1024 * 1024)),
-          heapUsed: Math.round(memory.heapUsed / (1024 * 1024)),
-          heapTotal: Math.round(memory.heapTotal / (1024 * 1024))
-        },
-        database: {
-          status: supabaseAdmin ? 'Connected' : 'Service key not configured',
-          projectId: (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return 'not-configured'; } })(),
-          databaseType: 'Supabase Postgres with RLS'
-        },
-        aiEngines: {
-          gemini: pickGeminiKey() ? 'Online' : 'Configured'
-        },
-        timestamp: new Date().toISOString()
-      }
-    });
-  });
 
   // ==========================================
   // PUBLIC / STUDENT CIRCLES API ENDPOINTS
@@ -4730,6 +3351,15 @@ CRITICAL WRITING RULES:
             .maybeSingle();
 
           if (!dbErr && dbData) {
+            if (ownerId) {
+              await supabaseAdmin.from('circle_members').upsert({
+                circle_id: dbData.id,
+                user_id: ownerId,
+                user_name: ownerName || 'Circle Creator',
+                role: 'owner',
+                joined_at: createdAt
+              }, { onConflict: 'circle_id,user_id' });
+            }
             return res.json({
               success: true,
               group: {
@@ -4897,6 +3527,14 @@ CRITICAL WRITING RULES:
               updated_at: new Date().toISOString()
             })
             .eq('id', groupId);
+
+          await supabaseAdmin.from('circle_members').upsert({
+            circle_id: groupId,
+            user_id: userId,
+            user_name: userName || 'Student',
+            role: 'member',
+            joined_at: new Date().toISOString()
+          }, { onConflict: 'circle_id,user_id' });
         }
 
         return res.json({
