@@ -75,7 +75,11 @@ function safeCompareStrings(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-const OCR_MODEL = 'gemini-3.5-flash';
+// Gemini models are env-configurable because Google retires them. Override GEMINI_MODEL in hosting env
+// instead of editing code. Later entries are fallbacks tried in order.
+const GEMINI_PRIMARY_MODEL = cleanEnvKey('GEMINI_MODEL') || 'gemini-3.6-flash';
+const GEMINI_FALLBACK_MODELS = [cleanEnvKey('GEMINI_FALLBACK_MODEL'), 'gemini-3.5-flash', 'gemini-3.5-flash-lite'].filter(Boolean) as string[];
+const OCR_MODEL = GEMINI_PRIMARY_MODEL;
 const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
 
 function pickGeminiKey(): string | null {
@@ -373,7 +377,7 @@ export async function createExpressApp() {
       config.responseMimeType = "application/json";
     }
 
-    const geminiCandidateModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+    const geminiCandidateModels = Array.from(new Set([GEMINI_PRIMARY_MODEL, ...GEMINI_FALLBACK_MODELS]));
     let lastError: any = null;
 
     for (const model of geminiCandidateModels) {
@@ -393,7 +397,7 @@ export async function createExpressApp() {
     }
 
     const failureReason = lastError?.message || 'Gemini API failed to generate a response';
-    console.error('[Gemini AI Execution Fatal]:', failureReason);
+    console.error('[Gemini AI Execution Fatal]:', { models: geminiCandidateModels, status: lastError?.status, reason: failureReason });
     throw new Error(`Gemini AI service error: ${failureReason}`);
   };
 
@@ -2907,7 +2911,7 @@ You MUST return a JSON object containing structured study assets with this exact
         };
 
         const response = await aiGen.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_PRIMARY_MODEL,
           contents: [
             mediaInput,
             "Scan and transcribe this document, then synthesize structured study assets matching the JSON schema."

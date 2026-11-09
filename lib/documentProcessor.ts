@@ -1,4 +1,4 @@
-import { PDFParse } from 'pdf-parse';
+// pdf-parse is loaded lazily: importing it at startup needs DOMMatrix, which crashes the Vercel function on boot.
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
 
@@ -243,7 +243,7 @@ export async function processDocumentBuffer(
 
       // 1. Try PDFParse class (pdf-parse v2)
       try {
-        let ParserClass: any = PDFParse;
+        let ParserClass: any = null;
         if (!ParserClass || typeof ParserClass !== 'function') {
           const mod = await import('pdf-parse');
           ParserClass = mod.PDFParse || (mod as any).default?.PDFParse || (mod as any).default || mod;
