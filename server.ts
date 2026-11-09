@@ -2919,9 +2919,130 @@ You MUST return a JSON object containing structured study assets with this exact
     }
   });
 
-  // Advanced Academic AI Companion / tutoring endpoint
+  // =============================================================
+  // PERSISTENT AI CONVERSATIONS & CHAT HISTORY (STUDY HUB AI)
+  // =============================================================
+  app.get('/api/ai/conversations', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const courseIdParam = typeof req.query.courseId === 'string' ? req.query.courseId.trim() : undefined;
+    if (!supabaseAdmin || !userId) {
+      return res.json({ conversations: [] });
+    }
+    try {
+      let query = supabaseAdmin
+        .from('ai_conversations')
+        .select('id, user_id, course_id, title, created_at, updated_at')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+        .limit(50);
+
+      if (courseIdParam === 'general') {
+        query = query.is('course_id', null);
+      } else if (courseIdParam) {
+        query = query.eq('course_id', courseIdParam);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('ai_conversations list warning:', error.message);
+        return res.json({ conversations: [] });
+      }
+      return res.json({ conversations: data || [] });
+    } catch (err: any) {
+      console.warn('Failed to fetch ai_conversations:', err?.message || err);
+      return res.json({ conversations: [] });
+    }
+  });
+
+  app.get('/api/ai/conversations/:id/messages', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const convId = req.params.id;
+    if (!supabaseAdmin || !userId || !convId) {
+      return res.json({ messages: [] });
+    }
+    try {
+      const { data: conv } = await supabaseAdmin
+        .from('ai_conversations')
+        .select('id, user_id')
+        .eq('id', convId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!conv) {
+        return res.status(404).json({ error: 'Conversation not found.' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('ai_messages')
+        .select('id, conversation_id, role, content, created_at')
+        .eq('conversation_id', convId)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(100);
+      if (error) {
+        console.warn('ai_messages fetch warning:', error.message);
+        return res.json({ messages: [] });
+      }
+      return res.json({ messages: data || [] });
+    } catch (err: any) {
+      return res.json({ messages: [] });
+    }
+  });
+
+  app.patch('/api/ai/conversations/:id', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const convId = req.params.id;
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 80) : '';
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required.' });
+    }
+    if (!supabaseAdmin || !userId) {
+      return res.status(503).json({ error: 'Database unavailable.' });
+    }
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('ai_conversations')
+        .update({ title, updated_at: new Date().toISOString() })
+        .eq('id', convId)
+        .eq('user_id', userId)
+        .select('id, user_id, course_id, title, created_at, updated_at')
+        .maybeSingle();
+      if (error || !data) {
+        return res.status(404).json({ error: error?.message || 'Conversation not found.' });
+      }
+      return res.json({ conversation: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'Failed to rename conversation.' });
+    }
+  });
+
+  app.delete('/api/ai/conversations/:id', requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const convId = req.params.id;
+    if (!supabaseAdmin || !userId) {
+      return res.status(503).json({ error: 'Database unavailable.' });
+    }
+    try {
+      await supabaseAdmin
+        .from('ai_messages')
+        .delete()
+        .eq('conversation_id', convId)
+        .eq('user_id', userId);
+      const { error } = await supabaseAdmin
+        .from('ai_conversations')
+        .delete()
+        .eq('id', convId)
+        .eq('user_id', userId);
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'Failed to delete conversation.' });
+    }
+  });
+
+  // Advanced Academic AI Companion / tutoring endpoint (with DB-backed conversation history)
   app.post('/api/scolaris/chat', requireAuth, apiRateLimiter, async (req, res) => {
-    const { messages, courseContext, fileContent } = req.body;
+    const { messages, message, conversationId, courseId, courseContext, fileContent } = req.body;
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
@@ -2930,7 +3051,18 @@ You MUST return a JSON object containing structured study assets with this exact
         });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const userId = (req as any).user?.id || (req as any).user?.uid;
+      const studentContext = await getStudentContextForUser(userId);
+
+      // Extract the new user message
+      const clientMsgs = Array.isArray(messages) ? messages : [];
+      const rawUserMessage = typeof message === 'string' && message.trim()
+        ? message.trim()
+        : (clientMsgs.length > 0 ? String(clientMsgs[clientMsgs.length - 1]?.content || clientMsgs[clientMsgs.length - 1]?.text || '').trim() : '');
+
+      if (!rawUserMessage) {
+        return res.status(400).json({ error: 'Message content is required.' });
+      }
 
       let systemPrompt = `${studentContext}
 
@@ -2945,9 +3077,7 @@ Focus your analysis, definitions, and problem-solving techniques on the scope an
       if (fileContent && typeof fileContent === 'string' && fileContent.trim().length > 0) {
         const val = validateExtractedText(fileContent);
         if (val.isValid) {
-          const clientMsgs = messages || [];
-          const lastUserMsg = clientMsgs.length > 0 ? (clientMsgs[clientMsgs.length - 1]?.content || clientMsgs[clientMsgs.length - 1]?.text || '') : '';
-          const cleanText = selectRelevantChunks(fileContent, lastUserMsg, 14000);
+          const cleanText = selectRelevantChunks(fileContent, rawUserMessage, 14000);
           systemPrompt += `\n\nCRITICAL CONTEXT: The student has uploaded a source material file to study. Below is clean readable text extracted from their file:
 ---
 ${cleanText}
@@ -2958,18 +3088,126 @@ Always refer to this context when answering questions about the material, explai
         }
       }
 
-      const clientMessages = (messages || []).map((m: any) => ({
-        role: m.role || (isAiSender(m.sender) ? 'assistant' : 'user'),
-        content: m.content || m.text
-      }));
+      // Load authoritative conversation history from the database for the authenticated user
+      let activeConv: any = null;
+      let conversationMessages: { role: string; content: string }[] = [];
+
+      if (supabaseAdmin && userId) {
+        try {
+          if (conversationId) {
+            const { data: existingConv } = await supabaseAdmin
+              .from('ai_conversations')
+              .select('id, user_id, course_id, title, created_at, updated_at')
+              .eq('id', conversationId)
+              .eq('user_id', userId)
+              .maybeSingle();
+
+            if (existingConv) {
+              activeConv = existingConv;
+              const { data: dbMsgs } = await supabaseAdmin
+                .from('ai_messages')
+                .select('role, content, created_at')
+                .eq('conversation_id', existingConv.id)
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+              if (Array.isArray(dbMsgs) && dbMsgs.length > 0) {
+                conversationMessages = dbMsgs
+                  .slice()
+                  .reverse()
+                  .map((m: any) => ({
+                    role: m.role === 'assistant' ? 'assistant' : 'user',
+                    content: m.content
+                  }));
+              }
+            }
+          }
+
+          if (!activeConv) {
+            const autoTitle = rawUserMessage.replace(/\s+/g, ' ').slice(0, 60);
+            const { data: createdConv } = await supabaseAdmin
+              .from('ai_conversations')
+              .insert({
+                user_id: userId,
+                course_id: courseId || null,
+                title: autoTitle || 'New conversation'
+              })
+              .select('id, user_id, course_id, title, created_at, updated_at')
+              .maybeSingle();
+            if (createdConv) {
+              activeConv = createdConv;
+            }
+          }
+        } catch (dbHistErr: any) {
+          console.warn('AI conversation DB lookup fallback:', dbHistErr?.message || dbHistErr);
+        }
+      }
+
+      // Append the current user prompt to the authoritative DB history
+      const messagesForAI = [
+        ...conversationMessages,
+        { role: 'user', content: rawUserMessage }
+      ];
 
       const aiContent = await runAICall({
         systemInstruction: systemPrompt,
-        messages: clientMessages,
+        messages: messagesForAI,
         temperature: 0.5
       });
 
-      res.json({ text: aiContent });
+      // Persist both the user message and the AI response to the database
+      let savedUserMsg: any = null;
+      let savedAssistantMsg: any = null;
+      if (supabaseAdmin && userId && activeConv?.id) {
+        try {
+          const nowIso = new Date().toISOString();
+          const { data: insertedMsgs } = await supabaseAdmin
+            .from('ai_messages')
+            .insert([
+              {
+                conversation_id: activeConv.id,
+                user_id: userId,
+                role: 'user',
+                content: rawUserMessage
+              },
+              {
+                conversation_id: activeConv.id,
+                user_id: userId,
+                role: 'assistant',
+                content: aiContent
+              }
+            ])
+            .select('id, conversation_id, role, content, created_at');
+
+          if (Array.isArray(insertedMsgs)) {
+            savedUserMsg = insertedMsgs.find((m: any) => m.role === 'user') || null;
+            savedAssistantMsg = insertedMsgs.find((m: any) => m.role === 'assistant') || null;
+          }
+
+          const updatedTitle = activeConv.title === 'New conversation'
+            ? rawUserMessage.replace(/\s+/g, ' ').slice(0, 60)
+            : activeConv.title;
+
+          const { data: updatedConv } = await supabaseAdmin
+            .from('ai_conversations')
+            .update({ title: updatedTitle, updated_at: nowIso })
+            .eq('id', activeConv.id)
+            .eq('user_id', userId)
+            .select('id, user_id, course_id, title, created_at, updated_at')
+            .maybeSingle();
+          if (updatedConv) activeConv = updatedConv;
+        } catch (saveErr: any) {
+          console.warn('Failed to persist AI chat messages:', saveErr?.message || saveErr);
+        }
+      }
+
+      res.json({
+        text: aiContent,
+        conversation: activeConv,
+        userMessage: savedUserMsg,
+        assistantMessage: savedAssistantMsg
+      });
     } catch (error: any) {
       console.error("KorsIQ Chat API pipeline error:", error?.message || error);
       res.status(500).json({

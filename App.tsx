@@ -17,7 +17,6 @@ import Profile from './components/Profile';
 import AnalyticsView from './components/AnalyticsView';
 import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
-import { ScolarisChatWidget } from './components/ScolarisChatWidget';
 import Auth, { type AuthMode } from './components/Auth';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
@@ -1087,15 +1086,6 @@ const App: React.FC = () => {
 
             {renderContent()}
           </div>
-
-          {profile && profile.onboarded && (
-            <ScolarisChatWidget 
-              profile={profile}
-              courses={courses}
-              activeCourseId={selectedCourseId}
-              activeHub={hubs[selectedCourseId || (courses[0]?.id || '')] || null}
-            />
-          )}
         </main>
 
         {/* Mobile Pinned Bottom Navigation Bar (Visible ONLY on mobile devices) */}

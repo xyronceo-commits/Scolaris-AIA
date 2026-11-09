@@ -2,12 +2,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState, UserFile } from '../types';
 import { ICONS } from '../constants';
-import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus } from 'lucide-react';
+import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus, MessageSquare, Link as LinkIcon } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
 import { RecentFiles } from './RecentFiles';
+import { StudyHubAIChat } from './StudyHubAIChat';
 
 // Component for individual flashcards in Grid View
 const FlashcardItem: React.FC<{ card: Flashcard; index: number }> = ({ card, index }) => {
@@ -95,7 +96,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
       } catch {}
     }
   }, [selectedCourseId, courses]);
-  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner'>('summary');
+  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner' | 'ai'>('summary');
+  const [landingView, setLandingView] = useState<'courses' | 'ai'>('courses');
   const [loading, setLoading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
@@ -576,6 +578,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const tools = [
     { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: 'Key Concepts' },
+    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
     { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
     { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
@@ -585,83 +588,133 @@ const StudyHub: React.FC<StudyHubProps> = ({
   if (!activeCourseId || !currentCourse) {
     return (
       <div className="space-y-6 max-w-5xl mx-auto pb-16">
-        {/* Header */}
-        <div className="border-b border-slate-200 dark:border-slate-800 pb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
-              Study Hub
-            </span>
+        {/* Header with Ask KorsIQ AI entry */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
+                Study Hub
+              </span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {landingView === 'ai' ? 'Ask KorsIQ AI' : 'Course Workbenches'}
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+              {landingView === 'ai'
+                ? 'General academic discussions with saved conversation history.'
+                : 'Select a course to open its study workbench, or start a conversation with KorsIQ AI.'}
+            </p>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Course Workbenches
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Select a course to open its study workbench, flashcards, summaries, and practice quizzes.
-          </p>
+
+          <button
+            type="button"
+            onClick={() => setLandingView(landingView === 'ai' ? 'courses' : 'ai')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs sm:text-sm font-semibold min-h-[44px] transition-colors cursor-pointer shrink-0 shadow-xs"
+          >
+            <MessageSquare size={16} />
+            <span>{landingView === 'ai' ? 'View courses' : 'Ask KorsIQ AI'}</span>
+          </button>
         </div>
 
-        {courses.length === 0 ? (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
-              <BookOpen size={24} />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-slate-900 dark:text-white">
-                No courses enrolled yet
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Add your courses to start generating tailored summaries, active recall flashcards, and quizzes.
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigate?.('planner')}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shadow-xs"
-            >
-              <Plus size={16} />
-              <span>Add your first course</span>
-            </button>
-          </div>
+        {landingView === 'ai' ? (
+          <StudyHubAIChat
+            profile={profile}
+            courses={courses}
+            activeCourse={null}
+            activeHub={null}
+            onBackToCourses={() => setLandingView('courses')}
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {courses.map(course => {
-              const hubData = hubs[course.id];
-              const hasMaterials = Boolean(hubData?.summary || hubData?.flashcards?.length || hubData?.quizzes?.length || hubData?.libraryFiles?.length);
+          <>
+            {/* Prominent Ask KorsIQ AI Entry Card */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950 text-[#2563EB] flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-900">
+                  <MessageSquare size={20} />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Ask KorsIQ AI
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Chat with your discipline-tailored academic tutor and revisit your saved conversation history anytime.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLandingView('ai')}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shrink-0"
+              >
+                <MessageSquare size={15} />
+                <span>Open AI Chat</span>
+              </button>
+            </div>
 
-              return (
+            {courses.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+                  <BookOpen size={24} />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                    No courses enrolled yet
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Add your courses to start generating tailored summaries, active recall flashcards, and quizzes.
+                  </p>
+                </div>
                 <button
-                  key={course.id}
-                  onClick={() => {
-                    setActiveCourseId(course.id);
-                    onCourseIdChange?.(course.id);
-                  }}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl p-5 text-left transition-all hover:shadow-sm min-h-[120px] flex flex-col justify-between group cursor-pointer"
+                  onClick={() => onNavigate?.('planner')}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shadow-xs"
                 >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-bold font-mono px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded border border-blue-100 dark:border-blue-900">
-                        {course.code}
-                      </span>
-                      <span className="text-[11px] font-medium text-slate-400">
-                        {course.units} Units
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {course.title}
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs">
-                    <span className="text-[11px] text-slate-400">
-                      {hasMaterials ? 'Materials active' : 'Ready to start'}
-                    </span>
-                    <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-                      Open Hub &rarr;
-                    </span>
-                  </div>
+                  <Plus size={16} />
+                  <span>Add your first course</span>
                 </button>
-              );
-            })}
-          </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {courses.map(course => {
+                  const hubData = hubs[course.id];
+                  const hasMaterials = Boolean(hubData?.summary || hubData?.flashcards?.length || hubData?.quizzes?.length || hubData?.libraryFiles?.length);
+
+                  return (
+                    <button
+                      key={course.id}
+                      onClick={() => {
+                        setActiveCourseId(course.id);
+                        onCourseIdChange?.(course.id);
+                      }}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 rounded-xl p-5 text-left transition-all hover:shadow-sm min-h-[120px] flex flex-col justify-between group cursor-pointer"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-bold font-mono px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded border border-blue-100 dark:border-blue-900">
+                            {course.code}
+                          </span>
+                          <span className="text-[11px] font-medium text-slate-400">
+                            {course.units} Units
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          {course.title}
+                        </h3>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs">
+                        <span className="text-[11px] text-slate-400">
+                          {hasMaterials ? 'Materials active' : 'Ready to start'}
+                        </span>
+                        <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                          Open Hub &rarr;
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -848,7 +901,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
             </div>
           )}
 
-          {!isSessionFileActive ? (
+          {activeTool === 'ai' ? (
+            <StudyHubAIChat
+              profile={profile}
+              courses={courses}
+              activeCourse={currentCourse}
+              activeHub={activeHub}
+            />
+          ) : !isSessionFileActive && activeTool !== 'library' ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in fade-in duration-300 min-h-[380px]">
               <div className="p-4 bg-blue-50 rounded-xl mb-4 text-blue-600 border border-blue-100 shadow-2xs">
                 <Sparkles size={28} />
