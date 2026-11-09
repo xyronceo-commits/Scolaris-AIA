@@ -4695,7 +4695,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       return res.status(400).json({ success: false, error: 'Payment reference is required.' });
     }
 
-    const secretKey = getPaystackSecretKey();
+    const secretKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
     if (!secretKey) {
       return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server.' });
     }
@@ -4731,8 +4731,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
             .from('payment_transactions')
             .update({
               status: mappedStatus,
-              gateway_response: txData.gateway_response || `Paystack status: ${gatewayStatus}`,
-              raw_payload: txData
+              gateway_response: txData.gateway_response || `Paystack status: ${gatewayStatus}`
             })
             .eq('reference', reference);
         }
@@ -4744,44 +4743,77 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         });
       }
 
-      const userId = txRecord?.user_id || txData.metadata?.user_id;
-      const planKey = normalizePlanTier(txRecord?.plan || txData.metadata?.plan || (Number(txData.amount) >= 1500000 ? 'studio' : 'plus')) || 'plus';
-      const cycleKey: 'monthly' | 'annual' = (txRecord?.billing_cycle || txData.metadata?.billing_cycle) === 'annual' ? 'annual' : 'monthly';
+      const userId = txRecord?.user_id || txData.metadata?.userId || txData.metadata?.user_id;
+      const rawPlan = String(txRecord?.plan_tier || txRecord?.plan || txData.metadata?.planTier || txData.metadata?.plan || '').toLowerCase();
+      const planKey: 'plus' | 'studio' =
+        rawPlan === 'studio' || rawPlan === 'sage' || Number(txData.amount) >= 1500000 ? 'studio' : 'plus';
+      const cycleKey: 'monthly' | 'annual' =
+        (txRecord?.metadata?.billingCycle || txData.metadata?.billingCycle || txData.metadata?.billing_cycle) === 'annual'
+          ? 'annual'
+          : 'monthly';
 
       if (!userId) {
         return res.status(400).json({ success: false, error: 'Payment succeeded on Paystack, but no user_id is linked to this reference.' });
       }
 
-      const activation = await activateSubscriptionIdempotent({
-        reference,
+      const periodStart = txData.paid_at ? new Date(txData.paid_at) : new Date();
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + (cycleKey === 'annual' ? 365 : 30));
+      const periodEndIso = periodEnd.toISOString();
+      const amountNaira = (Number(txData.amount) || Number(txRecord?.amount_kobo) || 0) / 100;
+
+      await supabaseAdmin
+        .from('payment_transactions')
+        .update({
+          status: 'paid',
+          paid_at: periodStart.toISOString(),
+          gateway_response: txData.gateway_response || 'Approved',
+          channel: txData.channel || null
+        })
+        .eq('reference', reference);
+
+      await supabaseAdmin.from('subscriptions').upsert(
+        {
+          user_id: userId,
+          plan_tier: planKey,
+          billing_cycle: cycleKey,
+          status: 'active',
+          payment_provider: 'paystack',
+          payment_reference: reference,
+          payment_status: 'paid',
+          amount_paid: amountNaira,
+          currency: txData.currency || 'NGN',
+          current_period_start: periodStart.toISOString(),
+          current_period_end: periodEndIso,
+          paystack_customer_code: txData.customer?.customer_code || null,
+          paystack_authorization_code: txData.authorization?.authorization_code || null
+        },
+        { onConflict: 'payment_reference' }
+      );
+
+      await activatePaidProfile(
+        supabaseAdmin,
         userId,
-        plan: planKey,
-        billingCycle: cycleKey,
-        amountKobo: Number(txData.amount) || Number(txRecord?.amount_kobo) || 0,
-        currency: txData.currency || 'NGN',
-        channel: txData.channel || null,
-        gatewayResponse: txData.gateway_response || 'Approved',
-        customerEmail: txData.customer?.email || txRecord?.customer_email || null,
-        customerCode: txData.customer?.customer_code || null,
-        subscriptionCode: txData.subscription_code || null,
-        planCode: txData.plan_object?.plan_code || null,
-        authorizationCode: txData.authorization?.authorization_code || null,
-        paidAt: txData.paid_at || new Date().toISOString(),
-        rawPayload: txData
-      });
+        planKey,
+        true,
+        'active',
+        'paid',
+        periodEndIso,
+        txData.customer?.customer_code || undefined
+      );
 
       await logAdminAction(admin.email, 'admin_verify_payment_activated', {
         reference,
         userId,
         plan: planKey,
-        amountNaira: (Number(txData.amount) || 0) / 100
+        amountNaira
       });
 
       return res.json({
         success: true,
         status: 'paid',
         plan: planKey,
-        periodEnd: activation.periodEnd,
+        periodEnd: periodEndIso,
         message: `Verified with Paystack and activated ${planKey.toUpperCase()} plan for user ${userId}.`
       });
     } catch (err: any) {

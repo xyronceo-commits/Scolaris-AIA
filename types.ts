@@ -210,7 +210,7 @@ export interface GroupMember {
   name: string;
   email?: string;
   avatarIcon?: string;
-  role: 'owner' | 'admin' | 'moderator' | 'member';
+  role: 'owner' | 'co_owner' | 'admin' | 'moderator' | 'member';
   joinedAt: string | number;
 }
 

@@ -1703,10 +1703,15 @@ export const DBService = {
       localSaved.add(postId);
       writeCache('circle_saved_posts', userId, Array.from(localSaved));
 
-      const { error } = await supabase
+      const { error: err1 } = await supabase
+        .from('saved_circle_posts')
+        .upsert({ circle_id: circleId, post_id: postId, user_id: userId }, { onConflict: 'user_id,post_id' });
+      if (!err1) return true;
+
+      const { error: err2 } = await supabase
         .from('circle_saved_posts')
         .upsert({ circle_id: circleId, post_id: postId, user_id: userId }, { onConflict: 'user_id,post_id' });
-      return !error;
+      return !err2;
     } catch {
       return true;
     }
@@ -1717,6 +1722,12 @@ export const DBService = {
       const localSaved = new Set(readCache<string[]>('circle_saved_posts', userId, []));
       localSaved.delete(postId);
       writeCache('circle_saved_posts', userId, Array.from(localSaved));
+
+      await supabase
+        .from('saved_circle_posts')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', userId);
 
       const { error } = await supabase
         .from('circle_saved_posts')
@@ -1732,16 +1743,69 @@ export const DBService = {
   async getSavedPostIds(userId: string): Promise<string[]> {
     const localSaved = readCache<string[]>('circle_saved_posts', userId, []);
     try {
-      const { data, error } = await supabase
-        .from('circle_saved_posts')
-        .select('post_id')
-        .eq('user_id', userId);
-      if (error || !data) return localSaved;
-      const merged = Array.from(new Set([...localSaved, ...data.map((r: any) => String(r.post_id))]));
+      const [res1, res2] = await Promise.all([
+        supabase.from('saved_circle_posts').select('post_id').eq('user_id', userId),
+        supabase.from('circle_saved_posts').select('post_id').eq('user_id', userId)
+      ]);
+      const ids1 = Array.isArray(res1.data) ? res1.data.map((r: any) => String(r.post_id)) : [];
+      const ids2 = Array.isArray(res2.data) ? res2.data.map((r: any) => String(r.post_id)) : [];
+      const merged = Array.from(new Set([...localSaved, ...ids1, ...ids2]));
       writeCache('circle_saved_posts', userId, merged);
       return merged;
     } catch {
       return localSaved;
+    }
+  },
+
+  async updateCircleMemberRole(
+    circleId: string,
+    targetUserId: string,
+    nextRole: 'co_owner' | 'member'
+  ): Promise<{ success: boolean; members?: (string | GroupMember)[]; error?: string }> {
+    try {
+      // 1. Update circle_members table if present
+      try {
+        await supabase
+          .from('circle_members')
+          .update({ role: nextRole })
+          .eq('circle_id', circleId)
+          .eq('user_id', targetUserId);
+      } catch {}
+
+      // 2. Update study_groups.members JSONB array
+      const group = await fetchGroupRow(circleId);
+      if (!group) {
+        return { success: false, error: 'Circle not found.' };
+      }
+
+      const currentMembers: (string | GroupMember)[] = Array.isArray(group.members) ? group.members : [];
+      const updatedMembers: (string | GroupMember)[] = currentMembers.map((m) => {
+        if (typeof m === 'string') {
+          if (m === targetUserId) {
+            return {
+              userId: m,
+              name: 'Member',
+              role: nextRole,
+              joinedAt: new Date().toISOString(),
+            };
+          }
+          return m;
+        }
+        if (m.userId === targetUserId) {
+          return { ...m, role: nextRole };
+        }
+        return m;
+      });
+
+      const { error } = await supabase
+        .from('study_groups')
+        .update({ members: updatedMembers, updated_at: new Date().toISOString() })
+        .eq('id', circleId);
+
+      if (error) throw error;
+      return { success: true, members: updatedMembers };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to update member role.' };
     }
   },
 
