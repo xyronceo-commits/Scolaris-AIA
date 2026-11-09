@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText,
   Plus,
-  Sparkles,
+  BookOpen as Sparkles,
   BookOpen,
   ArrowRight,
   ArrowLeft,
@@ -20,7 +20,7 @@ import {
   ChevronRight,
   ChevronDown,
   Layers,
-  Wand2,
+  Edit3 as Wand2,
   RefreshCw,
   Sliders,
   Check,
