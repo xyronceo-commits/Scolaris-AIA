@@ -30,15 +30,29 @@ import AdminApp from './components/AdminApp';
 const App: React.FC = () => {
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin');
+    return (
+      window.location.pathname === '/admin' ||
+      window.location.pathname.startsWith('/admin/') ||
+      window.location.hash === '#/admin' ||
+      window.location.hash.startsWith('#/admin/')
+    );
   });
 
   useEffect(() => {
-    const handlePopState = () => {
-      setIsAdminRoute(window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin'));
+    const handleRouteChange = () => {
+      setIsAdminRoute(
+        window.location.pathname === '/admin' ||
+        window.location.pathname.startsWith('/admin/') ||
+        window.location.hash === '#/admin' ||
+        window.location.hash.startsWith('#/admin/')
+      );
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handleRouteChange);
+    window.addEventListener('hashchange', handleRouteChange);
+    return () => {
+      window.removeEventListener('popstate', handleRouteChange);
+      window.removeEventListener('hashchange', handleRouteChange);
+    };
   }, []);
 
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
@@ -658,6 +672,18 @@ const App: React.FC = () => {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  // 0. Admin Portal Route Handling (/admin) — independent of student auth loading
+  if (isAdminRoute) {
+    return (
+      <AdminApp 
+        onExit={() => {
+          window.history.pushState({}, '', '/');
+          setIsAdminRoute(false);
+        }} 
+      />
+    );
+  }
+
   // 1. Loading State
   if (authLoading) {
     return (
@@ -691,18 +717,6 @@ const App: React.FC = () => {
             window.history.replaceState(null, '', window.location.pathname);
           }
         }}
-      />
-    );
-  }
-
-  // Admin Portal Route Handling (/admin)
-  if (isAdminRoute) {
-    return (
-      <AdminApp 
-        onExit={() => {
-          window.history.pushState({}, '', '/');
-          setIsAdminRoute(false);
-        }} 
       />
     );
   }

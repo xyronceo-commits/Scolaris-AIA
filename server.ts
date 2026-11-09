@@ -4278,19 +4278,95 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   const adminOtpCooldowns = new Map<string, number>();
   const adminIpRateLimits = new Map<string, number[]>();
 
+  // Checks both `admin_users` (20261109 migration) and `admins` (20261107 migration applied on live DB)
+  async function findAuthorizedAdmin(rawEmail: string): Promise<{ id: string; email: string; role: string; active: boolean } | null> {
+    if (!supabaseAdmin || !rawEmail) return null;
+    const cleanEmail = rawEmail.trim().toLowerCase();
+
+    // 1. Check `admin_users` table first
+    try {
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .ilike('email', cleanEmail)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (!userErr && userRow) {
+        return {
+          id: userRow.id,
+          email: String(userRow.email || cleanEmail).toLowerCase(),
+          role: userRow.role || 'super_admin',
+          active: Boolean(userRow.active)
+        };
+      }
+    } catch {}
+
+    // 2. Fallback to `admins` table (applied via 20261107_admin_system.sql)
+    try {
+      const { data: legacyRow, error: legacyErr } = await supabaseAdmin
+        .from('admins')
+        .select('id, email, role, is_active')
+        .ilike('email', cleanEmail)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (!legacyErr && legacyRow) {
+        return {
+          id: legacyRow.id,
+          email: String(legacyRow.email || cleanEmail).toLowerCase(),
+          role: legacyRow.role || 'super_admin',
+          active: Boolean(legacyRow.is_active)
+        };
+      }
+    } catch {}
+
+    return null;
+  }
+
   async function logAdminAction(adminEmail: string, action: string, details: any = {}, ipAddress: string = '') {
-    if (supabaseAdmin) {
-      try {
-        await supabaseAdmin.from('admin_audit_log').insert({
+    if (!supabaseAdmin) return;
+    try {
+      const { error } = await supabaseAdmin.from('admin_audit_log').insert({
+        admin_email: adminEmail,
+        action,
+        details,
+        ip_address: ipAddress
+      });
+      if (error) {
+        // Fallback to `admin_logs` table (20261107_admin_system.sql)
+        await supabaseAdmin.from('admin_logs').insert({
           admin_email: adminEmail,
           action,
           details,
           ip_address: ipAddress
         });
-      } catch (err) {
-        console.warn('[Admin Audit] Failed to record audit log:', err);
       }
+    } catch (err) {
+      console.warn('[Admin Audit] Failed to record audit log:', err);
     }
+  }
+
+  async function fetchAdminAuditLogs(limit = 100): Promise<any[]> {
+    if (!supabaseAdmin) return [];
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('admin_audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (!error && Array.isArray(data)) return data;
+    } catch {}
+
+    try {
+      const { data: fallbackData } = await supabaseAdmin
+        .from('admin_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (Array.isArray(fallbackData)) return fallbackData;
+    } catch {}
+    return [];
   }
 
   // 1. Submit email to request 6-digit OTP
@@ -4329,21 +4405,11 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         console.error(
           '[Admin Auth] Cannot process OTP request: SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing in server environment variables.'
         );
-        return res.json(GENERIC_SUCCESS_RESPONSE);
+        return res.status(503).json({ success: false, error: 'Admin authentication service is not configured on the server.' });
       }
 
-      // Check allowlist table `admin_users` (case-insensitive)
-      const { data: adminRow, error: adminErr } = await supabaseAdmin
-        .from('admin_users')
-        .select('id, email, role, active')
-        .ilike('email', rawEmail)
-        .eq('active', true)
-        .maybeSingle();
-
-      if (adminErr) {
-        console.error('[Admin Auth] Error querying admin_users table (ensure migration 20261109_admin_and_circles_reddit.sql was applied):', adminErr.message);
-        return res.json(GENERIC_SUCCESS_RESPONSE);
-      }
+      // Check allowlist across `admin_users` and `admins` (case-insensitive)
+      const adminRow = await findAuthorizedAdmin(rawEmail);
 
       if (!adminRow) {
         // Unknown or inactive email: do not send code, return identical message
@@ -4351,37 +4417,28 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         return res.json(GENERIC_SUCCESS_RESPONSE);
       }
 
-      // Authorized admin: trigger Supabase email OTP
-      let { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
-        email: rawEmail,
-        options: {
-          shouldCreateUser: false
-        }
-      });
-
-      // If the allowlisted admin email does not yet have a row in auth.users,
-      // provision their auth.users record via service role and re-send the OTP.
-      if (otpError) {
-        console.warn('[Admin Auth] Initial signInWithOtp failed for allowlisted admin, ensuring auth.users account exists:', otpError.message);
-        const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      // Ensure auth.users record exists for the allowlisted admin
+      try {
+        await supabaseAdmin.auth.admin.createUser({
           email: rawEmail,
           email_confirm: true
         });
-        if (createErr && !createErr.message?.toLowerCase().includes('already')) {
-          console.error('[Admin Auth] Failed to auto-provision auth.users record for admin:', createErr.message);
-        } else {
-          const retryOtp = await supabaseAuthClient.auth.signInWithOtp({
-            email: rawEmail,
-            options: {
-              shouldCreateUser: false
-            }
-          });
-          otpError = retryOtp.error;
+      } catch {}
+
+      // Trigger Supabase email OTP for the allowlisted admin
+      const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
+        email: rawEmail,
+        options: {
+          shouldCreateUser: true
         }
-      }
+      });
 
       if (otpError) {
         console.error('[Admin Auth] Supabase signInWithOtp error:', otpError.message);
+        return res.status(429).json({
+          success: false,
+          error: otpError.message || 'Could not dispatch OTP email right now. Please wait 60 seconds and try again.'
+        });
       }
 
       adminOtpCooldowns.set(rawEmail, now);
@@ -4412,30 +4469,53 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
 
     try {
-      // 1. Verify code via Supabase Auth
-      const { data, error } = await supabaseAuthClient.auth.verifyOtp({
+      // 1. Verify code via Supabase Auth (try 'email', then 'magiclink', then 'signup')
+      let verifyRes = await supabaseAuthClient.auth.verifyOtp({
         email: rawEmail,
         token,
         type: 'email'
       });
 
-      if (error || !data.user) {
-        await logAdminAction(rawEmail, 'admin_otp_verify_failed', { error: error?.message, ip }, ip);
+      if (verifyRes.error || !verifyRes.data?.user) {
+        const fallbackMagic = await supabaseAuthClient.auth.verifyOtp({
+          email: rawEmail,
+          token,
+          type: 'magiclink'
+        });
+        if (!fallbackMagic.error && fallbackMagic.data?.user) {
+          verifyRes = fallbackMagic;
+        } else {
+          const fallbackSignup = await supabaseAuthClient.auth.verifyOtp({
+            email: rawEmail,
+            token,
+            type: 'signup'
+          });
+          if (!fallbackSignup.error && fallbackSignup.data?.user) {
+            verifyRes = fallbackSignup;
+          }
+        }
+      }
+
+      if (verifyRes.error || !verifyRes.data?.user) {
+        await logAdminAction(rawEmail, 'admin_otp_verify_failed', { error: verifyRes.error?.message, ip }, ip);
         return res.status(401).json({ success: false, error: 'Invalid or expired 6-digit verification code.' });
       }
 
-      // 2. Cryptographically re-verify against admin_users allowlist (case-insensitive)
-      const { data: adminRow, error: allowErr } = await supabaseAdmin
-        .from('admin_users')
-        .select('id, email, role, active')
-        .ilike('email', rawEmail)
-        .eq('active', true)
-        .maybeSingle();
+      // 2. Cryptographically re-verify against allowlist (`admin_users` or `admins`)
+      const adminRow = await findAuthorizedAdmin(rawEmail);
 
-      if (allowErr || !adminRow) {
+      if (!adminRow) {
         await logAdminAction(rawEmail, 'admin_access_denied_not_allowlisted', { ip }, ip);
         return res.status(403).json({ success: false, error: 'Access denied: Email is not an authorized administrator.' });
       }
+
+      // Update last_login_at on `admins` if present (non-blocking)
+      try {
+        await supabaseAdmin
+          .from('admins')
+          .update({ last_login_at: new Date().toISOString() })
+          .ilike('email', rawEmail);
+      } catch {}
 
       await logAdminAction(rawEmail, 'admin_sign_in_success', { role: adminRow.role, ip }, ip);
 
@@ -4446,7 +4526,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
           email: adminRow.email.toLowerCase(),
           role: adminRow.role
         },
-        session: data.session
+        session: verifyRes.data.session
       });
     } catch (err: any) {
       console.error('[Admin Auth] Verify error:', err);
@@ -4479,15 +4559,10 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
       const email = data.user.email.toLowerCase().trim();
 
-      // Re-check active admin status in admin_users (case-insensitive)
-      const { data: adminRow, error: allowErr } = await supabaseAdmin
-        .from('admin_users')
-        .select('id, email, role, active')
-        .ilike('email', email)
-        .eq('active', true)
-        .maybeSingle();
+      // Re-check active admin status in allowlist (`admin_users` or `admins`)
+      const adminRow = await findAuthorizedAdmin(email);
 
-      if (allowErr || !adminRow) {
+      if (!adminRow) {
         return res.status(403).json({ success: false, error: 'Forbidden: Admin privileges inactive or revoked.' });
       }
 
@@ -4502,11 +4577,12 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   app.get('/api/admin/overview', requireAdminAuth, async (_req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
     try {
-      const [profilesRes, subsRes, groupsRes, logsRes] = await Promise.all([
+      const [profilesRes, subsRes, groupsRes, pendingTxRes, recentLogs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }),
         supabaseAdmin.from('subscriptions').select('id, amount_paid, status, created_at').eq('status', 'active'),
         supabaseAdmin.from('study_groups').select('id', { count: 'exact', head: true }),
-        supabaseAdmin.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(10)
+        supabaseAdmin.from('payment_transactions').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+        fetchAdminAuditLogs(10)
       ]);
 
       const now = new Date();
@@ -4522,7 +4598,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
           activeSubscriptions: subsRes.data?.length || 0,
           monthRevenue,
           totalCircles: groupsRes.count || 0,
-          recentLogs: logsRes.data || []
+          pendingPayments: pendingTxRes.count || 0,
+          recentLogs
         }
       });
     } catch (err: any) {
@@ -4538,7 +4615,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     try {
       let query = supabaseAdmin
         .from('profiles')
-        .select('id, email, name, university, department, level, tier, is_pro, subscription_status, created_at')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -4548,13 +4625,19 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
       const { data, error } = await query;
       if (error) throw error;
-      res.json({ success: true, users: data || [] });
+      const users = (data || []).map((u: any) => ({
+        ...u,
+        university: u.institution || u.university || '',
+        department: u.department || u.major || '',
+        tier: u.subscription_tier || u.tier || 'free'
+      }));
+      res.json({ success: true, users });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Failed to fetch users.' });
     }
   });
 
-  // 6. Admin Dashboard API: Subscriptions / Transactions
+  // 6. Admin Dashboard API: Subscriptions & Payment Transactions
   app.get('/api/admin/subscriptions', requireAdminAuth, async (_req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
     try {
@@ -4571,6 +4654,141 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
+  // 6b. Admin Dashboard API: Payment Transactions Ledger + Filter
+  app.get('/api/admin/payments', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const statusFilter = typeof req.query.status === 'string' ? req.query.status.trim().toLowerCase() : '';
+    try {
+      let txQuery = supabaseAdmin
+        .from('payment_transactions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (statusFilter && statusFilter !== 'all') {
+        txQuery = txQuery.eq('status', statusFilter);
+      }
+
+      const [{ data: transactions, error: txErr }, { data: subscriptions }] = await Promise.all([
+        txQuery,
+        supabaseAdmin.from('subscriptions').select('*').order('created_at', { ascending: false }).limit(100)
+      ]);
+
+      if (txErr) throw txErr;
+      res.json({
+        success: true,
+        transactions: transactions || [],
+        subscriptions: subscriptions || []
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch payment transactions.' });
+    }
+  });
+
+  // 6c. Admin Dashboard API: Verify a Pending Payment Reference with Paystack
+  app.post('/api/admin/payments/verify', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
+    const admin = (req as any).adminUser;
+
+    if (!reference) {
+      return res.status(400).json({ success: false, error: 'Payment reference is required.' });
+    }
+
+    const secretKey = getPaystackSecretKey();
+    if (!secretKey) {
+      return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server.' });
+    }
+
+    try {
+      const { data: txRecord } = await supabaseAdmin
+        .from('payment_transactions')
+        .select('*')
+        .eq('reference', reference)
+        .maybeSingle();
+
+      const verifyResponse = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${secretKey}` }
+      });
+      const verifyData: any = await verifyResponse.json().catch(() => ({}));
+
+      if (!verifyResponse.ok || !verifyData.status || !verifyData.data) {
+        await logAdminAction(admin.email, 'admin_verify_payment_not_found', { reference, paystackMessage: verifyData?.message });
+        return res.status(400).json({
+          success: false,
+          error: verifyData?.message || 'Paystack could not find or verify this reference.'
+        });
+      }
+
+      const txData = verifyData.data;
+      const gatewayStatus = String(txData.status || '').toLowerCase();
+
+      if (gatewayStatus !== 'success') {
+        const mappedStatus = gatewayStatus === 'abandoned' ? 'abandoned' : gatewayStatus === 'failed' ? 'failed' : 'pending';
+        if (txRecord) {
+          await supabaseAdmin
+            .from('payment_transactions')
+            .update({
+              status: mappedStatus,
+              gateway_response: txData.gateway_response || `Paystack status: ${gatewayStatus}`,
+              raw_payload: txData
+            })
+            .eq('reference', reference);
+        }
+        await logAdminAction(admin.email, 'admin_verify_payment_non_success', { reference, gatewayStatus });
+        return res.json({
+          success: false,
+          status: mappedStatus,
+          error: `Paystack reports transaction status "${gatewayStatus}" (${txData.gateway_response || 'not paid'}).`
+        });
+      }
+
+      const userId = txRecord?.user_id || txData.metadata?.user_id;
+      const planKey = normalizePlanTier(txRecord?.plan || txData.metadata?.plan || (Number(txData.amount) >= 1500000 ? 'studio' : 'plus')) || 'plus';
+      const cycleKey: 'monthly' | 'annual' = (txRecord?.billing_cycle || txData.metadata?.billing_cycle) === 'annual' ? 'annual' : 'monthly';
+
+      if (!userId) {
+        return res.status(400).json({ success: false, error: 'Payment succeeded on Paystack, but no user_id is linked to this reference.' });
+      }
+
+      const activation = await activateSubscriptionIdempotent({
+        reference,
+        userId,
+        plan: planKey,
+        billingCycle: cycleKey,
+        amountKobo: Number(txData.amount) || Number(txRecord?.amount_kobo) || 0,
+        currency: txData.currency || 'NGN',
+        channel: txData.channel || null,
+        gatewayResponse: txData.gateway_response || 'Approved',
+        customerEmail: txData.customer?.email || txRecord?.customer_email || null,
+        customerCode: txData.customer?.customer_code || null,
+        subscriptionCode: txData.subscription_code || null,
+        planCode: txData.plan_object?.plan_code || null,
+        authorizationCode: txData.authorization?.authorization_code || null,
+        paidAt: txData.paid_at || new Date().toISOString(),
+        rawPayload: txData
+      });
+
+      await logAdminAction(admin.email, 'admin_verify_payment_activated', {
+        reference,
+        userId,
+        plan: planKey,
+        amountNaira: (Number(txData.amount) || 0) / 100
+      });
+
+      return res.json({
+        success: true,
+        status: 'paid',
+        plan: planKey,
+        periodEnd: activation.periodEnd,
+        message: `Verified with Paystack and activated ${planKey.toUpperCase()} plan for user ${userId}.`
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to verify payment with Paystack.' });
+    }
+  });
+
   // 7. Admin Dashboard API: Manual Grant / Revoke Subscription
   app.post('/api/admin/subscriptions/grant-tier', requireAdminAuth, async (req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
@@ -4584,29 +4802,40 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     try {
       const isPro = targetTier === 'plus' || targetTier === 'studio';
       const status = isPro ? 'active' : 'inactive';
+      const periodEnd = isPro ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
 
       // Update profile
-      await supabaseAdmin
+      const { error: profErr } = await supabaseAdmin
         .from('profiles')
         .update({
           tier: targetTier,
           is_pro: isPro,
           subscription_tier: targetTier,
-          subscription_status: status
+          subscription_status: status,
+          payment_status: isPro ? 'paid' : 'none',
+          subscription_end: periodEnd
         })
         .eq('id', userId);
+
+      if (profErr) {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ tier: targetTier, is_pro: isPro })
+          .eq('id', userId);
+      }
 
       // Record in subscriptions
       await supabaseAdmin.from('subscriptions').insert({
         user_id: userId,
         plan_tier: targetTier,
         billing_cycle: 'monthly',
-        status,
+        status: isPro ? 'manual_active' : 'inactive',
         payment_provider: 'manual_admin',
         payment_status: isPro ? 'paid' : 'none',
         amount_paid: 0,
         currency: 'NGN',
-        current_period_start: new Date().toISOString()
+        current_period_start: new Date().toISOString(),
+        current_period_end: periodEnd
       });
 
       await logAdminAction(admin.email, 'admin_grant_tier', { userId, targetTier });
@@ -4614,6 +4843,105 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       res.json({ success: true, message: `Successfully updated user tier to ${targetTier}.` });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Failed to update user tier.' });
+    }
+  });
+
+  // 7b. Admin Dashboard API: AI Credits Lookup & Adjustment
+  app.get('/api/admin/credits', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const queryVal = typeof req.query.user === 'string' ? req.query.user.trim() : '';
+    if (!queryVal) {
+      return res.status(400).json({ success: false, error: 'Enter a user email or UUID.' });
+    }
+
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(queryVal);
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .or(isUuid ? `id.eq.${queryVal}` : `email.ilike.${queryVal}`)
+        .maybeSingle();
+
+      if (userErr || !userRow) {
+        return res.status(404).json({ success: false, error: 'No user found matching that email or UUID.' });
+      }
+
+      const balanceInfo = await getAiCreditBalanceForUser(userRow.id);
+      const { data: ledgerRows } = await supabaseAdmin
+        .from('ai_credit_ledger')
+        .select('*')
+        .eq('user_id', userRow.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      return res.json({
+        success: true,
+        user: {
+          id: userRow.id,
+          email: userRow.email,
+          name: userRow.name,
+          tier: balanceInfo.tier
+        },
+        credits: balanceInfo,
+        ledger: ledgerRows || []
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to load user AI credits.' });
+    }
+  });
+
+  app.post('/api/admin/credits/adjust', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const admin = (req as any).adminUser;
+    const userQuery = typeof req.body?.user === 'string' ? req.body.user.trim() : '';
+    const delta = Number(req.body?.delta);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'Admin credit adjustment';
+
+    if (!userQuery || !Number.isFinite(delta) || delta === 0) {
+      return res.status(400).json({ success: false, error: 'Valid user (email or UUID) and non-zero credit delta are required.' });
+    }
+
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userQuery);
+      const { data: userRow } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, name')
+        .or(isUuid ? `id.eq.${userQuery}` : `email.ilike.${userQuery}`)
+        .maybeSingle();
+
+      if (!userRow) {
+        return res.status(404).json({ success: false, error: 'No user found matching that email or UUID.' });
+      }
+
+      const { error: insertErr } = await supabaseAdmin.from('ai_credit_ledger').insert({
+        user_id: userRow.id,
+        action: `admin_adjust:${reason.slice(0, 60)}`,
+        delta: Math.trunc(delta),
+        request_id: `admin_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
+      });
+
+      if (insertErr) {
+        return res.status(500).json({
+          success: false,
+          error: `Could not insert into ai_credit_ledger (${insertErr.message}). Ensure migration 20261110_ai_credit_ledger_and_rpc.sql is applied.`
+        });
+      }
+
+      await logAdminAction(admin.email, 'admin_adjust_credits', {
+        targetUserId: userRow.id,
+        targetEmail: userRow.email,
+        delta: Math.trunc(delta),
+        reason
+      });
+
+      const updatedBalance = await getAiCreditBalanceForUser(userRow.id);
+      return res.json({
+        success: true,
+        message: `${delta > 0 ? 'Granted' : 'Deducted'} ${Math.abs(Math.trunc(delta))} AI credits for ${userRow.email}.`,
+        credits: updatedBalance
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to adjust AI credits.' });
     }
   });
 
@@ -4654,14 +4982,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   app.get('/api/admin/audit-log', requireAdminAuth, async (_req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
     try {
-      const { data, error } = await supabaseAdmin
-        .from('admin_audit_log')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
-      res.json({ success: true, logs: data || [] });
+      const logs = await fetchAdminAuditLogs(100);
+      res.json({ success: true, logs });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit log.' });
     }

@@ -60,14 +60,18 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Dashboard active tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'subscriptions' | 'circles' | 'audit'>('overview');
+  // Dashboard active tab (6 tabs: Overview, Users, Payments, Circles, Credits, Audit log)
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'payments' | 'circles' | 'credits' | 'audit'>('overview');
 
   // Dashboard data states
   const [overviewData, setOverviewData] = useState<any>(null);
   const [usersList, setUsersList] = useState<any[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [subsList, setSubsList] = useState<any[]>([]);
+  const [transactionsList, setTransactionsList] = useState<any[]>([]);
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | 'pending' | 'paid' | 'failed' | 'abandoned'>('all');
+  const [verifyingRef, setVerifyingRef] = useState<string | null>(null);
+  const [paymentFeedback, setPaymentFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [circlesList, setCirclesList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
@@ -76,6 +80,15 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
   const [grantUserId, setGrantUserId] = useState('');
   const [grantTier, setGrantTier] = useState<'plus' | 'studio' | 'free'>('plus');
   const [isGranting, setIsGranting] = useState(false);
+
+  // Credits tab state
+  const [creditsSearchUser, setCreditsSearchUser] = useState('');
+  const [creditsUserInfo, setCreditsUserInfo] = useState<any>(null);
+  const [creditsLedger, setCreditsLedger] = useState<any[]>([]);
+  const [creditsDelta, setCreditsDelta] = useState<number>(20);
+  const [creditsReason, setCreditsReason] = useState('Support bonus credits');
+  const [isAdjustingCredits, setIsAdjustingCredits] = useState(false);
+  const [creditsFeedback, setCreditsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const otpInputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -251,9 +264,12 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
         } else if (activeTab === 'users') {
           const res = await adminFetch(`/api/admin/users?search=${encodeURIComponent(userSearch)}`);
           if (res.success) setUsersList(res.users);
-        } else if (activeTab === 'subscriptions') {
-          const res = await adminFetch('/api/admin/subscriptions');
-          if (res.success) setSubsList(res.subscriptions);
+        } else if (activeTab === 'payments') {
+          const res = await adminFetch(`/api/admin/payments?status=${encodeURIComponent(paymentStatusFilter)}`);
+          if (res.success) {
+            setTransactionsList(res.transactions || []);
+            setSubsList(res.subscriptions || []);
+          }
         } else if (activeTab === 'circles') {
           const res = await adminFetch('/api/admin/circles');
           if (res.success) setCirclesList(res.circles);
@@ -269,29 +285,109 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
     };
 
     loadData();
-  }, [adminSession, activeTab, userSearch]);
+  }, [adminSession, activeTab, userSearch, paymentStatusFilter]);
+
+  const handleVerifyPaymentReference = async (reference: string) => {
+    if (!reference || verifyingRef) return;
+    setVerifyingRef(reference);
+    setPaymentFeedback(null);
+    try {
+      const res = await adminFetch('/api/admin/payments/verify', {
+        method: 'POST',
+        body: JSON.stringify({ reference })
+      });
+      if (res.success) {
+        setPaymentFeedback({ type: 'success', message: res.message || `Verified and activated ${reference}.` });
+      } else {
+        setPaymentFeedback({ type: 'error', message: res.error || `Could not verify ${reference}.` });
+      }
+      const refreshed = await adminFetch(`/api/admin/payments?status=${encodeURIComponent(paymentStatusFilter)}`);
+      if (refreshed.success) {
+        setTransactionsList(refreshed.transactions || []);
+        setSubsList(refreshed.subscriptions || []);
+      }
+    } catch (err: any) {
+      setPaymentFeedback({ type: 'error', message: err?.message || 'Error verifying reference.' });
+    } finally {
+      setVerifyingRef(null);
+    }
+  };
+
+  const handleLookupCredits = async (e?: React.FormEvent, targetOverride?: string) => {
+    if (e) e.preventDefault();
+    const target = (targetOverride ?? creditsSearchUser).trim();
+    if (!target) return;
+    setIsDataLoading(true);
+    setCreditsFeedback(null);
+    try {
+      const res = await adminFetch(`/api/admin/credits?user=${encodeURIComponent(target)}`);
+      if (res.success) {
+        setCreditsUserInfo({ ...res.user, ...res.credits });
+        setCreditsLedger(res.ledger || []);
+      } else {
+        setCreditsUserInfo(null);
+        setCreditsLedger([]);
+        setCreditsFeedback({ type: 'error', message: res.error || 'User not found.' });
+      }
+    } catch (err: any) {
+      setCreditsFeedback({ type: 'error', message: err?.message || 'Failed to look up user credits.' });
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
+  const handleAdjustCredits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = (creditsUserInfo?.id || creditsSearchUser).trim();
+    if (!target || !creditsDelta) return;
+    setIsAdjustingCredits(true);
+    setCreditsFeedback(null);
+    try {
+      const res = await adminFetch('/api/admin/credits/adjust', {
+        method: 'POST',
+        body: JSON.stringify({
+          user: target,
+          delta: Number(creditsDelta),
+          reason: creditsReason.trim() || 'Admin credit adjustment'
+        })
+      });
+      if (res.success) {
+        setCreditsFeedback({ type: 'success', message: res.message });
+        await handleLookupCredits(undefined, target);
+      } else {
+        setCreditsFeedback({ type: 'error', message: res.error || 'Failed to adjust credits.' });
+      }
+    } catch (err: any) {
+      setCreditsFeedback({ type: 'error', message: err?.message || 'Error adjusting credits.' });
+    } finally {
+      setIsAdjustingCredits(false);
+    }
+  };
 
   // Handle Manual Tier Grant
   const handleGrantTier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!grantUserId) return;
     setIsGranting(true);
+    setPaymentFeedback(null);
     try {
       const res = await adminFetch('/api/admin/subscriptions/grant-tier', {
         method: 'POST',
         body: JSON.stringify({ userId: grantUserId, targetTier: grantTier })
       });
       if (res.success) {
-        alert(res.message);
+        setPaymentFeedback({ type: 'success', message: res.message });
         setGrantUserId('');
-        // refresh users and subscriptions
-        const updatedUsers = await adminFetch('/api/admin/users');
-        if (updatedUsers.success) setUsersList(updatedUsers.users);
+        const refreshed = await adminFetch(`/api/admin/payments?status=${encodeURIComponent(paymentStatusFilter)}`);
+        if (refreshed.success) {
+          setTransactionsList(refreshed.transactions || []);
+          setSubsList(refreshed.subscriptions || []);
+        }
       } else {
-        alert(res.error || 'Failed to grant tier.');
+        setPaymentFeedback({ type: 'error', message: res.error || 'Failed to grant tier.' });
       }
     } catch (err: any) {
-      alert(err?.message || 'Error executing grant.');
+      setPaymentFeedback({ type: 'error', message: err?.message || 'Error executing grant.' });
     } finally {
       setIsGranting(false);
     }
@@ -477,7 +573,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
 
       {/* Main Admin Content Container */}
       <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-8 space-y-6">
-        {/* Navigation Tabs */}
+        {/* Navigation Tabs (6 Tabs: Overview, Users, Payments, Circles, Credits, Audit log) */}
         <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar pb-2">
           <button
             onClick={() => setActiveTab('overview')}
@@ -500,13 +596,13 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
           </button>
 
           <button
-            onClick={() => setActiveTab('subscriptions')}
+            onClick={() => setActiveTab('payments')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold min-h-[44px] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === 'subscriptions' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              activeTab === 'payments' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
             <CreditCard size={15} />
-            <span>Subscriptions &amp; Paystack</span>
+            <span>Payments</span>
           </button>
 
           <button
@@ -517,6 +613,16 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
           >
             <MessageSquare size={15} />
             <span>Circles</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('credits')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold min-h-[44px] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'credits' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <DollarSign size={15} />
+            <span>Credits</span>
           </button>
 
           <button
@@ -541,15 +647,20 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
         {/* TAB 1: OVERVIEW */}
         {!isDataLoading && activeTab === 'overview' && overviewData && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-1">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Total Registered Users</p>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Registered Users</p>
                 <p className="text-3xl font-bold text-slate-900 dark:text-white">{overviewData.totalUsers}</p>
               </div>
 
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-1">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Active Paid Subscriptions</p>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Active Subscriptions</p>
                 <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{overviewData.activeSubscriptions}</p>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-1">
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Pending Payments</p>
+                <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{overviewData.pendingPayments ?? 0}</p>
               </div>
 
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-1">
@@ -560,7 +671,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
               </div>
 
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-1">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Total Study Circles</p>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Study Circles</p>
                 <p className="text-3xl font-bold text-slate-900 dark:text-white">{overviewData.totalCircles}</p>
               </div>
             </div>
@@ -613,6 +724,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
                         <td className="px-4 py-3">
                           <p className="font-semibold text-slate-900 dark:text-white">{u.name || 'Unnamed'}</p>
                           <p className="text-slate-400 text-[11px]">{u.email}</p>
+                          <p className="text-slate-400 font-mono text-[10px]">{u.id}</p>
                         </td>
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{u.university || '—'}</td>
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{u.department || '—'}</td>
@@ -631,15 +743,28 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            onClick={() => {
-                              setGrantUserId(u.id);
-                              setGrantTier(u.tier === 'studio' ? 'free' : 'plus');
-                            }}
-                            className="text-blue-600 dark:text-blue-400 font-semibold hover:underline min-h-[44px] flex items-center cursor-pointer"
-                          >
-                            Manage Tier
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => {
+                                setGrantUserId(u.id);
+                                setGrantTier(u.tier === 'studio' ? 'free' : 'plus');
+                                setActiveTab('payments');
+                              }}
+                              className="text-blue-600 dark:text-blue-400 font-semibold hover:underline min-h-[44px] flex items-center cursor-pointer"
+                            >
+                              Manage Tier
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCreditsSearchUser(u.email || u.id);
+                                setActiveTab('credits');
+                                handleLookupCredits(undefined, u.email || u.id);
+                              }}
+                              className="text-slate-600 dark:text-slate-300 font-semibold hover:underline min-h-[44px] flex items-center cursor-pointer"
+                            >
+                              Credits
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -650,9 +775,125 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
           </div>
         )}
 
-        {/* TAB 3: SUBSCRIPTIONS */}
-        {!isDataLoading && activeTab === 'subscriptions' && (
+        {/* TAB 3: PAYMENTS (Ledger + Verify now + Subscriptions + Manual Override) */}
+        {!isDataLoading && activeTab === 'payments' && (
           <div className="space-y-6">
+            {paymentFeedback && (
+              <div
+                role="status"
+                className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                  paymentFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300'
+                }`}
+              >
+                {paymentFeedback.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+                <span>{paymentFeedback.message}</span>
+              </div>
+            )}
+
+            {/* Payment Transactions Ledger */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Payment Transactions Ledger</h3>
+                  <p className="text-xs text-slate-500">Verify pending Paystack transactions directly and activate plans</p>
+                </div>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {(['all', 'pending', 'paid', 'failed', 'abandoned'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setPaymentStatusFilter(st)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize min-h-[36px] cursor-pointer ${
+                        paymentStatusFilter === st
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold uppercase">
+                    <tr>
+                      <th className="px-4 py-3">Reference</th>
+                      <th className="px-4 py-3">User / Email</th>
+                      <th className="px-4 py-3">Plan</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Created</th>
+                      <th className="px-4 py-3">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {transactionsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                          No payment transactions found for this filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      transactionsList.map((tx: any) => {
+                        const amountNaira = tx.amount_naira || (tx.amount_kobo ? Number(tx.amount_kobo) / 100 : 0);
+                        const isPending = tx.status === 'pending';
+                        return (
+                          <tr key={tx.id || tx.reference} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                            <td className="px-4 py-3 font-mono text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                              {tx.reference}
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="text-slate-800 dark:text-slate-200">{tx.customer_email || '—'}</p>
+                              <p className="font-mono text-[10px] text-slate-400">{tx.user_id || ''}</p>
+                            </td>
+                            <td className="px-4 py-3 font-semibold uppercase">{tx.plan || '—'}</td>
+                            <td className="px-4 py-3 font-semibold">₦{Number(amountNaira).toLocaleString()}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                tx.status === 'paid'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : tx.status === 'pending'
+                                  ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-red-50 text-red-700'
+                              }`}>
+                                {tx.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-400">
+                              {tx.created_at ? new Date(tx.created_at).toLocaleString() : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              {isPending ? (
+                                <button
+                                  type="button"
+                                  disabled={verifyingRef === tx.reference}
+                                  onClick={() => handleVerifyPaymentReference(tx.reference)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[36px] disabled:opacity-50 cursor-pointer"
+                                >
+                                  {verifyingRef === tx.reference ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                  ) : (
+                                    <RotateCcw size={13} />
+                                  )}
+                                  <span>Verify now</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 text-[11px]">{tx.gateway_response || '—'}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Manual Grant Box */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">Manual Tier Grant / Override</h3>
@@ -686,6 +927,9 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
 
             {/* Subscriptions Table */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Subscriptions Records</h3>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold uppercase">
@@ -704,7 +948,7 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
                         <td className="px-4 py-3">{s.payment_provider || 'paystack'}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            s.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                            s.status === 'active' || s.status === 'manual_active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
                           }`}>
                             {s.status}
                           </span>
@@ -750,7 +994,141 @@ export const AdminApp: React.FC<AdminAppProps> = ({ onExit }) => {
           </div>
         )}
 
-        {/* TAB 5: AUDIT LOG */}
+        {/* TAB 5: CREDITS */}
+        {!isDataLoading && activeTab === 'credits' && (
+          <div className="space-y-6">
+            {creditsFeedback && (
+              <div
+                role="status"
+                className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                  creditsFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300'
+                }`}
+              >
+                {creditsFeedback.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+                <span>{creditsFeedback.message}</span>
+              </div>
+            )}
+
+            {/* Lookup User Credits */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Look up Student AI Credits</h3>
+              <form onSubmit={(e) => handleLookupCredits(e)} className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  required
+                  placeholder="Enter student email or User ID (UUID)..."
+                  value={creditsSearchUser}
+                  onChange={(e) => setCreditsSearchUser(e.target.value)}
+                  className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs outline-none min-h-[44px]"
+                />
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer"
+                >
+                  Check Balance
+                </button>
+              </form>
+
+              {creditsUserInfo && (
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Student</p>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">{creditsUserInfo.email}</p>
+                    <p className="text-[10px] text-slate-400 uppercase">{creditsUserInfo.tier} plan</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Monthly Allowance</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-white">{creditsUserInfo.allowance}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Net Used This Period</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-white">{creditsUserInfo.used}</p>
+                  </div>
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
+                    <p className="text-[10px] font-bold uppercase text-blue-600">Credits Remaining</p>
+                    <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{creditsUserInfo.balance}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Adjust Credits Form */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Grant or Deduct AI Credits</h3>
+              <p className="text-xs text-slate-500">Use a positive number (e.g. +20) to grant bonus credits, or a negative number (e.g. -5) to deduct credits.</p>
+              <form onSubmit={handleAdjustCredits} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <input
+                  type="text"
+                  required
+                  placeholder="Student email or UUID..."
+                  value={creditsSearchUser}
+                  onChange={(e) => setCreditsSearchUser(e.target.value)}
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs outline-none min-h-[44px]"
+                />
+                <input
+                  type="number"
+                  required
+                  value={creditsDelta}
+                  onChange={(e) => setCreditsDelta(Number(e.target.value))}
+                  placeholder="Credits delta (e.g. 20 or -5)"
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs outline-none min-h-[44px]"
+                />
+                <input
+                  type="text"
+                  required
+                  value={creditsReason}
+                  onChange={(e) => setCreditsReason(e.target.value)}
+                  placeholder="Reason for audit log..."
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs outline-none min-h-[44px]"
+                />
+                <button
+                  type="submit"
+                  disabled={isAdjustingCredits || !creditsSearchUser.trim() || !creditsDelta}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] disabled:opacity-50 cursor-pointer"
+                >
+                  {isAdjustingCredits ? 'Applying...' : 'Apply Credit Change'}
+                </button>
+              </form>
+            </div>
+
+            {/* Recent Credit Ledger Entries */}
+            {creditsLedger.length > 0 && (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Recent AI Credit Ledger Activity</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold uppercase">
+                      <tr>
+                        <th className="px-4 py-3">Action</th>
+                        <th className="px-4 py-3">Delta</th>
+                        <th className="px-4 py-3">Request ID</th>
+                        <th className="px-4 py-3">Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {creditsLedger.map((entry: any) => (
+                        <tr key={entry.id}>
+                          <td className="px-4 py-3 font-semibold">{entry.action}</td>
+                          <td className={`px-4 py-3 font-bold ${Number(entry.delta) > 0 ? 'text-emerald-600' : 'text-slate-700 dark:text-slate-300'}`}>
+                            {Number(entry.delta) > 0 ? `+${entry.delta}` : entry.delta}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-[11px] text-slate-400">{entry.request_id || '—'}</td>
+                          <td className="px-4 py-3 text-slate-400">{new Date(entry.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 6: AUDIT LOG */}
         {!isDataLoading && activeTab === 'audit' && (
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
