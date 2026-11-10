@@ -135,6 +135,106 @@ html, body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ========================================================= */
+/* KORSIQ PROSE & MARKDOWN FORMATTING (Bold, Headings, Lists) */
+/* ========================================================= */
+.prose {
+  line-height: 1.6;
+}
+.prose p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.prose p:first-child {
+  margin-top: 0;
+}
+.prose p:last-child {
+  margin-bottom: 0;
+}
+.prose strong, .prose b {
+  font-weight: 700;
+  color: inherit;
+}
+.prose em, .prose i {
+  font-style: italic;
+}
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  font-weight: 700;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.3;
+  color: inherit;
+}
+.prose h1 { font-size: 1.2rem; }
+.prose h2 { font-size: 1.05rem; }
+.prose h3 { font-size: 0.95rem; }
+.prose ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.prose ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.prose li {
+  margin-top: 0.2rem;
+  margin-bottom: 0.2rem;
+}
+.prose blockquote {
+  border-left: 3px solid #2563EB;
+  padding-left: 0.75rem;
+  margin: 0.75rem 0;
+  font-style: italic;
+  color: #4B5563;
+}
+.dark .prose blockquote {
+  border-left-color: #3B82F6;
+  color: #94A3B8;
+}
+.prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  background-color: rgba(148, 163, 184, 0.15);
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+.prose pre {
+  background-color: #0F172A;
+  color: #F8FAFC;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.prose pre code {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 0.825rem;
+}
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.85em;
+}
+.prose th, .prose td {
+  border: 1px solid #E2E8F0;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+.dark .prose th, .dark .prose td {
+  border-color: #334155;
+}
+.prose th {
+  background-color: rgba(148, 163, 184, 0.1);
+  font-weight: 600;
+}
+
 /* Print Stylesheet for High-Fidelity PDF generation */
 @media print {
   body {

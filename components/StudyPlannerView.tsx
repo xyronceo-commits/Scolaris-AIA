@@ -4,7 +4,6 @@ import CourseManager from './CourseManager';
 import CGPACalculator from './CGPACalculator';
 import TimetableView from './TimetableView';
 import ScheduleView from './ScheduleView';
-import AnalyticsView from './AnalyticsView';
 import TaskModal from './TaskModal';
 import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
@@ -19,13 +18,12 @@ import {
   Award,
   BookOpen,
   Calculator,
-  BarChart3,
   CalendarDays,
   Flag,
   ChevronRight
 } from 'lucide-react';
 
-export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetable' | 'cgpa' | 'analytics';
+export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetable' | 'cgpa';
 
 interface StudyPlannerViewProps {
   initialTab?: string;
@@ -61,7 +59,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   // Primary tabs: Today (default), Week, Exams, Courses
   const [activeTab, setActiveTab] = useState<PlannerViewMode>(() => {
     if (openAddCourseSignal > 0) return 'courses';
-    if (['courses', 'timetable', 'cgpa', 'analytics', 'week', 'exams'].includes(initialTab)) {
+    if (['courses', 'timetable', 'cgpa', 'week', 'exams'].includes(initialTab)) {
       return initialTab as PlannerViewMode;
     }
     return 'today';
@@ -69,7 +67,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   const [courseFormSignal, setCourseFormSignal] = useState<number>(openAddCourseSignal);
 
   useEffect(() => {
-    if (['courses', 'timetable', 'cgpa', 'analytics', 'week', 'exams', 'today'].includes(initialTab)) {
+    if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'today'].includes(initialTab)) {
       setActiveTab(initialTab as PlannerViewMode);
     }
   }, [initialTab]);
@@ -290,7 +288,6 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             <option value="courses">Course Manager</option>
             <option value="timetable">Weekly Timetable</option>
             <option value="cgpa">CGPA Calculator</option>
-            <option value="analytics">Analytics</option>
           </select>
           {!isPrimaryTab && (
             <button
@@ -464,18 +461,6 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
           setSchedule={setSchedule}
           addNotification={addNotification}
           onOpenHub={onOpenHub}
-        />
-      )}
-
-      {activeTab === 'analytics' && (
-        <AnalyticsView
-          courses={courses}
-          schedule={schedule}
-          profile={profile}
-          hubs={hubs}
-          isDarkMode={isDarkMode}
-          onToggleTheme={onToggleTheme}
-          setCourses={setCourses}
         />
       )}
 

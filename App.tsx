@@ -14,7 +14,6 @@ import AcademicStudio from './components/AcademicStudio';
 import PomodoroTimer from './components/PomodoroTimer';
 import TimetableView from './components/TimetableView';
 import Profile from './components/Profile';
-import AnalyticsView from './components/AnalyticsView';
 import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
 import Auth, { type AuthMode } from './components/Auth';
@@ -867,7 +866,7 @@ const App: React.FC = () => {
         />;
       case 'analytics':
         return <StudyPlannerView 
-          initialTab="analytics"
+          initialTab="today"
           courses={courses}
           setCourses={setCourses}
           schedule={schedule}
@@ -950,7 +949,7 @@ const App: React.FC = () => {
 
   const isNavActive = (id: string) => {
     if (id === 'overview') return activeTab === 'overview' || activeTab === 'dashboard';
-    if (id === 'planner') return ['planner', 'courses', 'schedule', 'timetable', 'calculator', 'analytics'].includes(activeTab);
+    if (id === 'planner') return ['planner', 'courses', 'schedule', 'timetable', 'calculator'].includes(activeTab);
     if (id === 'hub') return activeTab === 'hub';
     if (id === 'studio') return activeTab === 'studio';
     if (id === 'circles') return activeTab === 'circles' || activeTab === 'groups';
