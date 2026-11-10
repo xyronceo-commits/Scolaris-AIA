@@ -104,14 +104,14 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
   const [createType, setCreateType] = useState<'general' | 'private'>('private');
   const [isCreatingCircle, setIsCreatingCircle] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [joinModalTab, setJoinModalTab] = useState<'general' | 'private'>('general');
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
-  const [circleSearchQuery, setCircleSearchQuery] = useState('');
-  const [discoveredCircles, setDiscoveredCircles] = useState<StudyGroup[]>([]);
-  const [isSearchingCircles, setIsSearchingCircles] = useState(false);
-  const [privateCodePromptGroupId, setPrivateCodePromptGroupId] = useState<string | null>(null);
-  const [privateCodeInput, setPrivateCodeInput] = useState('');
+  const [generalSearchQuery, setGeneralSearchQuery] = useState('');
+  const [generalCirclesList, setGeneralCirclesList] = useState<StudyGroup[]>([]);
+  const [isLoadingGeneralCircles, setIsLoadingGeneralCircles] = useState(false);
+  const [joinAttempts, setJoinAttempts] = useState<{ count: number; windowStart: number }>({ count: 0, windowStart: Date.now() });
 
   // Library save state for circle materials
   const [savedToLibraryIds, setSavedToLibraryIds] = useState<Set<string>>(new Set());
@@ -143,24 +143,37 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
     }
   }, [activeGroupId, currentUserId]);
 
-  // Search / Browse Circles when Join Modal is open
-  const runCircleSearch = async (q: string) => {
-    setIsSearchingCircles(true);
+  // Search / Browse General Circles when Join Modal is open on General tab
+  const loadGeneralCircles = async (query: string = '') => {
+    setIsLoadingGeneralCircles(true);
     try {
-      const found = await DBService.searchCircles(q);
-      setDiscoveredCircles(found);
+      const results = await DBService.searchCircles(query);
+      // Strictly exclude private circles and circles user already joined
+      const filtered = (results || []).filter((circle) => {
+        const isPrivate = circle.type === 'private' || circle.visibility === 'private';
+        if (isPrivate) return false;
+        const isGeneral = circle.type === 'general' || circle.visibility === 'public';
+        if (!isGeneral) return false;
+
+        const alreadyJoined = groups.some((g) => g.id === circle.id) ||
+          (Array.isArray(circle.members) && circle.members.some((m: any) =>
+            typeof m === 'string' ? m === currentUserId : m?.userId === currentUserId
+          ));
+        return !alreadyJoined;
+      });
+      setGeneralCirclesList(filtered);
     } catch (err) {
-      console.warn('Error searching circles:', err);
+      console.warn('Failed to load general circles:', err);
     } finally {
-      setIsSearchingCircles(false);
+      setIsLoadingGeneralCircles(false);
     }
   };
 
   useEffect(() => {
-    if (showJoinModal) {
-      runCircleSearch(circleSearchQuery);
+    if (showJoinModal && joinModalTab === 'general') {
+      loadGeneralCircles(generalSearchQuery);
     }
-  }, [showJoinModal]);
+  }, [showJoinModal, joinModalTab]);
 
   // 2. Realtime Live Subscription for Posts & Replies
   useEffect(() => {
@@ -363,45 +376,123 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
     }
   };
 
-  // Handle Joining a Circle from Search Results
-  const handleJoinDiscoveredCircle = async (targetGroup: StudyGroup, explicitCode?: string) => {
+  // Handle Joining a General Circle (Side 1)
+  const handleJoinGeneralCircle = async (circle: StudyGroup) => {
     if (!canJoinMoreCircles) {
       setJoinError('You have reached the joined circle limit for your plan. Upgrade to join more circles.');
       return;
     }
+    setIsJoining(true);
+    setJoinError(null);
+    try {
+      const joinRes = await DBService.joinGroup(
+        circle.id,
+        null,
+        currentUserId,
+        profile.name
+      );
+      if (joinRes.success) {
+        setGroups((prev) => [circle, ...prev.filter((g) => g.id !== circle.id)]);
+        setActiveGroupId(circle.id);
+        setShowJoinModal(false);
+        addNotification('message', 'Joined Circle', `You are now a member of ${circle.name}.`);
+      } else {
+        if (joinRes.isAlreadyMember) {
+          setJoinError('You are already a member of this study circle.');
+        } else {
+          setJoinError(joinRes.error || 'Failed to join circle.');
+        }
+      }
+    } catch (err: any) {
+      setJoinError(err?.message || 'Error joining circle.');
+    } finally {
+      setIsJoining(false);
+    }
+  };
 
-    // If it's a private circle and no code was entered yet, prompt for its invite code
-    const isPrivate = targetGroup.type === 'private';
-    const codeToUse = (explicitCode || circleSearchQuery || '').trim().toUpperCase();
-    if (isPrivate && (!codeToUse || (targetGroup.inviteCode && codeToUse !== targetGroup.inviteCode.toUpperCase()))) {
-      setPrivateCodePromptGroupId(targetGroup.id);
-      setPrivateCodeInput('');
-      setJoinError(null);
+  // Handle Joining a Private Circle by Invite Code (Side 2)
+  const handleJoinPrivateCircle = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const code = joinCode.trim().toUpperCase();
+    if (!code) {
+      setJoinError('Please enter an invite code.');
+      return;
+    }
+
+    // Rate-limiting check: max 5 attempts per 60 seconds
+    const now = Date.now();
+    let attempts = joinAttempts;
+    if (now - attempts.windowStart > 60000) {
+      attempts = { count: 1, windowStart: now };
+    } else {
+      attempts = { count: attempts.count + 1, windowStart: attempts.windowStart };
+    }
+    setJoinAttempts(attempts);
+
+    if (attempts.count > 5) {
+      setJoinError('Too many join attempts. Please wait a minute and try again.');
+      return;
+    }
+
+    if (!canJoinMoreCircles) {
+      setJoinError('You have reached the joined circle limit for your plan. Upgrade to join more circles.');
       return;
     }
 
     setIsJoining(true);
     setJoinError(null);
     try {
-      const joinRes = await DBService.joinGroup(
-        targetGroup.id,
-        isPrivate ? codeToUse : (targetGroup.inviteCode || ''),
-        currentUserId,
-        profile.name
-      );
+      const findRes = await DBService.findGroupByCode(code);
+      if (!findRes || !findRes.group) {
+        const errMsg = findRes?.error || '';
+        if (/revoked|expired/i.test(errMsg)) {
+          setJoinError('This invite code has expired or been revoked.');
+        } else if (/rate|too many|429/i.test(errMsg)) {
+          setJoinError('Too many join attempts. Please wait a minute and try again.');
+        } else {
+          setJoinError("That code doesn't match any study circle.");
+        }
+        return;
+      }
+
+      const groupFound = findRes.group;
+      const alreadyMember = groups.some((g) => g.id === groupFound.id) ||
+        (Array.isArray(groupFound.members) && groupFound.members.some((m: any) =>
+          typeof m === 'string' ? m === currentUserId : m?.userId === currentUserId
+        ));
+      if (alreadyMember) {
+        setJoinError('You are already a member of this study circle.');
+        return;
+      }
+
+      const joinRes = await DBService.joinGroup(groupFound.id, code, currentUserId, profile.name);
       if (joinRes.success) {
-        setGroups(prev => [targetGroup, ...prev.filter(g => g.id !== targetGroup.id)]);
-        setActiveGroupId(targetGroup.id);
+        setGroups((prev) => [groupFound, ...prev.filter((g) => g.id !== groupFound.id)]);
+        setActiveGroupId(groupFound.id);
         setShowJoinModal(false);
-        setPrivateCodePromptGroupId(null);
-        setPrivateCodeInput('');
         setJoinCode('');
-        addNotification('message', 'Joined Circle', `You are now a member of ${targetGroup.name}.`);
+        addNotification('message', 'Joined Circle', `You are now a member of ${groupFound.name}.`);
       } else {
-        setJoinError(joinRes.error || 'Failed to join circle.');
+        const err = joinRes.error || '';
+        if (joinRes.isAlreadyMember || /already/i.test(err)) {
+          setJoinError('You are already a member of this study circle.');
+        } else if (/revoked|expired/i.test(err)) {
+          setJoinError('This invite code has expired or been revoked.');
+        } else if (/invalid/i.test(err)) {
+          setJoinError("That code doesn't match any study circle.");
+        } else if (/rate|too many|429/i.test(err)) {
+          setJoinError('Too many join attempts. Please wait a minute and try again.');
+        } else {
+          setJoinError(err || 'Failed to join circle.');
+        }
       }
     } catch (err: any) {
-      setJoinError(err?.message || 'Error joining circle.');
+      const msg = err?.message || '';
+      if (/rate|429/i.test(msg)) {
+        setJoinError('Too many join attempts. Please wait a minute and try again.');
+      } else {
+        setJoinError("That code doesn't match any study circle.");
+      }
     } finally {
       setIsJoining(false);
     }
@@ -549,7 +640,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
           <button
             onClick={() => {
               setJoinError(null);
-              setPrivateCodePromptGroupId(null);
+              setJoinModalTab('general');
               setShowJoinModal(true);
             }}
             className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg min-h-[44px] transition-colors cursor-pointer ${
@@ -683,7 +774,42 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
 
       {/* Community Feed */}
       <div className="space-y-4">
-        {filteredPosts.length === 0 ? (
+        {groups.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+              <Users size={24} />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                No study circles yet
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Join an open course circle to collaborate with peers, share resources, and participate in academic discussions.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setJoinError(null);
+                  setJoinModalTab('general');
+                  setShowJoinModal(true);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer"
+              >
+                Find or Join Circle
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(true)}
+                disabled={!canCreateCircle}
+                className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer disabled:opacity-50"
+              >
+                Create Circle
+              </button>
+            </div>
+          </div>
+        ) : filteredPosts.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
             <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
               <MessageSquare size={24} />
@@ -1253,112 +1379,94 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Find & Join Study Circles</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Search public or private circles by course, name, or invite code.
+                  Browse open study circles or join a private group with an invite code.
                 </p>
               </div>
-              <button onClick={() => setShowJoinModal(false)} className="p-1 text-slate-400 hover:text-slate-600">
+              <button 
+                onClick={() => setShowJoinModal(false)} 
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                title="Close"
+              >
                 <X size={18} />
               </button>
             </div>
 
+            {/* Two Distinct Sides / Tabs */}
+            <div className="flex border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setJoinModalTab('general');
+                  setJoinError(null);
+                }}
+                className={`flex-1 py-2.5 px-4 text-xs font-semibold text-center min-h-[44px] cursor-pointer transition-colors border-b-2 ${
+                  joinModalTab === 'general'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                }`}
+              >
+                General circles
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setJoinModalTab('private');
+                  setJoinError(null);
+                }}
+                className={`flex-1 py-2.5 px-4 text-xs font-semibold text-center min-h-[44px] cursor-pointer transition-colors border-b-2 ${
+                  joinModalTab === 'private'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                }`}
+              >
+                Private circle
+              </button>
+            </div>
+
             {joinError && (
-              <div className="p-3 bg-red-50 text-red-700 text-xs rounded-lg border border-red-200 shrink-0">
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs rounded-lg border border-red-200 dark:border-red-900 shrink-0">
                 {joinError}
               </div>
             )}
 
-            {/* Quick Invite Code Join */}
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!joinCode.trim()) return;
-                if (!canJoinMoreCircles) {
-                  setJoinError('You have reached the joined circle limit for your plan. Upgrade to join more circles.');
-                  return;
-                }
-                setIsJoining(true);
-                setJoinError(null);
-                try {
-                  const findRes = await DBService.findGroupByCode(joinCode.trim().toUpperCase());
-                  if (!findRes?.group) {
-                    throw new Error(findRes?.error || "That code doesn't match any study circle.");
-                  }
-                  const groupFound = findRes.group;
-                  const joinRes = await DBService.joinGroup(groupFound.id, joinCode.trim().toUpperCase(), currentUserId, profile.name);
-                  if (joinRes.success) {
-                    setGroups(prev => [groupFound, ...prev.filter(g => g.id !== groupFound.id)]);
-                    setActiveGroupId(groupFound.id);
-                    setShowJoinModal(false);
-                    setJoinCode('');
-                    addNotification('message', 'Joined Circle', `You are now a member of ${groupFound.name}.`);
-                  } else {
-                    throw new Error(joinRes.error || 'Failed to join circle.');
-                  }
-                } catch (err: any) {
-                  setJoinError(err?.message || 'Error joining circle.');
-                } finally {
-                  setIsJoining(false);
-                }
-              }}
-              className="flex items-center gap-2 shrink-0"
-            >
-              <input
-                type="text"
-                placeholder="Have an invite code? e.g. KQ-7F3A-92"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono uppercase text-slate-900 dark:text-white outline-none focus:border-blue-500 min-h-[44px]"
-              />
-              <button
-                type="submit"
-                disabled={isJoining || !joinCode.trim()}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-              >
-                {isJoining ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                <span>Join by Code</span>
-              </button>
-            </form>
-
-            {/* Search Public & Private Circles */}
-            <div className="space-y-2.5 flex-1 min-h-0 flex flex-col pt-2 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
+            {/* SIDE 1: General Circles */}
+            {joinModalTab === 'general' && (
+              <div className="space-y-3 flex-1 min-h-0 flex flex-col">
+                <div className="relative shrink-0">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Search circles by name, course code, or department..."
-                    value={circleSearchQuery}
+                    placeholder="Search general circles by name, course, or department..."
+                    value={generalSearchQuery}
                     onChange={(e) => {
-                      setCircleSearchQuery(e.target.value);
-                      runCircleSearch(e.target.value);
+                      setGeneralSearchQuery(e.target.value);
+                      loadGeneralCircles(e.target.value);
                     }}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 min-h-[44px]"
                   />
                 </div>
-              </div>
 
-              <div className="overflow-y-auto space-y-2 flex-1 pr-1">
-                {isSearchingCircles ? (
-                  <div className="py-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                    <Loader2 size={15} className="animate-spin" />
-                    <span>Searching study circles...</span>
-                  </div>
-                ) : discoveredCircles.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-slate-400">
-                    No matching study circles found.
-                  </div>
-                ) : (
-                  discoveredCircles.map((circle) => {
-                    const alreadyIn = groups.some((g) => g.id === circle.id);
-                    const isPrivate = circle.type === 'private';
-                    const isPromptingCode = privateCodePromptGroupId === circle.id;
+                <div className="overflow-y-auto space-y-2 flex-1 pr-1">
+                  {isLoadingGeneralCircles ? (
+                    <div className="py-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                      <Loader2 size={15} className="animate-spin" />
+                      <span>Loading general circles...</span>
+                    </div>
+                  ) : generalCirclesList.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      {generalSearchQuery.trim()
+                        ? 'No matching general circles found.'
+                        : 'No open general circles available to join.'}
+                    </div>
+                  ) : (
+                    generalCirclesList.map((circle) => {
+                      const memberCount = circle.members?.length || circle.memberCount || 1;
 
-                    return (
-                      <div
-                        key={circle.id}
-                        className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2"
-                      >
-                        <div className="flex items-center justify-between gap-3">
+                      return (
+                        <div
+                          key={circle.id}
+                          className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex items-center justify-between gap-3"
+                        >
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
@@ -1367,66 +1475,76 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                               <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-semibold">
                                 {circle.course}
                               </span>
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
-                                {isPrivate ? <Lock size={10} /> : <Globe size={10} />}
-                                {isPrivate ? 'Private' : 'General'}
-                              </span>
+                              {circle.department && (
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                  • {circle.department}
+                                </span>
+                              )}
                             </div>
-                            {circle.description && (
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                                {circle.description}
-                              </p>
-                            )}
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                              <span>
+                                {memberCount} {memberCount === 1 ? 'member' : 'members'}
+                              </span>
+                              {circle.description && (
+                                <span className="truncate max-w-[200px] sm:max-w-[280px]">
+                                  • {circle.description}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          {alreadyIn ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setActiveGroupId(circle.id);
-                                setShowJoinModal(false);
-                              }}
-                              className="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 min-h-[44px] shrink-0 cursor-pointer"
-                            >
-                              Open
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={isJoining}
-                              onClick={() => handleJoinDiscoveredCircle(circle)}
-                              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white min-h-[44px] shrink-0 cursor-pointer disabled:opacity-50"
-                            >
-                              {isPrivate ? 'Enter Code' : 'Join'}
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            disabled={isJoining}
+                            onClick={() => handleJoinGeneralCircle(circle)}
+                            className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white min-h-[44px] shrink-0 cursor-pointer disabled:opacity-50 transition-colors shadow-2xs"
+                          >
+                            Join
+                          </button>
                         </div>
-
-                        {isPromptingCode && !alreadyIn && (
-                          <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                            <input
-                              type="text"
-                              placeholder="Enter private circle invite code..."
-                              value={privateCodeInput}
-                              onChange={(e) => setPrivateCodeInput(e.target.value.toUpperCase())}
-                              className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono uppercase text-slate-900 dark:text-white outline-none focus:border-blue-500 min-h-[44px]"
-                            />
-                            <button
-                              type="button"
-                              disabled={isJoining || !privateCodeInput.trim()}
-                              onClick={() => handleJoinDiscoveredCircle(circle, privateCodeInput)}
-                              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white min-h-[44px] cursor-pointer disabled:opacity-50"
-                            >
-                              Confirm Join
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+                      );
+                    })
+                  )}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* SIDE 2: Private Circle */}
+            {joinModalTab === 'private' && (
+              <div className="space-y-4 py-2">
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  To join a private study circle, enter the invite code provided by the circle owner or a co-owner.
+                </p>
+
+                <form onSubmit={handleJoinPrivateCircle} className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Invite Code
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. KQ-7F3A-92"
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono uppercase text-slate-900 dark:text-white outline-none focus:border-blue-500 min-h-[44px]"
+                      autoFocus
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Format: KQ-XXXX-XX (case insensitive)
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isJoining || !joinCode.trim()}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                  >
+                    {isJoining ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                    <span>Join Private Circle</span>
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         </div>
       )}
