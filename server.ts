@@ -87,10 +87,10 @@ function safeCompareStrings(a: string, b: string): boolean {
 const GEMINI_PRIMARY_MODEL = cleanEnvKey('GEMINI_MODEL') || 'gemini-3.6-flash';
 const GEMINI_FALLBACK_MODELS = [
   cleanEnvKey('GEMINI_FALLBACK_MODEL'),
+  'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash'
+  'gemini-3.8-flash'
 ].filter(Boolean) as string[];
 const OCR_MODEL = GEMINI_PRIMARY_MODEL;
 const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
@@ -119,8 +119,8 @@ async function ocrMediaWithGemini(buffer: Buffer, mimeType: string, apiKey: stri
         model,
         contents: [
           { inlineData: { data: base64Data, mimeType } },
-          'Transcribe all text in this academic document or transcript exactly as written, in reading order, page by page. ' +
-            'Include course codes, course titles, credit units, scores, grades, and handwritten text. Do not summarize, translate, or add commentary. ' +
+          'Transcribe all text in this academic document, notes, slides, or transcript exactly as written, in reading order, page by page. ' +
+            'Include course codes, course titles, headings, body text, credit units, scores, grades, bullet points, and handwritten text. Do not summarize, translate, or add commentary. ' +
             'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
         ],
         config: { temperature: 0 }
@@ -148,13 +148,15 @@ async function extractDocumentWithOcrFallback(
   const lowerType = (fileType || '').toLowerCase();
   const isImage =
     lowerType.startsWith('image/') ||
-    /\.(jpe?g|png|webp)$/i.test(lowerName);
+    /\.(jpe?g|png|webp|heic|bmp|tiff|jfif)$/i.test(lowerName);
 
   if (isImage) {
     let imageMime = lowerType.startsWith('image/') ? lowerType : 'image/jpeg';
     if (lowerName.endsWith('.png')) imageMime = 'image/png';
     else if (lowerName.endsWith('.webp')) imageMime = 'image/webp';
-    else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) imageMime = 'image/jpeg';
+    else if (lowerName.endsWith('.gif')) imageMime = 'image/gif';
+    else if (lowerName.endsWith('.bmp')) imageMime = 'image/bmp';
+    else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.jfif')) imageMime = 'image/jpeg';
 
     const key = pickGeminiKey();
     if (!key) {
@@ -169,7 +171,7 @@ async function extractDocumentWithOcrFallback(
     }
 
     const text = await ocrMediaWithGemini(buffer, imageMime, key);
-    if (text.length >= 15 && validateExtractedText(text, 'txt').isValid) {
+    if (text && text.trim().length >= 5) {
       return {
         success: true,
         extractedText: text,
@@ -189,34 +191,42 @@ async function extractDocumentWithOcrFallback(
     };
   }
 
+  const isPdf = lowerName.endsWith('.pdf') || lowerType.includes('pdf');
   const result = await processDocumentBuffer(buffer, fileName, fileType);
-  if (result.success || !result.isScannedPdf) return { ...result, usedOcr: false };
+  if (result.success && result.extractedText && result.extractedText.trim().length >= 30) {
+    return { ...result, usedOcr: false };
+  }
 
-  const key = pickGeminiKey();
-  if (!key) {
+  // If standard extraction failed or yielded negligible text on a PDF, attempt Gemini Vision OCR
+  if (isPdf || result.isScannedPdf) {
+    const key = pickGeminiKey();
+    if (!key) {
+      return {
+        ...result,
+        error: "This PDF looks scanned or image-based and requires OCR, but Gemini AI is not configured on the server.",
+        usedOcr: false
+      };
+    }
+
+    const text = await ocrPdfWithGemini(buffer, key);
+    if (text && text.trim().length >= 5) {
+      return {
+        success: true,
+        extractedText: text,
+        fileTypeDetected: 'pdf',
+        pageCount: result.pageCount || 1,
+        usedOcr: true
+      };
+    }
+
     return {
       ...result,
-      error: "This PDF looks scanned and we couldn't read the text. Try a clearer file or enter grades manually.",
+      error: "This PDF contains scanned pages or slides and we couldn't read clear text from it. Please upload a clearer copy or enter grades manually.",
       usedOcr: false
     };
   }
 
-  const text = await ocrPdfWithGemini(buffer, key);
-  if (text.length >= 20 && validateExtractedText(text, 'txt').isValid) {
-    return {
-      success: true,
-      extractedText: text,
-      fileTypeDetected: 'pdf',
-      pageCount: result.pageCount,
-      usedOcr: true
-    };
-  }
-
-  return {
-    ...result,
-    error: "This PDF looks scanned and we couldn't read the text. Try a clearer file or enter grades manually.",
-    usedOcr: false
-  };
+  return { ...result, usedOcr: false };
 }
 
 async function parsePdfBuffer(buffer: Buffer): Promise<string> {
