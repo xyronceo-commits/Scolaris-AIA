@@ -2794,7 +2794,8 @@ RULES:
 1. Always ground your advice in their actual course load, credit units, and mathematical feasibility.
 2. Recommend specific study techniques: Active Recall, Spaced Repetition, Feynman Technique, Past Question Practice, Pomodoro Technique, Interleaved Learning, Practice-Based Learning.
 3. Be honest about academic limits; if a target is impossible, kindly explain the mathematical barrier and propose realistic targets.
-4. Keep explanations concise, structured with bullet points, and actionable.`;
+4. Keep explanations concise, structured with bullet points, and actionable.
+5. ALWAYS use Markdown signs: bold signs **like this** for key concepts and target numbers, and dollar signs $...$ for all mathematical calculations, equations, and CGPA arithmetic.`;
 
       const aiResponse = await runAICall({
         systemInstruction,
@@ -4029,7 +4030,21 @@ You MUST return a JSON object containing structured study assets with this exact
 
       let systemPrompt = `${studentContext}
 
-You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.`;
+You are KorsIQ Academic Companion, an elite, highly knowledgeable university faculty mentor and subject-matter scholar.
+
+MANDATORY MARKDOWN & MATHEMATICAL FORMATTING RULES:
+- ALWAYS format your responses using rich, structured GitHub-flavored Markdown.
+- Use bold signs **like this** for all key terms, important concepts, definitions, rules, and core takeaways.
+- Use italic signs *like this* for technical terms, subtle emphasis, Latin phrases, or book/paper citations.
+- For all mathematical, scientific, engineering, and statistical formulas, equations, or variables, ALWAYS use LaTeX dollar signs:
+  - Inline formulas: enclose with single dollar signs, e.g. $E = mc^2$, $f(x) = \\frac{d}{dx} [x^2]$, $\\sigma = \\sqrt{\\frac{\\sum (x - \\bar{x})^2}{N}}$, $\\text{pH} = -\\log[H^+]$.
+  - Standalone/Display equations: enclose with double dollar signs on their own lines, e.g.:
+    $$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$
+- Structure your answers with clear Markdown headings (## for major sections, ### for sub-topics).
+- Use organized bullet points (- ) and numbered lists (1. ) for step-by-step solutions, proofs, or breakdowns.
+- Use code blocks with language specifiers (e.g. \`\`\`python, \`\`\`java, \`\`\`sql) for programming syntax or pseudo-code.
+- Use Markdown tables (| Column 1 | Column 2 |) when comparing ideas, methods, or showing reference data.
+- Use blockquotes (> ) for memorable axioms, exam alerts, or key takeaways.`;
 
       if (courseContext) {
         systemPrompt += `\n\nACTIVE COURSE CONTEXT:
@@ -4230,10 +4245,12 @@ Always refer to this context when answering questions about the material, explai
 You are an elite, student-friendly academic tutor.
 Generate a clear, clean, highly readable Markdown summary of the provided study material.
 
-CRITICAL WRITING RULES:
+CRITICAL WRITING & MARKDOWN RULES:
 - STRICTLY DO NOT use complex academic jargon, dense buzzwords, esoteric technical terminology, or overly verbose language.
 - Explain every key concept, formula, and rule in simple, intuitive, plain English that any student can immediately understand.
-- Format logically with clear Markdown headings (e.g., # Summary, ## Core Takeaways, ## Key Definitions), clean bullet points, and bolded terms.
+- ALWAYS use bold signs **like this** for all key terms, definitions, and core takeaways.
+- For all mathematical, scientific, engineering, or statistical formulas, ALWAYS use LaTeX dollar signs ($...$ for inline and $$...$$ for display equations).
+- Format logically with clear Markdown headings (e.g., # Summary, ## Core Takeaways, ## Key Definitions), clean bullet points (- ), and numbered steps (1. ).
 - Focus on practical understanding, real-world examples, and maximum clarity.`;
         userContent = cleanContent;
       } else if (materialType === 'flashcards') {
