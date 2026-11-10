@@ -35,6 +35,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
   const [showAvailableSoon, setShowAvailableSoon] = useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [checkoutPlan, setCheckoutPlan] = useState<'plus' | 'studio'>('plus');
+  const [checkoutInitialStep, setCheckoutInitialStep] = useState<'select' | 'confirm'>('select');
   const [userFiles, setUserFiles] = useState<UserFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [aiCreditsUsed, setAiCreditsUsed] = useState<number>(0);
@@ -43,86 +44,24 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
   });
 
-  // Manual Paystack receipt verification state
+  // Track if student has initiated checkout and is still on Free
   const currentUid = getCurrentUserId() || (profile as any)?.id || '';
   const pendingRefKey = currentUid ? `scolaris_pending_payment_ref_${currentUid}` : '';
-  const [receiptRefInput, setReceiptRefInput] = useState<string>(() => {
+  const pendingPlanKey = currentUid ? `scolaris_pending_payment_plan_${currentUid}` : '';
+  const [pendingCheckoutRef, setPendingCheckoutRef] = useState<string>(() => {
     try {
       return pendingRefKey ? (localStorage.getItem(pendingRefKey) || '') : '';
     } catch {
       return '';
     }
   });
-  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
-  const [receiptVerifyFeedback, setReceiptVerifyFeedback] = useState<{
-    type: 'success' | 'error';
-    message: string;
-  } | null>(null);
 
-  const handleManualReceiptVerify = async (e?: React.FormEvent, useEmailLookup = false) => {
-    if (e) e.preventDefault();
-    const refToVerify = useEmailLookup ? '' : receiptRefInput.trim();
-    if (!useEmailLookup && !refToVerify) {
-      setReceiptVerifyFeedback({
-        type: 'error',
-        message: 'Paste your Paystack transaction reference from your email receipt.'
-      });
-      return;
-    }
-
-    setIsVerifyingReceipt(true);
-    setReceiptVerifyFeedback(null);
+  useEffect(() => {
+    if (!pendingRefKey) return;
     try {
-      const token = await getAccessToken();
-      const res = await fetch('/api/subscription/verify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          reference: refToVerify || undefined,
-          email: profile.email
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        setReceiptVerifyFeedback({
-          type: 'error',
-          message: data.error || data.message || 'Could not verify that payment reference. Check the reference on your Paystack receipt and try again.'
-        });
-        return;
-      }
-
-      try {
-        if (pendingRefKey) localStorage.removeItem(pendingRefKey);
-      } catch {}
-
-      const updatedProfile: UserProfile = {
-        ...profile,
-        tier: data.tier || 'plus',
-        isPro: true,
-        subscriptionTier: data.tier || 'plus',
-        subscriptionStatus: 'active',
-        paymentStatus: 'paid',
-        subscriptionEnd: data.currentPeriodEnd || profile.subscriptionEnd || ''
-      };
-      setProfile(updatedProfile);
-      setEditedProfile(updatedProfile);
-      setReceiptRefInput('');
-      setReceiptVerifyFeedback({
-        type: 'success',
-        message: data.message || `Payment verified! Your plan is now ${data.tier === 'studio' ? 'KorsIQ Premium' : 'KorsIQ Plus'}.`
-      });
-    } catch (err: any) {
-      setReceiptVerifyFeedback({
-        type: 'error',
-        message: err?.message || 'Unable to connect to verification server. Please try again.'
-      });
-    } finally {
-      setIsVerifyingReceipt(false);
-    }
-  };
+      setPendingCheckoutRef(localStorage.getItem(pendingRefKey) || '');
+    } catch {}
+  }, [pendingRefKey, showCheckoutModal, profile.tier, profile.subscriptionTier]);
 
   useEffect(() => {
     setEditedProfile(profile);
@@ -454,59 +393,33 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 </p>
               </div>
 
-              {/* Have a receipt? Verify payment (Manual Recovery Box) */}
-              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <CreditCard size={16} className="text-[#2563EB]" />
-                    <h3 className="font-bold text-sm text-[#111827] dark:text-white">Have a receipt? Verify payment</h3>
+              {planKey === 'free' && Boolean(pendingCheckoutRef) && (
+                <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <CreditCard size={16} className="text-[#2563EB] shrink-0" />
+                    <span className="text-xs font-medium text-[#111827] dark:text-white">
+                      Paid on Paystack and still on Free?
+                    </span>
                   </div>
-                </div>
-                <p className="text-xs text-[#5B6472]">
-                  Paid on Paystack and haven&apos;t seen your plan update? Paste the reference from your Paystack receipt below to verify and activate your subscription immediately.
-                </p>
-                <form onSubmit={(e) => handleManualReceiptVerify(e, false)} className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={receiptRefInput}
-                    onChange={(e) => setReceiptRefInput(e.target.value)}
-                    placeholder="e.g. KQ_PLUS_... or Paystack reference"
-                    className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-slate-950 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-[#111827] dark:text-white min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isVerifyingReceipt}
-                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors"
-                  >
-                    {isVerifyingReceipt ? 'Verifying...' : 'Verify payment'}
-                  </button>
                   <button
                     type="button"
-                    disabled={isVerifyingReceipt}
-                    onClick={() => handleManualReceiptVerify(undefined, true)}
-                    className="px-3.5 py-2 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-[#111827] dark:text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors"
+                    onClick={() => {
+                      let savedPlan: 'plus' | 'studio' = 'plus';
+                      try {
+                        const p = pendingPlanKey ? localStorage.getItem(pendingPlanKey) : null;
+                        if (p === 'studio' || p === 'plus') savedPlan = p;
+                      } catch {}
+                      setCheckoutPlan(savedPlan);
+                      setCheckoutInitialStep('confirm');
+                      setShowCheckoutModal(true);
+                    }}
+                    className="px-3.5 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors inline-flex items-center justify-center gap-1.5"
                   >
-                    Check by email
+                    <span>Paid but not upgraded? Verify payment</span>
+                    <ArrowRight size={13} />
                   </button>
-                </form>
-                {receiptVerifyFeedback && (
-                  <div
-                    role="alert"
-                    className={`p-3 rounded-lg text-xs flex items-center gap-2 border ${
-                      receiptVerifyFeedback.type === 'success'
-                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
-                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
-                    }`}
-                  >
-                    {receiptVerifyFeedback.type === 'success' ? (
-                      <Check size={15} className="text-emerald-600 shrink-0" />
-                    ) : (
-                      <AlertCircle size={15} className="text-rose-600 shrink-0" />
-                    )}
-                    <span>{receiptVerifyFeedback.message}</span>
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Right Column (4 cols on desktop): Quiet Upgrade Card */}
@@ -957,6 +870,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   onClick={() => {
                     setShowPlansModal(false);
                     setCheckoutPlan('plus');
+                    setCheckoutInitialStep('select');
                     setShowCheckoutModal(true);
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
@@ -1004,6 +918,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   onClick={() => {
                     setShowPlansModal(false);
                     setCheckoutPlan('studio');
+                    setCheckoutInitialStep('select');
                     setShowCheckoutModal(true);
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
@@ -1012,6 +927,23 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 </button>
               </div>
             </div>
+
+            {planKey === 'free' && Boolean(pendingCheckoutRef) && (
+              <div className="pt-2 border-t border-[#E5E7EB] dark:border-slate-800 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPlansModal(false);
+                    setCheckoutInitialStep('confirm');
+                    setShowCheckoutModal(true);
+                  }}
+                  className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer min-h-[36px] inline-flex items-center gap-1"
+                >
+                  <span>Paid but not upgraded? Verify payment</span>
+                  <ArrowRight size={12} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1019,12 +951,17 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
       {/* Subscription Checkout Modal */}
       <SubscriptionCheckoutModal
         isOpen={showCheckoutModal}
-        onClose={() => setShowCheckoutModal(false)}
+        onClose={() => {
+          setShowCheckoutModal(false);
+          setCheckoutInitialStep('select');
+        }}
         initialPlan={checkoutPlan}
+        initialStep={checkoutInitialStep}
         currentProfile={profile}
         onSubscriptionUpdated={(upd) => {
           if (setProfile) setProfile(upd);
           setEditedProfile(upd);
+          setPendingCheckoutRef('');
         }}
       />
 

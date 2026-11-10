@@ -4,6 +4,7 @@ import { DIFFICULTY_COLORS } from '../constants';
 import { GeminiService } from '../services/gemini';
 import { RecentFiles } from './RecentFiles';
 import { getCurrentUserId } from '../lib/supabase';
+import { DBService } from '../services/db';
 import { 
   Plus, 
   Sparkles, 
@@ -147,8 +148,25 @@ const CourseManager: React.FC<CourseManagerProps> = ({
     setManualCourse({ difficulty: Difficulty.MEDIUM, units: 3 });
   };
 
-  const removeCourse = (id: string) => {
+  const removeCourse = async (id: string) => {
+    const courseToDelete = courses.find(c => c.id === id);
+    const label = courseToDelete ? `${courseToDelete.code} - ${courseToDelete.title}` : 'this course';
+    if (!window.confirm(`Are you sure you want to delete ${label}? This will also delete its scheduled sessions and study hub materials. Uploaded library files will be kept.`)) {
+      return;
+    }
+
+    const previousCourses = [...courses];
     setCourses(prev => prev.filter(c => c.id !== id));
+    setError(null);
+
+    const uid = getCurrentUserId() || (profile as any)?.id || profile.email;
+    if (uid) {
+      const res = await DBService.deleteCourse(uid, id);
+      if (!res.success) {
+        setError(res.error || 'Failed to delete course from database. Reverting.');
+        setCourses(previousCourses);
+      }
+    }
   };
 
   const generatePlan = async () => {
@@ -171,11 +189,23 @@ const CourseManager: React.FC<CourseManagerProps> = ({
     }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     setError(null);
     if (courses.length === 0) return;
-    if (window.confirm("Are you sure you want to delete all current courses? This action is irreversible.")) {
-      setCourses([]);
+    if (!window.confirm("Are you sure you want to delete all current courses? This will also clear all scheduled sessions and course study hubs. Uploaded files will be kept.")) {
+      return;
+    }
+
+    const previousCourses = [...courses];
+    setCourses([]);
+
+    const uid = getCurrentUserId() || (profile as any)?.id || profile.email;
+    if (uid) {
+      const res = await DBService.deleteAllCourses(uid);
+      if (!res.success) {
+        setError(res.error || 'Failed to wipe courses from database. Reverting.');
+        setCourses(previousCourses);
+      }
     }
   };
 

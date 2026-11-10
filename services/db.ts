@@ -448,7 +448,11 @@ export const DBService = {
   async saveCourses(userId: string, courses: Course[]) {
     try {
       writeCache('courses', userId, courses);
-      if (courses.length === 0) return { error: null };
+      if (courses.length === 0) {
+        // If empty array, delete all user courses from Supabase
+        await supabase.from('courses').delete().eq('user_id', userId);
+        return { error: null };
+      }
 
       const rows = courses.map((c) => ({
         id: c.id || `course_${rand(8)}`,
@@ -468,11 +472,90 @@ export const DBService = {
     }
   },
 
+  async deleteCourse(userId: string, courseId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // 1. Delete course from DB
+      const { error: courseErr } = await supabase
+        .from('courses')
+        .delete()
+        .eq('id', courseId)
+        .eq('user_id', userId);
+      if (courseErr) {
+        throw new Error(courseErr.message || 'Failed to delete course row.');
+      }
+
+      // 2. Cascade cleanup in related tables: study_sessions and study_hubs
+      await supabase
+        .from('study_sessions')
+        .delete()
+        .eq('course_id', courseId)
+        .eq('user_id', userId);
+
+      await supabase
+        .from('study_hubs')
+        .delete()
+        .eq('course_id', courseId)
+        .eq('user_id', userId);
+
+      // 3. Set academic_tasks.course_id to null (preserve tasks)
+      await supabase
+        .from('academic_tasks')
+        .update({ course_id: null })
+        .eq('course_id', courseId)
+        .eq('user_id', userId);
+
+      // 4. Update local caches immediately (courses, schedule, hubs)
+      const currentCourses = readCache<Course[]>('courses', userId, []);
+      const updatedCourses = currentCourses.filter((c) => c.id !== courseId);
+      writeCache('courses', userId, updatedCourses);
+
+      const currentSchedule = readCache<StudySession[]>('schedule', userId, []);
+      const updatedSchedule = currentSchedule.filter((s) => s.courseId !== courseId);
+      writeCache('schedule', userId, updatedSchedule);
+
+      const currentHubs = readCache<Record<string, StudyHubData>>('hubs', userId, {});
+      if (currentHubs[courseId]) {
+        delete currentHubs[courseId];
+        writeCache('hubs', userId, currentHubs);
+      }
+
+      // Note: files in user_files (Resources) are explicitly preserved per spec.
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('deleteCourse error:', err);
+      return { success: false, error: err?.message || 'Failed to delete course.' };
+    }
+  },
+
+  async deleteAllCourses(userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.from('courses').delete().eq('user_id', userId);
+      if (error) throw error;
+
+      await supabase.from('study_sessions').delete().eq('user_id', userId);
+      await supabase.from('study_hubs').delete().eq('user_id', userId);
+      await supabase.from('academic_tasks').update({ course_id: null }).eq('user_id', userId);
+
+      writeCache('courses', userId, []);
+      writeCache('schedule', userId, []);
+      writeCache('hubs', userId, {});
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('deleteAllCourses error:', err);
+      return { success: false, error: err?.message || 'Failed to wipe courses.' };
+    }
+  },
+
   // ---------------- Schedule ----------------
   async saveSchedule(userId: string, sessions: StudySession[]) {
     try {
       writeCache('schedule', userId, sessions);
-      if (sessions.length === 0) return { error: null };
+      if (sessions.length === 0) {
+        await supabase.from('study_sessions').delete().eq('user_id', userId);
+        return { error: null };
+      }
 
       const rows = sessions.map((s) => ({
         id: s.id || `session_${rand(8)}`,
@@ -488,6 +571,19 @@ export const DBService = {
     } catch (err) {
       console.error('saveSchedule error:', err);
       return { error: err };
+    }
+  },
+
+  async deleteScheduleSession(userId: string, sessionId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.from('study_sessions').delete().eq('id', sessionId).eq('user_id', userId);
+      if (error) throw error;
+
+      const current = readCache<StudySession[]>('schedule', userId, []);
+      writeCache('schedule', userId, current.filter((s) => s.id !== sessionId));
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete session.' };
     }
   },
 
@@ -586,6 +682,28 @@ export const DBService = {
     } catch (err) {
       console.warn('saveHub warning:', err);
       return { error: null };
+    }
+  },
+
+  async deleteHub(courseId: string, explicitUserId?: string): Promise<{ success: boolean; error?: string }> {
+    const userId = explicitUserId || getCurrentUserId();
+    if (!userId) return { success: true };
+
+    const cachedHubs = readCache<Record<string, StudyHubData>>('hubs', userId, {});
+    delete cachedHubs[courseId];
+    writeCache('hubs', userId, cachedHubs);
+
+    try {
+      const { error } = await supabase
+        .from('study_hubs')
+        .delete()
+        .eq('course_id', courseId)
+        .eq('user_id', userId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.warn('deleteHub error:', err);
+      return { success: false, error: err?.message || 'Failed to delete study hub data.' };
     }
   },
 
@@ -1995,6 +2113,20 @@ export const DBService = {
     }
   },
 
+  async deleteCircleMaterial(materialId: string, storagePath?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (storagePath) {
+        await supabase.storage.from(GROUP_MATERIALS_BUCKET).remove([storagePath]).catch(() => {});
+        await supabase.storage.from(FALLBACK_BUCKET).remove([storagePath]).catch(() => {});
+      }
+      const { error } = await supabase.from('group_materials').delete().eq('id', materialId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete circle material.' };
+    }
+  },
+
   async retryMaterialExtraction(
     materialId: string,
     storagePath: string,
@@ -2805,6 +2937,22 @@ export const DBService = {
         .update({ read: true })
         .eq('user_id', userId)
         .eq('read', false);
+      return !error;
+    } catch {
+      return true;
+    }
+  },
+
+  async deleteNotification(userId: string, notifId: string): Promise<boolean> {
+    const cached = readCache<AppNotification[]>('user_notifications', userId, []);
+    writeCache('user_notifications', userId, cached.filter((n) => n.id !== notifId));
+
+    try {
+      const { error } = await supabase
+        .from('user_notifications')
+        .delete()
+        .eq('id', notifId)
+        .eq('user_id', userId);
       return !error;
     } catch {
       return true;

@@ -85,7 +85,13 @@ function safeCompareStrings(a: string, b: string): boolean {
 // Gemini models are env-configurable because Google retires them. Override GEMINI_MODEL in hosting env
 // instead of editing code. Later entries are fallbacks tried in order.
 const GEMINI_PRIMARY_MODEL = cleanEnvKey('GEMINI_MODEL') || 'gemini-3.6-flash';
-const GEMINI_FALLBACK_MODELS = [cleanEnvKey('GEMINI_FALLBACK_MODEL'), 'gemini-3.5-flash', 'gemini-3.5-flash-lite'].filter(Boolean) as string[];
+const GEMINI_FALLBACK_MODELS = [
+  cleanEnvKey('GEMINI_FALLBACK_MODEL'),
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash'
+].filter(Boolean) as string[];
 const OCR_MODEL = GEMINI_PRIMARY_MODEL;
 const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
 
@@ -97,42 +103,103 @@ function pickGeminiKey(): string | null {
   return null;
 }
 
-/** Reads a scanned / image-only PDF with Gemini's native PDF vision. Returns '' when it can't. */
-async function ocrPdfWithGemini(buffer: Buffer, apiKey: string): Promise<string> {
+/** Reads a scanned PDF or image document with Gemini's native multimodal vision across fallback models. Returns '' when it can't. */
+async function ocrMediaWithGemini(buffer: Buffer, mimeType: string, apiKey: string): Promise<string> {
   if (buffer.length > OCR_MAX_PDF_BYTES) {
-    console.warn(`OCR skipped: PDF is ${(buffer.length / 1048576).toFixed(1)} MB (limit ${OCR_MAX_PDF_BYTES / 1048576} MB).`);
+    console.warn(`[OCR] Skipped: file is ${(buffer.length / 1048576).toFixed(1)} MB (limit ${OCR_MAX_PDF_BYTES / 1048576} MB).`);
     return '';
   }
-  try {
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
-    const response = await ai.models.generateContent({
-      model: OCR_MODEL,
-      contents: [
-        { inlineData: { data: buffer.toString('base64'), mimeType: 'application/pdf' } },
-        'Transcribe all text in this scanned document exactly as written, in reading order, page by page. ' +
-          'Include handwritten text. Do not summarize, translate, or add commentary. ' +
-          'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
-      ],
-      config: { temperature: 0 }
-    });
-    return normalizeExtractedText(response.text || '');
-  } catch (err: any) {
-    console.warn('Gemini PDF OCR failed:', err?.message || err);
-    return '';
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+  const candidateModels = Array.from(new Set([OCR_MODEL, ...GEMINI_FALLBACK_MODELS]));
+  const base64Data = buffer.toString('base64');
+
+  for (const model of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          { inlineData: { data: base64Data, mimeType } },
+          'Transcribe all text in this academic document or transcript exactly as written, in reading order, page by page. ' +
+            'Include course codes, course titles, credit units, scores, grades, and handwritten text. Do not summarize, translate, or add commentary. ' +
+            'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
+        ],
+        config: { temperature: 0 }
+      });
+      const text = normalizeExtractedText(response.text || '');
+      if (text) return text;
+    } catch (err: any) {
+      console.warn(`[OCR] Gemini OCR model ${model} failed (${err?.status || 'ERR'}):`, err?.message || err);
+    }
   }
+  return '';
 }
 
-/** Normal extraction first; if a PDF turns out to be scanned, fall back to Gemini OCR. */
+async function ocrPdfWithGemini(buffer: Buffer, apiKey: string): Promise<string> {
+  return ocrMediaWithGemini(buffer, 'application/pdf', apiKey);
+}
+
+/** Normal extraction first; if a file is an image or a scanned PDF, use Gemini vision OCR. */
 async function extractDocumentWithOcrFallback(
   buffer: Buffer,
   fileName: string,
   fileType: string
 ) {
+  const lowerName = (fileName || '').toLowerCase();
+  const lowerType = (fileType || '').toLowerCase();
+  const isImage =
+    lowerType.startsWith('image/') ||
+    /\.(jpe?g|png|webp)$/i.test(lowerName);
+
+  if (isImage) {
+    let imageMime = lowerType.startsWith('image/') ? lowerType : 'image/jpeg';
+    if (lowerName.endsWith('.png')) imageMime = 'image/png';
+    else if (lowerName.endsWith('.webp')) imageMime = 'image/webp';
+    else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) imageMime = 'image/jpeg';
+
+    const key = pickGeminiKey();
+    if (!key) {
+      return {
+        success: false,
+        extractedText: '',
+        fileTypeDetected: 'image',
+        isScannedPdf: false,
+        usedOcr: false,
+        error: "Image OCR is currently unavailable on the server. Please upload a PDF with selectable text or enter grades manually."
+      };
+    }
+
+    const text = await ocrMediaWithGemini(buffer, imageMime, key);
+    if (text.length >= 15 && validateExtractedText(text, 'txt').isValid) {
+      return {
+        success: true,
+        extractedText: text,
+        fileTypeDetected: 'image',
+        pageCount: 1,
+        usedOcr: true
+      };
+    }
+
+    return {
+      success: false,
+      extractedText: '',
+      fileTypeDetected: 'image',
+      isScannedPdf: false,
+      usedOcr: false,
+      error: "We couldn't read clear text from this photo. Try a clearer, well-lit photo, upload a PDF transcript, or enter grades manually."
+    };
+  }
+
   const result = await processDocumentBuffer(buffer, fileName, fileType);
   if (result.success || !result.isScannedPdf) return { ...result, usedOcr: false };
 
   const key = pickGeminiKey();
-  if (!key) return { ...result, usedOcr: false };
+  if (!key) {
+    return {
+      ...result,
+      error: "This PDF looks scanned and we couldn't read the text. Try a clearer file or enter grades manually.",
+      usedOcr: false
+    };
+  }
 
   const text = await ocrPdfWithGemini(buffer, key);
   if (text.length >= 20 && validateExtractedText(text, 'txt').isValid) {
@@ -147,7 +214,7 @@ async function extractDocumentWithOcrFallback(
 
   return {
     ...result,
-    error: "This PDF looks scanned and we couldn't read the text from it. Try a clearer scan, or use the Vision Document Scanner with photos of the pages.",
+    error: "This PDF looks scanned and we couldn't read the text. Try a clearer file or enter grades manually.",
     usedOcr: false
   };
 }
@@ -1435,34 +1502,45 @@ export async function createExpressApp() {
 
   const getTranscriptFallback = (text: string) => {
     const courses: any[] = [];
-    const lines = (text || '').split('\n');
-    const regex = /([A-Z]{2,4})\s*(\d{3})\s*[:\-\|]?\s*(.*?)(?:\s+(\d)\s*(?:units?|cr|credits?)?)?\s+([A-F][\+\-]?)/i;
+    // Split both by newline and before course code boundaries so PDF tables flattened onto one line are parsed per course
+    const segments = (text || '')
+      .split(/\r?\n|(?=\b[A-Z]{2,4}\s*\d{3}\b)/)
+      .map(s => s.trim())
+      .filter(Boolean);
 
-    for (const line of lines) {
-      const match = line.match(regex);
+    const structuredRegex = /^([A-Z]{2,4})\s*(\d{3})\b\s*[:\-\|]?\s*(.*?)(?:\s+(\d)\s*(?:units?|cr|credits?)?)?(?:\s+(?:grade|score)?\s*[:\-]?\s*|\s+)([A-F][\+\-]?)(?:\s+\d{1,3}%?|\s*)$/i;
+
+    for (const seg of segments) {
+      const match = seg.match(structuredRegex);
       if (match) {
         const code = (match[1] + match[2]).toUpperCase();
-        const rawTitle = (match[3] || '').trim().replace(/^[:\-\|,\s]+|[:\-\|,\s]+$/g, '');
+        const rawTitle = (match[3] || '')
+          .replace(/\b(?:grade|units?|credits?|cr)\b\s*[:\-]?/gi, '')
+          .trim()
+          .replace(/^[:\-\|,\s]+|[:\-\|,\s]+$/g, '');
         const units = match[4] ? parseInt(match[4], 10) : 3;
-        const grade = (match[5] || 'A').toUpperCase();
-        if (!courses.some(c => c.code === code)) {
+        const rawGrade = (match[5] || '').trim().toUpperCase();
+        if (/^[A-F][\+\-]?$/.test(rawGrade) && !courses.some(c => c.code === code)) {
           courses.push({
             code,
             title: rawTitle || `Course ${code}`,
-            creditUnits: isNaN(units) ? 3 : units,
-            grade
+            creditUnits: !isNaN(units) && units >= 1 && units <= 12 ? units : 3,
+            grade: rawGrade
           });
         }
       } else {
-        const codeMatch = line.match(/([A-Z]{2,4}\s*\d{3})/i);
-        const gradeMatch = line.match(/\b([A-F][\+\-]?)\b/);
+        const codeMatch = seg.match(/^([A-Z]{2,4}\s*\d{3})\b/i);
+        // Require explicit uppercase grade token at the end or after "Grade:" so English article "a" is never mistaken for a grade
+        const gradeMatch = seg.match(/(?:grade\s*[:\-]?\s*|\b\d\s*(?:units?|cr|credits?)?\s+|\s+)([A-F][\+\-]?)\s*$/);
+        const unitMatch = seg.match(/\b([1-6])\s*(?:units?|cr|credits?)\b/i);
         if (codeMatch && gradeMatch) {
           const code = codeMatch[1].replace(/\s+/g, '').toUpperCase();
+          const units = unitMatch ? parseInt(unitMatch[1], 10) : 3;
           if (!courses.some(c => c.code === code)) {
             courses.push({
               code,
               title: `Course ${code}`,
-              creditUnits: 3,
+              creditUnits: units,
               grade: gradeMatch[1].toUpperCase()
             });
           }
@@ -3717,20 +3795,37 @@ You MUST return a JSON object containing structured study assets with this exact
           }
         };
 
-        const response = await aiGen.models.generateContent({
-          model: GEMINI_PRIMARY_MODEL,
-          contents: [
-            mediaInput,
-            "Scan and transcribe this document, then synthesize structured study assets matching the JSON schema."
-          ],
-          config: {
-            systemInstruction: visionSchemaPrompt,
-            responseMimeType: "application/json",
-            temperature: 0.2
+        const visionCandidateModels = Array.from(new Set([GEMINI_PRIMARY_MODEL, ...GEMINI_FALLBACK_MODELS]));
+        let rawText = '';
+        let lastVisionErr: any = null;
+        for (const model of visionCandidateModels) {
+          try {
+            const response = await aiGen.models.generateContent({
+              model,
+              contents: [
+                mediaInput,
+                "Scan and transcribe this document, then synthesize structured study assets matching the JSON schema."
+              ],
+              config: {
+                systemInstruction: visionSchemaPrompt,
+                responseMimeType: "application/json",
+                temperature: 0.2
+              }
+            });
+            if (response?.text) {
+              rawText = response.text;
+              break;
+            }
+          } catch (modelErr: any) {
+            lastVisionErr = modelErr;
+            console.warn(`[Vision Scan] Model ${model} failed (${modelErr?.status || 'ERR'}):`, modelErr?.message || modelErr);
           }
-        });
+        }
 
-        const rawText = response.text || '{}';
+        if (!rawText) {
+          throw lastVisionErr || new Error('Gemini vision models failed to transcribe the document.');
+        }
+
         const resultJson = JSON.parse(rawText);
         return res.json({ success: true, data: resultJson });
       } else {
@@ -4226,15 +4321,16 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       return res.status(400).json({ error: "Please provide study text or select a material to generate a podcast." });
     }
 
-    const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
-    if (!spend.success) {
+    // Step 1: Check credit balance first WITHOUT consuming credits yet
+    const balanceInfo = await getAiCreditBalanceForUser(userId);
+    if (balanceInfo.balance < cost) {
       return res.status(402).json({
         error: 'Not enough credits',
         code: 'INSUFFICIENT_CREDITS',
-        balance: spend.balance,
+        balance: balanceInfo.balance,
         required: cost,
-        allowance: spend.allowance,
-        resetDate: spend.periodEnd
+        allowance: balanceInfo.allowance,
+        resetDate: balanceInfo.periodEnd
       });
     }
 
@@ -4251,20 +4347,44 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       const script = cleanScriptFormatting(rawScript);
 
       // Step 3: Audio Generation & Output Stream Validation
-      const wavBuffer = generateSpeechWav(script);
-      const validation = validateWavBuffer(wavBuffer);
-      if (!validation.valid) {
-        console.error('Audio validation failed for podcast output:', validation.error);
-        await refundAiCredits(userId, 'podcast', cost, spend.requestId);
-        return res.status(500).json({ error: `Audio stream validation failed: ${validation.error || 'Corrupt media file generated.'}` });
+      let wavBuffer: Buffer | null = null;
+      let validation: { valid: boolean; error?: string; durationSec?: number } = { valid: false, error: 'Audio generator not called', durationSec: 0 };
+      try {
+        wavBuffer = generateSpeechWav(script);
+        validation = validateWavBuffer(wavBuffer);
+      } catch (audioErr: any) {
+        console.warn('Podcast audio synthesis exception:', audioErr?.message || audioErr);
+        validation = { valid: false, error: audioErr?.message || 'Audio synthesis exception', durationSec: 0 };
       }
 
+      if (!validation.valid || !wavBuffer) {
+        console.error('Audio validation failed for podcast output:', validation.error);
+        // Script succeeded but audio failed: return script, charge 0 credits per spec!
+        return res.json({
+          success: true,
+          script,
+          audioBase64: null,
+          audioFailed: true,
+          audioError: validation.error || 'Audio synthesis was unable to render voice track.',
+          creditsCharged: 0,
+          creditsRemaining: balanceInfo.balance
+        });
+      }
+
+      // Step 4: BOTH script and valid playable audio succeeded -> now consume credits
+      const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
       const audioBase64 = wavBuffer.toString('base64');
-      res.json({ script, audioBase64, durationSec: validation.durationSec, creditsRemaining: spend.balance });
+      res.json({
+        success: true,
+        script,
+        audioBase64,
+        durationSec: validation.durationSec,
+        creditsCharged: spend.success ? cost : 0,
+        creditsRemaining: spend.balance
+      });
     } catch (error: any) {
-      console.error('Podcast generation server error, refunding credits:', error?.message || error);
-      await refundAiCredits(userId, 'podcast', cost, spend.requestId);
-      res.status(500).json({ error: "We couldn't generate your podcast right now. Your credits have been refunded." });
+      console.error('Podcast generation server error (0 credits charged):', error?.message || error);
+      res.status(500).json({ error: "We couldn't generate your podcast right now. No credits were charged." });
     }
   };
 

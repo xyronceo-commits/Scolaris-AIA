@@ -19,6 +19,7 @@ interface SubscriptionCheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialPlan?: 'plus' | 'studio';
+  initialStep?: 'select' | 'confirm';
   currentProfile: UserProfile;
   onSubscriptionUpdated: (updatedProfile: UserProfile) => void;
 }
@@ -27,13 +28,15 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
   isOpen,
   onClose,
   initialPlan = 'plus',
+  initialStep = 'select',
   currentProfile,
   onSubscriptionUpdated
 }) => {
   const [selectedPlan, setSelectedPlan] = useState<'plus' | 'studio'>(initialPlan);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [step, setStep] = useState<'select' | 'confirm' | 'status'>('select');
+  const [step, setStep] = useState<'select' | 'confirm' | 'status'>(initialStep);
   const [paymentRef, setPaymentRef] = useState<string | null>(null);
+  const [hasStartedCheckout, setHasStartedCheckout] = useState(false);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{
     type: 'success' | 'error' | 'warning' | 'info';
@@ -44,20 +47,35 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
   const uid = getCurrentUserId() || (currentProfile as any)?.id || '';
   const pendingRefStorageKey = uid ? `scolaris_pending_payment_ref_${uid}` : '';
   const pendingPlanStorageKey = uid ? `scolaris_pending_payment_plan_${uid}` : '';
+  const currentTier = (currentProfile?.subscriptionTier || currentProfile?.tier || 'free').toLowerCase();
+  const isStillFree = currentTier === 'free';
 
   useEffect(() => {
     setSelectedPlan(initialPlan);
   }, [initialPlan]);
 
   useEffect(() => {
+    if (isOpen) {
+      setStep(initialStep);
+    }
+  }, [isOpen, initialStep]);
+
+  useEffect(() => {
     if (!isOpen || !pendingRefStorageKey) return;
     try {
       const savedRef = localStorage.getItem(pendingRefStorageKey);
-      if (savedRef && !paymentRef) {
-        setPaymentRef(savedRef);
+      const savedPlan = pendingPlanStorageKey ? localStorage.getItem(pendingPlanStorageKey) : null;
+      if (savedRef) {
+        setHasStartedCheckout(true);
+        if (!paymentRef) setPaymentRef(savedRef);
+        if (savedPlan === 'plus' || savedPlan === 'studio') {
+          setSelectedPlan(savedPlan);
+        }
+      } else {
+        setHasStartedCheckout(false);
       }
     } catch {}
-  }, [isOpen, pendingRefStorageKey]);
+  }, [isOpen, pendingRefStorageKey, pendingPlanStorageKey]);
 
   if (!isOpen) return null;
 
@@ -95,6 +113,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
       }
 
       setPaymentRef(data.reference);
+      setHasStartedCheckout(true);
       try {
         if (pendingRefStorageKey) localStorage.setItem(pendingRefStorageKey, data.reference);
         if (pendingPlanStorageKey) localStorage.setItem(pendingPlanStorageKey, selectedPlan);
@@ -158,6 +177,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
         if (pendingRefStorageKey) localStorage.removeItem(pendingRefStorageKey);
         if (pendingPlanStorageKey) localStorage.removeItem(pendingPlanStorageKey);
       } catch {}
+      setHasStartedCheckout(false);
 
       // Successful verified payment!
       const updatedProfile: UserProfile = {
@@ -311,6 +331,19 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               <span>{isProcessing ? 'Connecting...' : `Proceed to Pay ${planInfo.price}`}</span>
               <ArrowRight size={13} />
             </button>
+
+            {isStillFree && hasStartedCheckout && (
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => setStep('confirm')}
+                  className="text-xs font-semibold text-[#2563EB] dark:text-blue-400 hover:underline cursor-pointer min-h-[36px] inline-flex items-center gap-1"
+                >
+                  <span>Paid but not upgraded? Verify payment</span>
+                  <ArrowRight size={12} />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
