@@ -1,6 +1,7 @@
 // pdf-parse is loaded lazily: importing it at startup needs DOMMatrix, which crashes the Vercel function on boot.
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
+import { GoogleGenAI } from '@google/genai';
 
 export interface ExtractionResult {
   success: boolean;
@@ -349,7 +350,8 @@ export async function processDocumentBuffer(
       success: false,
       extractedText: '',
       error: `Failed to extract text from ${fileName}. ${err?.message || ''}`,
-      fileTypeDetected: detectedType
+      fileTypeDetected: detectedType,
+      isScannedPdf: detectedType === 'pdf'
     };
   }
 
@@ -452,4 +454,38 @@ export function selectRelevantChunks(text: string, query: string, maxChars: numb
   }
 
   return combined;
+}
+
+/**
+ * Reads a scanned PDF or image document with Gemini Vision OCR across Gemini 3.6+ models.
+ */
+export async function ocrMediaWithGemini(
+  buffer: Buffer,
+  mimeType: string,
+  apiKey: string,
+  candidateModels: string[] = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
+): Promise<string> {
+  if (buffer.length > 15 * 1024 * 1024) return '';
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+  const base64Data = buffer.toString('base64');
+
+  for (const model of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          { inlineData: { data: base64Data, mimeType } },
+          'Transcribe all text in this academic document, notes, slides, or transcript exactly as written, in reading order, page by page. ' +
+            'Include all course codes, course titles, headings, body text, numbers, scores, grades, and handwritten text. Do not summarize, translate, or add commentary. ' +
+            'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
+        ],
+        config: { temperature: 0 }
+      });
+      const text = normalizeExtractedText(response.text || '');
+      if (text) return text;
+    } catch (err: any) {
+      console.warn(`[documentProcessor OCR] Gemini model ${model} failed:`, err?.message || err);
+    }
+  }
+  return '';
 }
