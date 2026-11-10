@@ -210,6 +210,8 @@ export const GeminiService = {
 
     const script = data?.script || '';
     let wavUrl: string | null = null;
+    let audioFailed = Boolean(data?.audioFailed);
+    let audioError = data?.audioError || null;
 
     if (data?.audioBase64) {
       try {
@@ -217,10 +219,9 @@ export const GeminiService = {
         const validation = validateAudioBytes(bytes);
         if (!validation.valid) {
           console.error('Audio stream validation failed:', validation.error);
-          throw new Error(`Corrupt audio output: ${validation.error}`);
-        }
-
-        if (bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70) {
+          audioFailed = true;
+          audioError = validation.error;
+        } else if (bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70) {
           const blob = new Blob([bytes], { type: 'audio/wav' });
           wavUrl = URL.createObjectURL(blob);
         } else {
@@ -229,14 +230,24 @@ export const GeminiService = {
         }
       } catch (err: any) {
         console.error('Error validating or decoding audio stream:', err);
+        audioFailed = true;
+        audioError = err?.message || 'Audio decoding failed';
       }
+    } else {
+      audioFailed = true;
     }
 
     if (!script) {
       throw new Error('No podcast dialogue could be generated for this topic.');
     }
 
-    return { script, wavUrl };
+    return {
+      script,
+      wavUrl,
+      audioFailed,
+      audioError,
+      creditsCharged: data?.creditsCharged ?? (wavUrl ? 6 : 0)
+    };
   },
 
   async scolarisGenerate(studyMaterial: string, mode: 'quiz' | 'flashcards') {

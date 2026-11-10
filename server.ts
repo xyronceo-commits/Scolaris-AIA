@@ -4321,15 +4321,16 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       return res.status(400).json({ error: "Please provide study text or select a material to generate a podcast." });
     }
 
-    const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
-    if (!spend.success) {
+    // Step 1: Check credit balance first WITHOUT consuming credits yet
+    const balanceInfo = await getAiCreditBalanceForUser(userId);
+    if (balanceInfo.balance < cost) {
       return res.status(402).json({
         error: 'Not enough credits',
         code: 'INSUFFICIENT_CREDITS',
-        balance: spend.balance,
+        balance: balanceInfo.balance,
         required: cost,
-        allowance: spend.allowance,
-        resetDate: spend.periodEnd
+        allowance: balanceInfo.allowance,
+        resetDate: balanceInfo.periodEnd
       });
     }
 
@@ -4346,20 +4347,44 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       const script = cleanScriptFormatting(rawScript);
 
       // Step 3: Audio Generation & Output Stream Validation
-      const wavBuffer = generateSpeechWav(script);
-      const validation = validateWavBuffer(wavBuffer);
-      if (!validation.valid) {
-        console.error('Audio validation failed for podcast output:', validation.error);
-        await refundAiCredits(userId, 'podcast', cost, spend.requestId);
-        return res.status(500).json({ error: `Audio stream validation failed: ${validation.error || 'Corrupt media file generated.'}` });
+      let wavBuffer: Buffer | null = null;
+      let validation: { valid: boolean; error?: string; durationSec?: number } = { valid: false, error: 'Audio generator not called', durationSec: 0 };
+      try {
+        wavBuffer = generateSpeechWav(script);
+        validation = validateWavBuffer(wavBuffer);
+      } catch (audioErr: any) {
+        console.warn('Podcast audio synthesis exception:', audioErr?.message || audioErr);
+        validation = { valid: false, error: audioErr?.message || 'Audio synthesis exception', durationSec: 0 };
       }
 
+      if (!validation.valid || !wavBuffer) {
+        console.error('Audio validation failed for podcast output:', validation.error);
+        // Script succeeded but audio failed: return script, charge 0 credits per spec!
+        return res.json({
+          success: true,
+          script,
+          audioBase64: null,
+          audioFailed: true,
+          audioError: validation.error || 'Audio synthesis was unable to render voice track.',
+          creditsCharged: 0,
+          creditsRemaining: balanceInfo.balance
+        });
+      }
+
+      // Step 4: BOTH script and valid playable audio succeeded -> now consume credits
+      const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
       const audioBase64 = wavBuffer.toString('base64');
-      res.json({ script, audioBase64, durationSec: validation.durationSec, creditsRemaining: spend.balance });
+      res.json({
+        success: true,
+        script,
+        audioBase64,
+        durationSec: validation.durationSec,
+        creditsCharged: spend.success ? cost : 0,
+        creditsRemaining: spend.balance
+      });
     } catch (error: any) {
-      console.error('Podcast generation server error, refunding credits:', error?.message || error);
-      await refundAiCredits(userId, 'podcast', cost, spend.requestId);
-      res.status(500).json({ error: "We couldn't generate your podcast right now. Your credits have been refunded." });
+      console.error('Podcast generation server error (0 credits charged):', error?.message || error);
+      res.status(500).json({ error: "We couldn't generate your podcast right now. No credits were charged." });
     }
   };
 

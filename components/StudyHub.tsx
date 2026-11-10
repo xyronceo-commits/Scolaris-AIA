@@ -112,6 +112,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [podcastAudioNotice, setPodcastAudioNotice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Document Scanner Vision State
@@ -704,6 +705,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
     if (!source || !source.trim()) return alert("Upload or select study material first!");
 
     setInsufficientCreditsNotice(null);
+    setPodcastAudioNotice(null);
     setLoading(true);
     try {
       const res = await GeminiService.generatePodcast(source);
@@ -714,7 +716,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
       } as StudyHubData;
       setHubs({ ...hubs, [activeCourseId]: updatedHub });
       await DBService.saveHub(updatedHub);
-      addNotification('content', 'AI Podcast Ready', `Your audio overview for ${currentCourse?.code} has been generated.`, 'hub');
+      if (res.audioFailed) {
+        setPodcastAudioNotice(res.audioError || 'Audio synthesis was unable to render the voice track. Your transcript is ready below and 0 credits were charged.');
+      } else {
+        setPodcastAudioNotice(null);
+        addNotification('content', 'AI Podcast Ready', `Your audio overview for ${currentCourse?.code} has been generated.`, 'hub');
+      }
     } catch (err: any) {
       console.error(err);
       if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
@@ -2008,6 +2015,22 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     {activeHub.transcript ? 'Regenerate AI Podcast — 6 credits' : 'AI Podcast — 6 credits'}
                   </button>
                 </div>
+
+                {podcastAudioNotice && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-900">
+                    <div>
+                      <p className="font-semibold text-amber-950">Audio generation notice</p>
+                      <p className="text-amber-800 mt-0.5">{podcastAudioNotice}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={generatePodcastTool}
+                      className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold cursor-pointer shrink-0 min-h-[44px]"
+                    >
+                      Retry Audio Generation
+                    </button>
+                  </div>
+                )}
 
                 {activeHub.podcastUrl && (
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
