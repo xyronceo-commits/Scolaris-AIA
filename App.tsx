@@ -19,7 +19,7 @@ import { UserAvatar } from './components/UserAvatar';
 import Tutorial from './components/Tutorial';
 import Auth, { type AuthMode } from './components/Auth';
 import type { Session } from '@supabase/supabase-js';
-import { supabase, toAuthUser, setCurrentUserId, type AuthUser } from './lib/supabase';
+import { supabase, toAuthUser, setCurrentUserId, getAccessToken, type AuthUser } from './lib/supabase';
 import { DBService } from './services/db';
 import { cleanupLegacyApiKeyStorage } from './services/gemini';
 import KorsIQLogo from './components/KorsIQLogo';
@@ -30,15 +30,29 @@ import AdminApp from './components/AdminApp';
 const App: React.FC = () => {
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin');
+    return (
+      window.location.pathname === '/admin' ||
+      window.location.pathname.startsWith('/admin/') ||
+      window.location.hash === '#/admin' ||
+      window.location.hash.startsWith('#/admin/')
+    );
   });
 
   useEffect(() => {
-    const handlePopState = () => {
-      setIsAdminRoute(window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin'));
+    const handleRouteChange = () => {
+      setIsAdminRoute(
+        window.location.pathname === '/admin' ||
+        window.location.pathname.startsWith('/admin/') ||
+        window.location.hash === '#/admin' ||
+        window.location.hash.startsWith('#/admin/')
+      );
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handleRouteChange);
+    window.addEventListener('hashchange', handleRouteChange);
+    return () => {
+      window.removeEventListener('popstate', handleRouteChange);
+      window.removeEventListener('hashchange', handleRouteChange);
+    };
   }, []);
 
   const [activeTab, setActiveTab] = useState<AppState>('dashboard');
@@ -96,6 +110,154 @@ const App: React.FC = () => {
     return window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
   });
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
+  const [paymentReturnBanner, setPaymentReturnBanner] = useState<{
+    status: 'verifying' | 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Paystack Callback Return Handler: detects ?payment=return, ?reference=..., ?trxref=..., or #/settings?reference=...
+  useEffect(() => {
+    if (!authUser?.uid || typeof window === 'undefined') return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashQueryIdx = window.location.hash.indexOf('?');
+    const hashParams = hashQueryIdx !== -1
+      ? new URLSearchParams(window.location.hash.slice(hashQueryIdx + 1))
+      : new URLSearchParams();
+
+    const refFromUrl =
+      searchParams.get('reference') ||
+      searchParams.get('trxref') ||
+      hashParams.get('reference') ||
+      hashParams.get('trxref') ||
+      '';
+    const isPaymentReturn =
+      Boolean(refFromUrl) ||
+      searchParams.get('payment') === 'return' ||
+      hashParams.get('payment') === 'return';
+
+    if (!isPaymentReturn) return;
+
+    const pendingRefKey = `scolaris_pending_payment_ref_${authUser.uid}`;
+    let refToVerify = refFromUrl.trim();
+    if (!refToVerify) {
+      try {
+        refToVerify = (localStorage.getItem(pendingRefKey) || '').trim();
+      } catch {}
+    }
+
+    // Clean the URL immediately so refreshes do not re-trigger
+    try {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch {}
+
+    setActiveTab('settings');
+    setPaymentReturnBanner({
+      status: 'verifying',
+      message: 'Verifying your payment with Paystack...'
+    });
+
+    let cancelled = false;
+    const runVerificationWithRetry = async () => {
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (cancelled) return;
+        try {
+          const token = await getAccessToken();
+          const res = await fetch('/api/subscription/verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({
+              reference: refToVerify || undefined,
+              email: authUser.email || profile?.email
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (res.ok && data.success) {
+            try {
+              localStorage.removeItem(pendingRefKey);
+              localStorage.removeItem(`scolaris_pending_payment_plan_${authUser.uid}`);
+            } catch {}
+
+            const freshProfile = await DBService.getProfile(authUser.uid);
+            const resolvedTier = data.tier || freshProfile?.tier || 'plus';
+            const resolvedEnd = data.currentPeriodEnd || freshProfile?.subscriptionEnd || '';
+            if (freshProfile) {
+              setProfile({
+                ...freshProfile,
+                tier: resolvedTier,
+                subscriptionTier: resolvedTier,
+                isPro: true,
+                subscriptionStatus: 'active',
+                paymentStatus: 'paid',
+                subscriptionEnd: resolvedEnd
+              });
+            } else if (profile) {
+              setProfile({
+                ...profile,
+                tier: resolvedTier,
+                subscriptionTier: resolvedTier,
+                isPro: true,
+                subscriptionStatus: 'active',
+                paymentStatus: 'paid',
+                subscriptionEnd: resolvedEnd
+              });
+            }
+
+            const planLabel = resolvedTier === 'studio' ? 'KorsIQ Premium' : 'KorsIQ Plus';
+            const renewLabel = resolvedEnd
+              ? ` (renews ${new Date(resolvedEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })})`
+              : '';
+
+            if (!cancelled) {
+              setPaymentReturnBanner({
+                status: 'success',
+                message: `Payment verified! Your account is now active on ${planLabel}${renewLabel}.`
+              });
+            }
+            return;
+          }
+
+          // If pending and we have retries left, wait 2 seconds and retry
+          if (attempt < maxAttempts && (data.status === 'pending' || res.status >= 500)) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+
+          if (!cancelled) {
+            setPaymentReturnBanner({
+              status: 'error',
+              message:
+                data.error ||
+                data.message ||
+                'We could not verify your payment automatically yet. Paste your Paystack receipt reference in the "Have a receipt? Verify payment" box below.'
+            });
+          }
+          return;
+        } catch (err: any) {
+          if (attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          if (!cancelled) {
+            setPaymentReturnBanner({
+              status: 'error',
+              message: 'Could not reach the payment verification server. Use the "Have a receipt? Verify payment" box below to retry.'
+            });
+          }
+        }
+      }
+    };
+
+    runVerificationWithRetry();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.uid]);
 
   // Update Page Title and Robots Metadata based on Active State
   useEffect(() => {
@@ -330,9 +492,16 @@ const App: React.FC = () => {
     }
   };
 
+  const [openAddCourseSignal, setOpenAddCourseSignal] = useState(0);
+
   const handleQuickAddCourse = (newCourse: Course) => {
     // Persisted by the courses effect above (DBService.saveCourses)
     setCourses(prev => [...prev, newCourse]);
+  };
+
+  const handleOpenAddCourseFlow = () => {
+    setOpenAddCourseSignal(s => s + 1);
+    setActiveTab('courses');
   };
 
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
@@ -503,6 +672,18 @@ const App: React.FC = () => {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  // 0. Admin Portal Route Handling (/admin) — independent of student auth loading
+  if (isAdminRoute) {
+    return (
+      <AdminApp 
+        onExit={() => {
+          window.history.pushState({}, '', '/');
+          setIsAdminRoute(false);
+        }} 
+      />
+    );
+  }
+
   // 1. Loading State
   if (authLoading) {
     return (
@@ -536,18 +717,6 @@ const App: React.FC = () => {
             window.history.replaceState(null, '', window.location.pathname);
           }
         }}
-      />
-    );
-  }
-
-  // Admin Portal Route Handling (/admin)
-  if (isAdminRoute) {
-    return (
-      <AdminApp 
-        onExit={() => {
-          window.history.pushState({}, '', '/');
-          setIsAdminRoute(false);
-        }} 
       />
     );
   }
@@ -610,6 +779,7 @@ const App: React.FC = () => {
       onNavigate={(tab) => { setActiveTab(tab); }}
       onUpdateProfile={(updated) => setProfile(updated)}
       onAddCourse={handleQuickAddCourse}
+      onOpenAddCourse={handleOpenAddCourseFlow}
     />
   );
 
@@ -620,7 +790,8 @@ const App: React.FC = () => {
         return renderDashboard();
       case 'planner':
         return <StudyPlannerView 
-          initialTab="courses"
+          initialTab={openAddCourseSignal > 0 ? 'courses' : 'today'}
+          openAddCourseSignal={openAddCourseSignal}
           courses={courses}
           setCourses={setCourses}
           schedule={schedule}
@@ -636,6 +807,7 @@ const App: React.FC = () => {
       case 'courses':
         return <StudyPlannerView 
           initialTab="courses"
+          openAddCourseSignal={openAddCourseSignal}
           courses={courses}
           setCourses={setCourses}
           schedule={schedule}
@@ -1053,6 +1225,32 @@ const App: React.FC = () => {
           )}
 
           <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
+            {/* Paystack Return Verification Banner */}
+            {paymentReturnBanner && (
+              <div
+                role="status"
+                className={`mb-6 p-4 rounded-lg border flex items-center justify-between gap-3 text-xs font-medium ${
+                  paymentReturnBanner.status === 'verifying'
+                    ? 'bg-[#EFF6FF] dark:bg-blue-950/60 border-blue-200 dark:border-blue-900 text-[#1D4ED8] dark:text-blue-200'
+                    : paymentReturnBanner.status === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200'
+                }`}
+              >
+                <span>{paymentReturnBanner.message}</span>
+                {paymentReturnBanner.status !== 'verifying' && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentReturnBanner(null)}
+                    className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer shrink-0"
+                    aria-label="Dismiss payment status banner"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Notification Permission Pre-Prompt Banner */}
             {showNotifPermissionBanner && (
               <div className="mb-6 p-4 bg-[#EFF6FF] dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">

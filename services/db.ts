@@ -286,8 +286,7 @@ export const DBService = {
   async saveProfile(userId: string, profile: UserProfile) {
     writeCache('profile', userId, profile);
     try {
-      const basePayload: Record<string, any> = {
-        id: userId,
+      const baseUpdate: Record<string, any> = {
         name: profile.name,
         email: profile.email,
         institution: profile.university,
@@ -298,27 +297,67 @@ export const DBService = {
         avatar_icon: profile.avatarIcon || 'graduation-cap',
         onboarded: profile.onboarded,
         tutorial_seen: profile.tutorialSeen,
-        is_pro: profile.isPro,
-        tier: profile.tier,
         notifications: profile.notifications,
       };
 
-      const fullPayload = { ...basePayload };
-      if (profile.department !== undefined) fullPayload.department = profile.department;
-      if (profile.major !== undefined) fullPayload.major = profile.major;
-      if (profile.academicGoals !== undefined) fullPayload.academic_goals = profile.academicGoals;
-      if (profile.studyStyle !== undefined) fullPayload.study_style = profile.studyStyle;
-      if (profile.assistanceAreas !== undefined) fullPayload.assistance_areas = profile.assistanceAreas;
+      const fullUpdate: Record<string, any> = { ...baseUpdate };
+      if (profile.department !== undefined) fullUpdate.department = profile.department;
+      if (profile.major !== undefined) fullUpdate.major = profile.major;
+      else if (profile.department !== undefined) fullUpdate.major = profile.department;
+      if (profile.academicGoals !== undefined) fullUpdate.academic_goals = profile.academicGoals;
+      if (profile.studyStyle !== undefined) fullUpdate.study_style = profile.studyStyle;
+      if (profile.assistanceAreas !== undefined) fullUpdate.assistance_areas = profile.assistanceAreas;
 
-      let { error } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+      // 1. Prefer UPDATE on existing row (checks UPDATE RLS policy only, not INSERT, and avoids touching tier/is_pro)
+      const { data: updatedRows, error: updateErr } = await supabase
+        .from('profiles')
+        .update(fullUpdate)
+        .eq('id', userId)
+        .select('id');
+
+      if (!updateErr && Array.isArray(updatedRows) && updatedRows.length > 0) {
+        return { error: null, droppedExtendedFields: false };
+      }
+
+      // 2. Fall back to authenticated server endpoint (/api/profile via service_role) to handle RLS or missing row
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const res = await fetch('/api/profile', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              ...profile,
+              department: profile.department,
+              major: profile.major || profile.department,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok && body.success) {
+            return { error: null, droppedExtendedFields: !!body.droppedExtendedFields };
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Server /api/profile fallback error:', apiErr);
+      }
+
+      // 3. Final client fallback if server route was unreachable
+      let error = updateErr;
       let droppedExtendedFields = false;
+      if (!error && (!updatedRows || updatedRows.length === 0)) {
+        const upsertRes = await supabase
+          .from('profiles')
+          .upsert({ id: userId, ...fullUpdate }, { onConflict: 'id' });
+        error = upsertRes.error;
+      }
 
-      // If database table doesn't have the extended columns yet, fall back gracefully to base columns
       if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
         console.warn('Extended profile columns missing from remote DB, saving core profile fields:', error.message);
-        const retry = await supabase.from('profiles').upsert(basePayload, { onConflict: 'id' });
+        const retry = await supabase.from('profiles').update(baseUpdate).eq('id', userId);
         error = retry.error;
-        // department/major etc. were NOT saved; callers must not report success for those fields
         droppedExtendedFields = true;
       }
 
@@ -1664,10 +1703,15 @@ export const DBService = {
       localSaved.add(postId);
       writeCache('circle_saved_posts', userId, Array.from(localSaved));
 
-      const { error } = await supabase
+      const { error: err1 } = await supabase
+        .from('saved_circle_posts')
+        .upsert({ circle_id: circleId, post_id: postId, user_id: userId }, { onConflict: 'user_id,post_id' });
+      if (!err1) return true;
+
+      const { error: err2 } = await supabase
         .from('circle_saved_posts')
         .upsert({ circle_id: circleId, post_id: postId, user_id: userId }, { onConflict: 'user_id,post_id' });
-      return !error;
+      return !err2;
     } catch {
       return true;
     }
@@ -1678,6 +1722,12 @@ export const DBService = {
       const localSaved = new Set(readCache<string[]>('circle_saved_posts', userId, []));
       localSaved.delete(postId);
       writeCache('circle_saved_posts', userId, Array.from(localSaved));
+
+      await supabase
+        .from('saved_circle_posts')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', userId);
 
       const { error } = await supabase
         .from('circle_saved_posts')
@@ -1693,16 +1743,69 @@ export const DBService = {
   async getSavedPostIds(userId: string): Promise<string[]> {
     const localSaved = readCache<string[]>('circle_saved_posts', userId, []);
     try {
-      const { data, error } = await supabase
-        .from('circle_saved_posts')
-        .select('post_id')
-        .eq('user_id', userId);
-      if (error || !data) return localSaved;
-      const merged = Array.from(new Set([...localSaved, ...data.map((r: any) => String(r.post_id))]));
+      const [res1, res2] = await Promise.all([
+        supabase.from('saved_circle_posts').select('post_id').eq('user_id', userId),
+        supabase.from('circle_saved_posts').select('post_id').eq('user_id', userId)
+      ]);
+      const ids1 = Array.isArray(res1.data) ? res1.data.map((r: any) => String(r.post_id)) : [];
+      const ids2 = Array.isArray(res2.data) ? res2.data.map((r: any) => String(r.post_id)) : [];
+      const merged = Array.from(new Set([...localSaved, ...ids1, ...ids2]));
       writeCache('circle_saved_posts', userId, merged);
       return merged;
     } catch {
       return localSaved;
+    }
+  },
+
+  async updateCircleMemberRole(
+    circleId: string,
+    targetUserId: string,
+    nextRole: 'co_owner' | 'member'
+  ): Promise<{ success: boolean; members?: (string | GroupMember)[]; error?: string }> {
+    try {
+      // 1. Update circle_members table if present
+      try {
+        await supabase
+          .from('circle_members')
+          .update({ role: nextRole })
+          .eq('circle_id', circleId)
+          .eq('user_id', targetUserId);
+      } catch {}
+
+      // 2. Update study_groups.members JSONB array
+      const group = await fetchGroupRow(circleId);
+      if (!group) {
+        return { success: false, error: 'Circle not found.' };
+      }
+
+      const currentMembers: (string | GroupMember)[] = Array.isArray(group.members) ? group.members : [];
+      const updatedMembers: (string | GroupMember)[] = currentMembers.map((m) => {
+        if (typeof m === 'string') {
+          if (m === targetUserId) {
+            return {
+              userId: m,
+              name: 'Member',
+              role: nextRole,
+              joinedAt: new Date().toISOString(),
+            };
+          }
+          return m;
+        }
+        if (m.userId === targetUserId) {
+          return { ...m, role: nextRole };
+        }
+        return m;
+      });
+
+      const { error } = await supabase
+        .from('study_groups')
+        .update({ members: updatedMembers, updated_at: new Date().toISOString() })
+        .eq('id', circleId);
+
+      if (error) throw error;
+      return { success: true, members: updatedMembers };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to update member role.' };
     }
   },
 
@@ -1899,27 +2002,20 @@ export const DBService = {
     fileType: string
   ): Promise<{ success: boolean; extractedText?: string; error?: string }> {
     try {
-      const { data: blob, error: dlError } = await supabase.storage.from(GROUP_MATERIALS_BUCKET).download(storagePath);
-      if (dlError || !blob) {
-        throw dlError || new Error('Could not download file from storage.');
-      }
-
-      const buffer = await blob.arrayBuffer();
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
-
       const token = await getAccessToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
+      // Pass storagePath directly to bypass Vercel 4.5MB payload limit
       const resp = await fetch('/api/files/extract', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ fileName, fileType, contentBase64: base64 }),
+        body: JSON.stringify({
+          fileName,
+          fileType,
+          storagePath,
+          bucket: GROUP_MATERIALS_BUCKET,
+        }),
       });
 
       if (!resp.ok) {
@@ -1932,10 +2028,10 @@ export const DBService = {
           .from('group_materials')
           .update({
             status: 'failed',
-            error_message: resJson.error || 'Text extraction unsuccessful.',
+            error_message: resJson.error || 'Uploaded, could not read text.',
           })
           .eq('id', materialId);
-        return { success: false, error: resJson.error || 'Extraction failed' };
+        return { success: false, error: resJson.error || 'Uploaded, could not read text.' };
       }
 
       await supabase
@@ -1955,7 +2051,7 @@ export const DBService = {
         .from('group_materials')
         .update({
           status: 'failed',
-          error_message: err?.message || 'Extraction retry failed.',
+          error_message: err?.message || 'Uploaded, could not read text.',
         })
         .eq('id', materialId);
       return { success: false, error: err?.message || 'Extraction retry failed.' };
@@ -2002,7 +2098,8 @@ export const DBService = {
     courseId: string,
     file: File,
     courseCode?: string,
-    courseTitle?: string
+    courseTitle?: string,
+    initialStatus: 'ready' | 'processing' | 'failed' = 'ready'
   ): Promise<UserFile> {
     if (!userId) throw new Error('User must be authenticated to upload files');
 
@@ -2033,21 +2130,32 @@ export const DBService = {
       throw new Error(uploadError.message || 'File upload failed.');
     }
 
-    const { data: row, error: insertError } = await supabase
+    const baseRowPayload: any = {
+      id: fileId,
+      user_id: userId,
+      course_id: courseId,
+      file_name: file.name,
+      file_type: file.type || 'application/octet-stream',
+      file_size: formatSize(file.size),
+      storage_path: storagePath,
+      course_code: courseCode || '',
+      course_title: courseTitle || '',
+      status: initialStatus,
+    };
+
+    let { data: row, error: insertError } = await supabase
       .from('user_files')
-      .insert({
-        id: fileId,
-        user_id: userId,
-        course_id: courseId,
-        file_name: file.name,
-        file_type: file.type || 'application/octet-stream',
-        file_size: formatSize(file.size),
-        storage_path: storagePath,
-        course_code: courseCode || '',
-        course_title: courseTitle || '',
-      })
+      .insert(baseRowPayload)
       .select('*')
       .single();
+
+    if (insertError && insertError.message?.includes('status')) {
+      const { status: _drop, ...withoutStatus } = baseRowPayload;
+      const retry = await supabase.from('user_files').insert(withoutStatus).select('*').single();
+      row = retry.data;
+      insertError = retry.error;
+    }
+
     if (insertError || !row) {
       await supabase.storage.from(usedBucket).remove([storagePath]).catch(() => {});
       console.error('Save user_files error:', insertError);
@@ -2055,11 +2163,66 @@ export const DBService = {
     }
 
     const urls = await signedUrlMap(usedBucket, [storagePath]);
-    const userFile = rowToUserFile(row, urls);
+    const userFile = rowToUserFile({ ...row, status: row.status || initialStatus }, urls);
 
     const cached = readCache<UserFile[]>('files', userId, []);
     writeCache('files', userId, [userFile, ...cached.filter((f) => f.id !== fileId)]);
     return userFile;
+  },
+
+  async updateUserFileStatus(fileId: string, userId: string, status: 'ready' | 'processing' | 'failed'): Promise<void> {
+    try {
+      await supabase.from('user_files').update({ status }).eq('id', fileId).eq('user_id', userId);
+      const cached = readCache<UserFile[]>('files', userId, []);
+      writeCache(
+        'files',
+        userId,
+        cached.map((f) => (f.id === fileId ? { ...f, status } : f))
+      );
+    } catch (err) {
+      console.warn('updateUserFileStatus warning:', err);
+    }
+  },
+
+  async retryUserFileExtraction(
+    file: UserFile
+  ): Promise<{ success: boolean; extractedText?: string; error?: string }> {
+    const uid = file.userId || getCurrentUserId() || '';
+    if (uid && file.id) {
+      await DBService.updateUserFileStatus(file.id, uid, 'processing');
+    }
+    try {
+      const token = await getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const resp = await fetch('/api/files/extract', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          fileName: file.fileName,
+          fileType: file.fileType,
+          storagePath: file.storagePath,
+          bucket: file.storagePath?.startsWith('groups/') ? GROUP_MATERIALS_BUCKET : USER_FILES_BUCKET,
+          fileId: file.id,
+        }),
+      });
+
+      const resJson = await resp.json().catch(() => ({}));
+      if (!resp.ok || !resJson.success || !resJson.extractedText) {
+        if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
+        return {
+          success: false,
+          error: resJson.error || 'Uploaded, could not read text. Please try again.',
+        };
+      }
+
+      if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'ready');
+      return { success: true, extractedText: resJson.extractedText };
+    } catch (err: any) {
+      if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
+      return { success: false, error: err?.message || 'Uploaded, could not read text.' };
+    }
   },
 
   async saveUserFileRecord(fileRecord: UserFile): Promise<{ error: any }> {

@@ -61,6 +61,17 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
   const [activeGroupId, setActiveGroupId] = useState<string | null>(groups[0]?.id || null);
   const activeGroup = groups.find(g => g.id === activeGroupId) || null;
   const isOwner = Boolean(activeGroup && activeGroup.ownerId === currentUserId);
+  const isCoOwner = Boolean(
+    activeGroup &&
+      !isOwner &&
+      Array.isArray(activeGroup.members) &&
+      activeGroup.members.some(
+        (m) => typeof m === 'object' && m !== null && m.userId === currentUserId && (m.role === 'co_owner' || m.role === 'admin')
+      )
+  );
+  const canManagePosts = isOwner || isCoOwner;
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [updatingRoleUserId, setUpdatingRoleUserId] = useState<string | null>(null);
 
   // Reddit Community Feed State
   const [posts, setPosts] = useState<GroupDiscussionPost[]>([]);
@@ -194,10 +205,10 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
     ? joinedCirclesCount < 10 
     : joinedCirclesCount < 2;
 
-  // Handle Post Creation (Owner Only)
+  // Handle Post Creation (Owner or Co-Owner)
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeGroupId || !isOwner) return;
+    if (!activeGroupId || !canManagePosts) return;
     if (!postTitle.trim()) {
       setPostError('Please provide a title for this post.');
       return;
@@ -270,13 +281,39 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
     addNotification('message', 'Post Removed', 'The post was removed from the circle.');
   };
 
-  // Handle Pin Toggle (Owner Only)
+  // Handle Pin Toggle (Owner or Co-Owner)
   const handleTogglePin = async (postId: string, currentPinStatus: boolean) => {
-    if (!isOwner) return;
+    if (!canManagePosts) return;
     const nextStatus = !currentPinStatus;
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, isPinned: nextStatus } : p));
     await DBService.togglePinPost(postId, nextStatus);
     addNotification('message', nextStatus ? 'Post Pinned' : 'Post Unpinned', 'Updated pinned status for the circle.');
+  };
+
+  // Handle Promote / Demote Co-Owner (Owner Only)
+  const handleToggleCoOwner = async (targetUserId: string, currentRole?: string) => {
+    if (!activeGroup || !isOwner || !targetUserId || targetUserId === activeGroup.ownerId) return;
+    const nextRole: 'co_owner' | 'member' = currentRole === 'co_owner' ? 'member' : 'co_owner';
+    setUpdatingRoleUserId(targetUserId);
+    try {
+      const res = await DBService.updateCircleMemberRole(activeGroup.id, targetUserId, nextRole);
+      if (res.success && res.members) {
+        setGroups(prev =>
+          prev.map(g => (g.id === activeGroup.id ? { ...g, members: res.members! } : g))
+        );
+        addNotification(
+          'message',
+          nextRole === 'co_owner' ? 'Promoted to Co-Owner' : 'Co-Owner Role Removed',
+          nextRole === 'co_owner'
+            ? 'Member can now publish threads, upload materials, pin posts, and moderate replies.'
+            : 'Member role updated to standard member.'
+        );
+      } else {
+        addNotification('message', 'Role Update Failed', res.error || 'Could not update member role.');
+      }
+    } finally {
+      setUpdatingRoleUserId(null);
+    }
   };
 
   // Handle Save / Bookmark Post (Thread or Material)
@@ -497,6 +534,17 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
             </button>
           )}
 
+          {activeGroup && (
+            <button
+              onClick={() => setShowMembersModal(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg min-h-[44px] transition-colors cursor-pointer"
+              title="View Circle Members & Co-Owners"
+            >
+              <Users size={14} />
+              <span>Members ({activeGroup.members?.length || 1})</span>
+            </button>
+          )}
+
           {/* Always allow searching & joining other circles, even if user owns a circle */}
           <button
             onClick={() => {
@@ -505,7 +553,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
               setShowJoinModal(true);
             }}
             className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg min-h-[44px] transition-colors cursor-pointer ${
-              isOwner
+              canManagePosts
                 ? 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
                 : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
             }`}
@@ -514,8 +562,8 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
             <span>Find / Join Circle</span>
           </button>
 
-          {/* Primary Action when Owner: + New Post */}
-          {isOwner && (
+          {/* Primary Action when Owner or Co-Owner: + New Post */}
+          {canManagePosts && (
             <button
               onClick={() => {
                 setPostError(null);
@@ -547,13 +595,19 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                 }`}
               >
                 <span>{group.name}</span>
-                {group.ownerId === currentUserId && (
+                {group.ownerId === currentUserId ? (
                   <span className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase ${
                     isSelected ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-600'
                   }`}>
                     Owner
                   </span>
-                )}
+                ) : group.members?.some(m => typeof m === 'object' && m !== null && m.userId === currentUserId && m.role === 'co_owner') ? (
+                  <span className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase ${
+                    isSelected ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-700'
+                  }`}>
+                    Co-Owner
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -619,10 +673,10 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
         </div>
       )}
 
-      {/* Notice for non-owners */}
-      {!isOwner && activeGroup && (
+      {/* Notice for non-owners / non-co-owners */}
+      {!canManagePosts && activeGroup && (
         <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between">
-          <span>Posting is managed by the circle owner. Members can participate in all discussion threads below.</span>
+          <span>Posting is managed by the circle owner and co-owners. Members can participate in all discussion threads below.</span>
           <span className="font-semibold text-slate-700 dark:text-slate-300">Member Mode</span>
         </div>
       )}
@@ -647,12 +701,12 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                   ? 'Tap the bookmark icon on any post to save it for quick reference.'
                   : searchQuery.trim()
                   ? 'Try searching with different keywords.'
-                  : isOwner
+                  : canManagePosts
                   ? 'Start the discussion by creating a question thread or sharing lecture materials.'
                   : 'The circle owner has not posted any threads yet. Check back soon!'}
               </p>
             </div>
-            {isOwner && !searchQuery.trim() && feedFilter !== 'saved' && (
+            {canManagePosts && !searchQuery.trim() && feedFilter !== 'saved' && (
               <button
                 onClick={() => setIsPostModalOpen(true)}
                 className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold min-h-[44px] transition-colors cursor-pointer shadow-xs"
@@ -666,7 +720,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
           filteredPosts.map(post => {
             const isSaved = savedPostIds.has(post.id);
             const isPostAuthor = post.authorId === currentUserId;
-            const canDelete = isPostAuthor || isOwner;
+            const canDelete = isPostAuthor || canManagePosts;
             const isExpanded = expandedPostIds.has(post.id);
             const replies = post.replies || [];
 
@@ -687,11 +741,15 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                       <span className="font-semibold text-slate-900 dark:text-white truncate">
                         {post.authorName}
                       </span>
-                      {activeGroup?.ownerId === post.authorId && (
+                      {activeGroup?.ownerId === post.authorId ? (
                         <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 text-[10px] font-bold uppercase border border-blue-100 dark:border-blue-900">
                           Owner
                         </span>
-                      )}
+                      ) : activeGroup?.members?.some(m => typeof m === 'object' && m !== null && m.userId === post.authorId && m.role === 'co_owner') ? (
+                        <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-bold uppercase border border-slate-200 dark:border-slate-700">
+                          Co-Owner
+                        </span>
+                      ) : null}
                       <span className="text-slate-400 text-[11px]">
                         {new Date(post.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                       </span>
@@ -704,9 +762,9 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                     </div>
                   </div>
 
-                  {/* Actions: Pin (owner), Save (all), Delete (author/owner) */}
+                  {/* Actions: Pin (owner/co-owner), Save (all), Delete (author/owner/co-owner) */}
                   <div className="flex items-center gap-1 shrink-0">
-                    {isOwner && (
+                    {canManagePosts && (
                       <button
                         onClick={() => handleTogglePin(post.id, Boolean(post.isPinned))}
                         className={`p-2 rounded-lg text-slate-400 hover:text-blue-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer ${
@@ -846,7 +904,7 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                     {replies.length > 0 && (
                       <div className="space-y-2.5 pl-3 border-l-2 border-slate-200 dark:border-slate-800">
                         {replies.map(reply => {
-                          const canDeleteReply = reply.authorId === currentUserId || isOwner;
+                          const canDeleteReply = reply.authorId === currentUserId || canManagePosts;
 
                           return (
                             <div key={reply.id} className="bg-slate-50 dark:bg-slate-800/40 rounded-lg p-3 space-y-1.5 text-xs">
@@ -855,11 +913,15 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                                   <span className="font-semibold text-slate-900 dark:text-white">
                                     {reply.authorName}
                                   </span>
-                                  {activeGroup?.ownerId === reply.authorId && (
+                                  {activeGroup?.ownerId === reply.authorId ? (
                                     <span className="text-[9px] font-bold text-blue-600 uppercase">
                                       Owner
                                     </span>
-                                  )}
+                                  ) : activeGroup?.members?.some(m => typeof m === 'object' && m !== null && m.userId === reply.authorId && m.role === 'co_owner') ? (
+                                    <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                                      Co-Owner
+                                    </span>
+                                  ) : null}
                                   <span className="text-[10px] text-slate-400">
                                     {new Date(reply.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                   </span>
@@ -1364,6 +1426,90 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
                   })
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: Circle Members & Co-Owner Management */}
+      {showMembersModal && activeGroup && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-xl space-y-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Circle Members ({activeGroup.members?.length || 1})
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {isOwner
+                    ? 'Manage circle members and appoint Co-Owners who can publish posts & materials.'
+                    : 'Members of this study circle.'}
+                </p>
+              </div>
+              <button onClick={() => setShowMembersModal(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto space-y-2 flex-1 pr-1">
+              {(activeGroup.members || []).map((rawMember, idx) => {
+                const member: GroupMember =
+                  typeof rawMember === 'string'
+                    ? { userId: rawMember, name: rawMember, role: rawMember === activeGroup.ownerId ? 'owner' : 'member', joinedAt: '' }
+                    : rawMember;
+                const isMemberOwner = member.userId === activeGroup.ownerId || member.role === 'owner' || member.role === 'admin';
+                const isMemberCoOwner = member.role === 'co_owner';
+
+                return (
+                  <div
+                    key={member.userId || idx}
+                    className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <UserAvatar name={member.name || 'Student'} size="xs" useInitials />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                            {member.name || 'Student'}
+                          </span>
+                          {isMemberOwner ? (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 text-[10px] font-bold uppercase border border-blue-100 dark:border-blue-900">
+                              Owner
+                            </span>
+                          ) : isMemberCoOwner ? (
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-bold uppercase border border-slate-200 dark:border-slate-700">
+                              Co-Owner
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              Member
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {isOwner && !isMemberOwner && (
+                      <button
+                        type="button"
+                        disabled={updatingRoleUserId === member.userId}
+                        onClick={() => handleToggleCoOwner(member.userId, member.role)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold min-h-[38px] transition-colors cursor-pointer disabled:opacity-50 ${
+                          isMemberCoOwner
+                            ? 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-red-50 hover:text-red-600'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
+                      >
+                        {updatingRoleUserId === member.userId
+                          ? 'Updating...'
+                          : isMemberCoOwner
+                          ? 'Remove Co-Owner'
+                          : 'Make Co-Owner'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

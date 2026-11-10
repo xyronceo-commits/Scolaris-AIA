@@ -15,6 +15,12 @@ import {
 } from './lib/documentProcessor';
 import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
 import { buildStudentContext } from './lib/studentContext';
+import {
+  AI_CREDIT_ALLOWANCES,
+  AI_CREDIT_COSTS,
+  getMonthlyCreditAllowance,
+  getNormalizedCreditTier
+} from './lib/aiCredits';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -505,6 +511,57 @@ export async function createExpressApp() {
     }
   };
 
+  /**
+   * Resiliently updates the user's profile tier/pro status, falling back gracefully
+   * if optional subscription columns have not yet been migrated on the live database.
+   */
+  async function activatePaidProfile(
+    client: SupabaseClient,
+    userId: string,
+    planTier: 'plus' | 'studio' | 'free',
+    isPro: boolean,
+    subscriptionStatus: string,
+    paymentStatus: string,
+    endDateIso: string | null,
+    paystackCustCode?: string | null
+  ) {
+    const fullUpdate: Record<string, any> = {
+      tier: planTier,
+      is_pro: isPro,
+      subscription_tier: planTier,
+      subscription_status: subscriptionStatus,
+      payment_status: paymentStatus,
+      subscription_end: endDateIso
+    };
+    if (paystackCustCode !== undefined) {
+      fullUpdate.paystack_customer_code = paystackCustCode;
+    }
+
+    let { error } = await client.from('profiles').update(fullUpdate).eq('id', userId);
+    if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
+      const withoutCustCode = {
+        tier: planTier,
+        is_pro: isPro,
+        subscription_tier: planTier,
+        subscription_status: subscriptionStatus,
+        payment_status: paymentStatus,
+        subscription_end: endDateIso
+      };
+      const retry1 = await client.from('profiles').update(withoutCustCode).eq('id', userId);
+      error = retry1.error;
+
+      if (error && (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache'))) {
+        const coreOnly = { tier: planTier, is_pro: isPro };
+        const retry2 = await client.from('profiles').update(coreOnly).eq('id', userId);
+        error = retry2.error;
+      }
+    }
+    if (error) {
+      console.error('[Subscription] Failed to update profile tier:', error.message);
+    }
+    return { error };
+  }
+
   // Initialize checkout transaction
   app.post('/api/subscription/initialize', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
@@ -521,92 +578,100 @@ export async function createExpressApp() {
         });
       }
 
-      const reference = `KQ_${normalizedPlan.toUpperCase()}_${uid.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-      const client = supabaseAdmin || supabaseAuthClient;
-
-      // Store pending transaction in payment_transactions ledger before calling gateway
-      if (client) {
-        await client.from('payment_transactions').insert({
-          user_id: uid,
-          reference,
-          plan_tier: normalizedPlan,
-          amount_kobo: targetPlan.amountKobo,
-          amount_naira: targetPlan.amountNaira,
-          currency: 'NGN',
-          status: 'pending',
-          customer_email: email,
-          paystack_plan_code: targetPlan.planCode,
-          metadata: { billingCycle, initiatedAt: new Date().toISOString() }
+      if (!supabaseAdmin) {
+        console.error('[Subscription Initialize] SUPABASE_SERVICE_ROLE_KEY is not configured; cannot write to payment_transactions ledger.');
+        return res.status(503).json({
+          success: false,
+          error: 'Payment ledger service is not configured on the server (missing SUPABASE_SERVICE_ROLE_KEY).'
         });
       }
 
       const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
-      if (paystackKey) {
-        const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${paystackKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            email,
-            amount: targetPlan.amountKobo,
-            plan: targetPlan.planCode,
-            reference,
-            currency: 'NGN',
-            callback_url: `${req.headers.origin || 'http://localhost:3000'}/#/settings`,
-            metadata: {
-              userId: uid,
-              planTier: normalizedPlan,
-              planCode: targetPlan.planCode,
-              billingCycle
-            }
-          })
-        });
-
-        const paystackData = await paystackRes.json();
-        if (!paystackRes.ok || !paystackData.status) {
-          if (client) {
-            await client.from('payment_transactions').update({
-              status: 'failed',
-              gateway_response: paystackData.message || 'Initialization failed'
-            }).eq('reference', reference);
-          }
-          return res.status(400).json({
-            success: false,
-            error: paystackData.message || 'Failed to initialize Paystack checkout'
-          });
-        }
-
-        if (client) {
-          await client.from('payment_transactions').update({
-            paystack_reference: paystackData.data?.reference || reference,
-            authorization_url: paystackData.data?.authorization_url,
-            access_code: paystackData.data?.access_code
-          }).eq('reference', reference);
-        }
-
-        return res.json({
-          success: true,
-          authorizationUrl: paystackData.data.authorization_url,
-          accessCode: paystackData.data.access_code,
-          reference: paystackData.data.reference || reference,
-          plan: normalizedPlan,
-          amount: targetPlan.amountNaira,
-          currency: 'NGN'
+      if (!paystackKey) {
+        console.error('[Subscription Initialize] PAYSTACK_SECRET_KEY is not configured on the server.');
+        return res.status(503).json({
+          success: false,
+          error: 'Payment gateway is not configured on the server (missing PAYSTACK_SECRET_KEY).'
         });
       }
 
-      // If no PAYSTACK_SECRET_KEY is configured (e.g. testing mode)
+      const reference = `KQ_${normalizedPlan.toUpperCase()}_${uid.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+      // Store pending transaction in payment_transactions ledger BEFORE calling gateway. Fail loudly if insert fails.
+      const { error: ledgerInsertErr } = await supabaseAdmin.from('payment_transactions').insert({
+        user_id: uid,
+        reference,
+        plan_tier: normalizedPlan,
+        amount_kobo: targetPlan.amountKobo,
+        amount_naira: targetPlan.amountNaira,
+        currency: 'NGN',
+        status: 'pending',
+        customer_email: email,
+        paystack_plan_code: targetPlan.planCode,
+        metadata: { billingCycle, initiatedAt: new Date().toISOString() }
+      });
+
+      if (ledgerInsertErr) {
+        console.error('[Subscription Initialize] Failed to insert payment_transactions row:', ledgerInsertErr);
+        return res.status(500).json({
+          success: false,
+          error: `Could not create payment ledger record: ${ledgerInsertErr.message}`
+        });
+      }
+
+      const origin = req.headers.origin || `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+      const callbackUrl = `${origin.replace(/\/$/, '')}/?payment=return`;
+
+      const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${paystackKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email,
+          amount: targetPlan.amountKobo,
+          plan: targetPlan.planCode,
+          reference,
+          currency: 'NGN',
+          callback_url: callbackUrl,
+          metadata: {
+            userId: uid,
+            planTier: normalizedPlan,
+            planCode: targetPlan.planCode,
+            billingCycle
+          }
+        })
+      });
+
+      const paystackData = await paystackRes.json();
+      if (!paystackRes.ok || !paystackData.status) {
+        await supabaseAdmin.from('payment_transactions').update({
+          status: 'failed',
+          gateway_response: paystackData.message || 'Initialization failed'
+        }).eq('reference', reference);
+
+        return res.status(400).json({
+          success: false,
+          error: paystackData.message || 'Failed to initialize Paystack checkout'
+        });
+      }
+
+      const returnedRef = paystackData.data?.reference || reference;
+      await supabaseAdmin.from('payment_transactions').update({
+        paystack_reference: returnedRef,
+        authorization_url: paystackData.data?.authorization_url,
+        access_code: paystackData.data?.access_code
+      }).eq('reference', reference);
+
       return res.json({
         success: true,
-        reference,
+        authorizationUrl: paystackData.data.authorization_url,
+        accessCode: paystackData.data.access_code,
+        reference: returnedRef,
         plan: normalizedPlan,
         amount: targetPlan.amountNaira,
-        currency: 'NGN',
-        testMode: true,
-        authorizationUrl: null,
-        message: 'Initialized checkout reference for verification'
+        currency: 'NGN'
       });
     } catch (err: any) {
       console.error('Initialize subscription error:', err);
@@ -614,78 +679,87 @@ export async function createExpressApp() {
     }
   });
 
-  // Verify transaction status securely on the backend
+  // Verify transaction status securely on the backend (also serves as manual receipt recovery endpoint)
   app.post('/api/subscription/verify', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { reference } = req.body;
       let cleanRef = (typeof reference === 'string' ? reference.trim() : '');
       const uid = req.user!.uid;
-      const userEmail = (req.body?.email || req.user!.email || '').toLowerCase().trim();
+      const userEmail = (req.user?.email || req.body?.email || '').toLowerCase().trim();
       const client = supabaseAdmin || supabaseAuthClient;
 
-      // 1. Idempotency & existing active check in database
-      if (client) {
-        if (cleanRef) {
-          const { data: existingSub } = await client
-            .from('subscriptions')
-            .select('*')
-            .eq('payment_reference', cleanRef)
-            .maybeSingle();
+      if (!supabaseAdmin) {
+        console.warn('[Subscription Verify] SUPABASE_SERVICE_ROLE_KEY is missing; ledger/subscription writes may fail under RLS.');
+      }
 
-          if (existingSub && existingSub.payment_status === 'paid' && (existingSub.status === 'active' || existingSub.status === 'manual_active')) {
-            if (existingSub.user_id !== uid) {
-              return res.status(403).json({ success: false, error: 'Access denied: Payment reference was credited to a different account.' });
-            }
-            return res.json({
-              success: true,
-              tier: existingSub.plan_tier,
-              isPro: true,
-              subscriptionStatus: 'active',
-              message: 'Subscription is already verified and active.',
-              subscription: existingSub,
-              alreadyProcessed: true
-            });
-          }
-        }
-
-        // Check if user already has an active subscription recorded (e.g. from a webhook)
-        const { data: userActiveSub } = await client
+      // 1. Idempotency check if this exact payment_reference was already processed
+      if (client && cleanRef) {
+        const { data: existingSub } = await client
           .from('subscriptions')
           .select('*')
-          .eq('user_id', uid)
-          .eq('status', 'active')
-          .order('current_period_end', { ascending: false })
-          .limit(1)
+          .eq('payment_reference', cleanRef)
           .maybeSingle();
 
-        if (userActiveSub && userActiveSub.payment_status === 'paid') {
+        if (existingSub && existingSub.payment_status === 'paid' && (existingSub.status === 'active' || existingSub.status === 'manual_active')) {
+          if (existingSub.user_id !== uid) {
+            return res.status(403).json({ success: false, error: 'Access denied: Payment reference belongs to a different account.' });
+          }
+          await activatePaidProfile(
+            client,
+            uid,
+            existingSub.plan_tier === 'studio' ? 'studio' : 'plus',
+            true,
+            'active',
+            'paid',
+            existingSub.current_period_end || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            existingSub.paystack_customer_code
+          );
           return res.json({
             success: true,
-            tier: userActiveSub.plan_tier,
+            tier: existingSub.plan_tier,
             isPro: true,
             subscriptionStatus: 'active',
-            currentPeriodEnd: userActiveSub.current_period_end,
-            message: 'Your account subscription is verified and active.',
-            subscription: userActiveSub,
+            currentPeriodEnd: existingSub.current_period_end,
+            message: 'Subscription is verified and active.',
+            subscription: existingSub,
             alreadyProcessed: true
           });
         }
       }
 
-      // Load pending transaction record if exists
+      // Load pending transaction record if exists in ledger
       let localTx: any = null;
       if (client && cleanRef) {
         const { data } = await client
           .from('payment_transactions')
           .select('*')
-          .eq('reference', cleanRef)
+          .or(`reference.eq.${cleanRef},paystack_reference.eq.${cleanRef}`)
+          .limit(1)
           .maybeSingle();
         localTx = data;
+
+        // Enforce ledger ownership: a user cannot verify another user's ledger reference
+        if (localTx && localTx.user_id && localTx.user_id !== uid) {
+          return res.status(403).json({
+            success: false,
+            error: 'Access denied: This payment reference was initiated by a different user.'
+          });
+        }
       }
 
       const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+      if (!paystackKey) {
+        return res.status(503).json({
+          success: false,
+          error: 'Payment verification is unavailable: PAYSTACK_SECRET_KEY is not configured on the server.'
+        });
+      }
+
       let isVerified = false;
-      let planTier: 'plus' | 'studio' = localTx?.plan_tier || ((cleanRef.includes('_STUDIO_') || cleanRef.includes('_studio_') || req.body?.plan === 'studio' || req.body?.plan === 'premium') ? 'studio' : 'plus');
+      const requestedPlan = req.body?.plan === 'studio' || req.body?.plan === 'premium' ? 'studio' : req.body?.plan === 'plus' ? 'plus' : undefined;
+      let planTier: 'plus' | 'studio' =
+        localTx?.plan_tier ||
+        ((cleanRef.toUpperCase().includes('_STUDIO_')) ? 'studio' : (cleanRef.toUpperCase().includes('_PLUS_') ? 'plus' : (requestedPlan || 'plus')));
       let targetPlanConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
       let amountPaid = targetPlanConfig.amountNaira;
       let paymentStatus: 'paid' | 'failed' | 'abandoned' | 'pending' | 'cancelled' = 'paid';
@@ -694,175 +768,182 @@ export async function createExpressApp() {
       let paystackCustCode: string | null = null;
       let paystackAuthCode: string | null = null;
       let paystackPlanCode: string | null = targetPlanConfig.planCode;
+      let paidAtIso: string | null = null;
 
-      if (paystackKey) {
-        let tx: any = null;
+      let tx: any = null;
 
-        // Try direct reference verification if reference was supplied
-        if (cleanRef) {
-          try {
-            const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(cleanRef)}`, {
-              headers: {
-                Authorization: `Bearer ${paystackKey}`,
-                'Content-Type': 'application/json'
-              }
-            });
-            const verifyData = await verifyRes.json();
-            if (verifyRes.ok && verifyData.status && verifyData.data) {
-              tx = verifyData.data;
+      // Try direct reference verification with Paystack if reference was supplied
+      if (cleanRef) {
+        try {
+          const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(cleanRef)}`, {
+            headers: {
+              Authorization: `Bearer ${paystackKey}`,
+              'Content-Type': 'application/json'
             }
-          } catch (vErr) {
-            console.warn('Paystack direct verify lookup warning:', vErr);
+          });
+          const verifyData = await verifyRes.json();
+          if (verifyRes.ok && verifyData.status && verifyData.data) {
+            tx = verifyData.data;
+          } else if (verifyData?.message) {
+            gatewayMessage = verifyData.message;
           }
+        } catch (vErr) {
+          console.warn('Paystack direct verify lookup warning:', vErr);
         }
+      }
 
-        // Fallback: If not found by reference (or reference was blank), query Paystack for customer transactions by account email
-        if (!tx && userEmail) {
-          try {
-            const custRes = await fetch(`https://api.paystack.co/transaction?customer=${encodeURIComponent(userEmail)}&perPage=5`, {
-              headers: {
-                Authorization: `Bearer ${paystackKey}`,
-                'Content-Type': 'application/json'
-              }
-            });
-            const custData = await custRes.json();
-            if (custRes.ok && custData.status && Array.isArray(custData.data)) {
-              // Find the latest successful transaction for this customer
-              const successfulTx = custData.data.find((t: any) => t.status === 'success');
-              if (successfulTx) {
-                tx = successfulTx;
-                cleanRef = tx.reference || cleanRef;
-              }
+      // Recovery fallback: If no reference was found (or user paid via direct Paystack shop link without reference),
+      // look up recent Paystack transactions for this authenticated user's email
+      if (!tx && !cleanRef && userEmail) {
+        try {
+          const custRes = await fetch(`https://api.paystack.co/transaction?customer=${encodeURIComponent(userEmail)}&perPage=10`, {
+            headers: {
+              Authorization: `Bearer ${paystackKey}`,
+              'Content-Type': 'application/json'
             }
-          } catch (cErr) {
-            console.warn('Paystack customer transaction search warning:', cErr);
+          });
+          const custData = await custRes.json();
+          if (custRes.ok && custData.status && Array.isArray(custData.data)) {
+            const matchingTx = custData.data.find((t: any) =>
+              t.status === 'success' &&
+              t.currency === 'NGN' &&
+              t.amount >= PAYSTACK_PLANS.plus.amountKobo &&
+              t.customer?.email?.toLowerCase().trim() === userEmail
+            );
+            if (matchingTx) {
+              tx = matchingTx;
+              cleanRef = matchingTx.reference || cleanRef;
+            }
           }
+        } catch (cErr) {
+          console.warn('Paystack customer transaction search warning:', cErr);
         }
+      }
 
-        if (!tx) {
-          if (!cleanRef) {
-            return res.status(400).json({
-              success: false,
-              error: 'A valid payment reference is required. Please paste the reference from your Paystack receipt.'
-            });
-          }
+      if (!tx) {
+        if (!cleanRef) {
           return res.status(400).json({
             success: false,
-            error: `Payment reference '${cleanRef}' could not be verified on Paystack. If you recently paid, please verify the reference or retry in a few moments.`
+            error: 'No verified payment was found. Please paste the reference from your Paystack receipt.'
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          error: `Payment reference '${cleanRef}' could not be verified on Paystack${gatewayMessage ? ` (${gatewayMessage})` : ''}. Check the reference on your receipt and try again.`
+        });
+      }
+
+      const resolvedRef = (localTx?.reference || tx.reference || cleanRef).trim();
+      gatewayMessage = tx.gateway_response || gatewayMessage || tx.status;
+
+      if (tx.status === 'success') {
+        // STRICT SECURITY CHECKS:
+        // 1. Currency must be NGN
+        if (tx.currency !== 'NGN') {
+          return res.status(400).json({ success: false, error: 'Invalid currency: Only NGN transactions are accepted.' });
+        }
+
+        // 2. Customer ownership verification (cross-user replay protection)
+        const customerEmail = tx.customer?.email?.toLowerCase().trim();
+        const metaUserId = tx.metadata?.userId;
+        const emailMatches = Boolean(customerEmail && userEmail && customerEmail === userEmail);
+        const userIdMatches = Boolean(metaUserId && metaUserId === uid) || Boolean(localTx && localTx.user_id === uid);
+        if (!emailMatches && !userIdMatches) {
+          return res.status(403).json({
+            success: false,
+            error: 'Payment verification failed: This transaction receipt belongs to a different email address.'
           });
         }
 
-        if (tx.status === 'success') {
-          // STRICT SECURITY CHECKS:
-          // 1. Currency must be NGN
-          if (tx.currency !== 'NGN') {
-            return res.status(400).json({ success: false, error: 'Invalid currency: Only NGN transactions are accepted.' });
-          }
-
-          // 2. Customer ownership verification (cross-user replay protection)
-          const customerEmail = tx.customer?.email?.toLowerCase().trim();
-          const metaUserId = tx.metadata?.userId;
-          if (customerEmail && userEmail && customerEmail !== userEmail && metaUserId && metaUserId !== uid) {
-            return res.status(403).json({ success: false, error: 'Payment verification failed: Transaction customer does not match authenticated user.' });
-          }
-
-          // 3. Amount verification: reject underpaid transactions
-          const expectedKobo = targetPlanConfig.amountKobo;
-          if (tx.amount < expectedKobo) {
-            return res.status(400).json({
-              success: false,
-              error: `Underpaid transaction: Received ₦${(tx.amount / 100).toLocaleString()}, expected ₦${targetPlanConfig.amountNaira.toLocaleString()}. Paid access was not granted.`
-            });
-          }
-
-          isVerified = true;
-          paymentStatus = 'paid';
-          planTier = tx.amount >= PAYSTACK_PLANS.studio.amountKobo ? 'studio' : 'plus';
-          targetPlanConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
-          amountPaid = tx.amount / 100;
-          paystackSubCode = tx.subscription_code || tx.customer?.subscription_code || null;
-          paystackCustCode = tx.customer?.customer_code || null;
-          paystackAuthCode = tx.authorization?.authorization_code || null;
-          paystackPlanCode = tx.plan || targetPlanConfig.planCode;
-        } else if (tx.status === 'abandoned' || tx.status === 'failed' || tx.status === 'reversed') {
-          paymentStatus = tx.status === 'abandoned' ? 'abandoned' : 'failed';
-          isVerified = false;
+        // 3. Determine target plan and verify exact minimum amount in kobo
+        // If localTx exists, enforce localTx.plan_tier; otherwise infer from metadata or amount
+        if (localTx?.plan_tier === 'studio' || tx.metadata?.planTier === 'studio') {
+          planTier = 'studio';
+        } else if (localTx?.plan_tier === 'plus' || tx.metadata?.planTier === 'plus') {
+          planTier = 'plus';
         } else {
-          paymentStatus = 'pending';
-          isVerified = false;
+          planTier = tx.amount >= PAYSTACK_PLANS.studio.amountKobo ? 'studio' : 'plus';
         }
-      } else {
-        // Non-production test environment simulation (only when PAYSTACK_SECRET_KEY is not set)
-        if (process.env.NODE_ENV === 'production') {
-          return res.status(503).json({ success: false, error: 'Payment gateway configuration is missing in production.' });
+        targetPlanConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
+
+        const expectedKobo = targetPlanConfig.amountKobo;
+        if (tx.amount < expectedKobo) {
+          return res.status(400).json({
+            success: false,
+            error: `Underpaid transaction: Received ₦${(tx.amount / 100).toLocaleString()}, expected at least ₦${targetPlanConfig.amountNaira.toLocaleString()} for ${targetPlanConfig.name}.`
+          });
         }
+
         isVerified = true;
         paymentStatus = 'paid';
-        amountPaid = targetPlanConfig.amountNaira;
-        gatewayMessage = 'Test environment payment simulation';
+        amountPaid = tx.amount / 100;
+        paidAtIso = tx.paid_at ? new Date(tx.paid_at).toISOString() : new Date().toISOString();
+        paystackSubCode = tx.subscription_code || tx.customer?.subscription_code || null;
+        paystackCustCode = tx.customer?.customer_code || null;
+        paystackAuthCode = tx.authorization?.authorization_code || null;
+        paystackPlanCode = (typeof tx.plan === 'string' ? tx.plan : tx.plan?.plan_code) || targetPlanConfig.planCode;
+      } else if (tx.status === 'abandoned' || tx.status === 'failed' || tx.status === 'reversed') {
+        paymentStatus = tx.status === 'abandoned' ? 'abandoned' : 'failed';
+        isVerified = false;
+      } else {
+        paymentStatus = 'pending';
+        isVerified = false;
       }
 
-      // If payment failed, abandoned, or pending: RECORD failure without granting paid access
+      // If payment failed, abandoned, or pending: record status without granting paid access
       if (!isVerified || paymentStatus !== 'paid') {
-        if (client) {
+        if (client && resolvedRef) {
           await client.from('payment_transactions').update({
             status: paymentStatus === 'pending' ? 'pending' : 'failed',
+            paystack_reference: tx.reference || resolvedRef,
             gateway_response: gatewayMessage
-          }).eq('reference', reference.trim());
-
-          await client.from('subscriptions').upsert({
-            user_id: uid,
-            plan_tier: planTier,
-            billing_cycle: 'monthly',
-            status: paymentStatus === 'pending' ? 'pending' : 'failed',
-            payment_provider: paystackKey ? 'paystack' : 'test',
-            payment_reference: reference.trim(),
-            payment_status: paymentStatus,
-            amount_paid: amountPaid,
-            currency: 'NGN',
-            current_period_start: new Date().toISOString(),
-            metadata: { gatewayMessage, verifiedAt: new Date().toISOString() }
-          }, { onConflict: 'payment_reference' });
+          }).eq('reference', resolvedRef);
         }
 
         return res.status(400).json({
           success: false,
           status: paymentStatus,
-          error: `Payment verification unsuccessful: Status is '${paymentStatus}'. Paid access was not granted.`,
+          error: paymentStatus === 'pending'
+            ? 'Your payment is still being processed by Paystack. Please wait a moment and try again.'
+            : `Payment verification unsuccessful: Paystack reported status '${tx.status || paymentStatus}'. Paid access was not granted.`,
           message: gatewayMessage
         });
       }
 
       // On successful verified payment:
-      const startDate = new Date();
+      const startDate = paidAtIso ? new Date(paidAtIso) : new Date();
       const endDate = new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
       if (client) {
-        // 1. Update payment_transactions ledger
-        await client.from('payment_transactions').upsert({
+        // 1. Upsert payment_transactions ledger (handles both initialized rows and manual receipt recovery)
+        const { error: txUpsertErr } = await client.from('payment_transactions').upsert({
           user_id: uid,
-          reference: reference.trim(),
-          paystack_reference: reference.trim(),
+          reference: resolvedRef,
+          paystack_reference: tx.reference || resolvedRef,
           plan_tier: planTier,
-          amount_kobo: amountPaid * 100,
+          amount_kobo: Math.round(amountPaid * 100),
           amount_naira: amountPaid,
           currency: 'NGN',
           status: 'success',
-          customer_email: userEmail || 'user@korsiq.app',
+          customer_email: userEmail || tx.customer?.email || 'user@korsiq.app',
           paystack_plan_code: paystackPlanCode,
           paid_at: startDate.toISOString(),
           gateway_response: gatewayMessage || 'Successful',
-          metadata: { verifiedAt: new Date().toISOString() }
+          metadata: { verifiedAt: new Date().toISOString(), recovered: !localTx }
         }, { onConflict: 'reference' });
 
-        // 2. Insert record into subscriptions table
-        await client.from('subscriptions').upsert({
+        if (txUpsertErr) {
+          console.error('[Subscription Verify] payment_transactions upsert warning:', txUpsertErr.message);
+        }
+
+        // 2. Upsert record into subscriptions table
+        const { error: subUpsertErr } = await client.from('subscriptions').upsert({
           user_id: uid,
           plan_tier: planTier,
           billing_cycle: 'monthly',
           status: 'active',
-          payment_provider: paystackKey ? 'paystack' : 'test',
-          payment_reference: reference.trim(),
+          payment_provider: 'paystack',
+          payment_reference: resolvedRef,
           payment_status: 'paid',
           amount_paid: amountPaid,
           currency: 'NGN',
@@ -875,25 +956,44 @@ export async function createExpressApp() {
           metadata: { gatewayMessage, verifiedAt: new Date().toISOString() }
         }, { onConflict: 'payment_reference' });
 
+        if (subUpsertErr) {
+          console.warn('[Subscription Verify] subscriptions upsert warning (falling back to core columns):', subUpsertErr.message);
+          await client.from('subscriptions').upsert({
+            user_id: uid,
+            plan_tier: planTier,
+            billing_cycle: 'monthly',
+            status: 'active',
+            payment_provider: 'paystack',
+            payment_reference: resolvedRef,
+            payment_status: 'paid',
+            amount_paid: amountPaid,
+            currency: 'NGN',
+            current_period_start: startDate.toISOString(),
+            current_period_end: endDate.toISOString()
+          }, { onConflict: 'payment_reference' });
+        }
+
         // 3. Update user profile to paid tier with Pro enabled
-        await client.from('profiles').update({
-          tier: planTier,
-          is_pro: true,
-          subscription_tier: planTier,
-          subscription_status: 'active',
-          payment_status: 'paid',
-          subscription_end: endDate.toISOString(),
-          paystack_customer_code: paystackCustCode
-        }).eq('id', uid);
+        await activatePaidProfile(
+          client,
+          uid,
+          planTier,
+          true,
+          'active',
+          'paid',
+          endDate.toISOString(),
+          paystackCustCode
+        );
       }
 
       return res.json({
         success: true,
+        reference: resolvedRef,
         tier: planTier,
         isPro: true,
         subscriptionStatus: 'active',
         currentPeriodEnd: endDate.toISOString(),
-        message: `Payment verified! You are now subscribed to the ${planTier === 'studio' ? 'Academic Studio' : 'Plus'} plan.`
+        message: `Payment verified! Your account is now active on ${planTier === 'studio' ? 'KorsIQ Premium' : 'KorsIQ Plus'}.`
       });
     } catch (err: any) {
       console.error('Verify subscription error:', err);
@@ -988,6 +1088,12 @@ export async function createExpressApp() {
             payload: event,
             status: 'received'
           });
+        } else {
+          // Existing event had status 'failed' or 'received' — mark as 'received' for retry
+          await client.from('webhook_events').update({
+            status: 'received',
+            error_message: null
+          }).eq('event_id', eventId);
         }
       }
 
@@ -996,13 +1102,24 @@ export async function createExpressApp() {
         const tx = event.data;
         const ref = tx.reference;
         const uid = tx.metadata?.userId;
-        const planTier = tx.metadata?.planTier || (tx.amount >= 1500000 ? 'studio' : 'plus');
+        const planTier: 'plus' | 'studio' = tx.metadata?.planTier === 'studio' || tx.amount >= PAYSTACK_PLANS.studio.amountKobo ? 'studio' : 'plus';
         const planConfig = planTier === 'studio' ? PAYSTACK_PLANS.studio : PAYSTACK_PLANS.plus;
 
-        if (client && (uid || tx.customer?.email)) {
+        // Verify currency and minimum expected amount before granting access
+        const isCurrencyValid = !tx.currency || tx.currency === 'NGN';
+        const isAmountValid = typeof tx.amount === 'number' && tx.amount >= planConfig.amountKobo;
+
+        if (!isCurrencyValid || !isAmountValid) {
+          console.error('[Webhook charge.success] Rejected underpaid or non-NGN charge:', {
+            reference: ref,
+            currency: tx.currency,
+            amountKobo: tx.amount,
+            expectedKobo: planConfig.amountKobo
+          });
+        } else if (client && (uid || tx.customer?.email)) {
           let resolvedUid = uid;
           if (!resolvedUid && tx.customer?.email) {
-            const { data: userProfile } = await client.from('profiles').select('id').eq('email', tx.customer.email.toLowerCase().trim()).maybeSingle();
+            const { data: userProfile } = await client.from('profiles').select('id').ilike('email', tx.customer.email.toLowerCase().trim()).maybeSingle();
             resolvedUid = userProfile?.id;
           }
 
@@ -1021,7 +1138,7 @@ export async function createExpressApp() {
               currency: tx.currency || 'NGN',
               status: 'success',
               customer_email: tx.customer?.email || 'student@korsiq.app',
-              paystack_plan_code: tx.plan || planConfig.planCode,
+              paystack_plan_code: (typeof tx.plan === 'string' ? tx.plan : tx.plan?.plan_code) || planConfig.planCode,
               paid_at: startDate.toISOString(),
               gateway_response: tx.gateway_response || 'charge.success',
               metadata: { event: event.event, receivedAt: new Date().toISOString() }
@@ -1042,21 +1159,22 @@ export async function createExpressApp() {
               current_period_end: endDate.toISOString(),
               paystack_subscription_code: tx.subscription_code || tx.customer?.subscription_code || null,
               paystack_customer_code: tx.customer?.customer_code || null,
-              paystack_plan_code: tx.plan || planConfig.planCode,
+              paystack_plan_code: (typeof tx.plan === 'string' ? tx.plan : tx.plan?.plan_code) || planConfig.planCode,
               paystack_authorization_code: tx.authorization?.authorization_code || null,
               metadata: { event: event.event, receivedAt: new Date().toISOString() }
             }, { onConflict: 'payment_reference' });
 
-            // Update user profile
-            await client.from('profiles').update({
-              tier: planTier,
-              is_pro: true,
-              subscription_tier: planTier,
-              subscription_status: 'active',
-              payment_status: 'paid',
-              subscription_end: endDate.toISOString(),
-              paystack_customer_code: tx.customer?.customer_code || null
-            }).eq('id', resolvedUid);
+            // Update user profile resiliently
+            await activatePaidProfile(
+              client,
+              resolvedUid,
+              planTier,
+              true,
+              'active',
+              'paid',
+              endDate.toISOString(),
+              tx.customer?.customer_code || null
+            );
           }
         }
       }
@@ -2069,89 +2187,259 @@ Dr. Taylor: Exactly. Consistently testing yourself on key formulas and definitio
   });
 
   // =============================================================
-  // AI CREDITS USAGE METERING & PERIOD SUMMARY ENDPOINT
+  // AI CREDITS LEDGER, ATOMIC SPEND/REFUND & BALANCE ENDPOINT
   // =============================================================
-  async function recordAiUsage(userId: string | undefined, feature: string, credits = 1): Promise<void> {
-    if (!supabaseAdmin || !userId) return;
-    try {
-      await supabaseAdmin.from('ai_usage').insert({
-        user_id: userId,
-        credits: Math.max(1, Math.round(credits)),
-        feature
-      });
-    } catch (err: any) {
-      console.warn('[AI Metering] Failed to record ai_usage:', err?.message || err);
-    }
-  }
+  // Rule: Chatbot, Academic Adviser, Study Planner, and Timetable are NOT metered.
+  // Credits apply ONLY to Study Hub generation tools and Academic Studio tools.
 
-  app.get('/api/usage/ai-credits', requireAuth, async (req, res) => {
-    const userId = (req as any).user?.id || (req as any).user?.uid;
+  async function getAiCreditBalanceForUser(userId: string | undefined) {
     const now = new Date();
     const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
     const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString();
 
     if (!supabaseAdmin || !userId) {
-      return res.json({
+      return {
+        balance: AI_CREDIT_ALLOWANCES.free,
         used: 0,
-        allowance: 0,
-        tier: 'free',
+        allowance: AI_CREDIT_ALLOWANCES.free,
+        tier: 'free' as const,
         periodStart,
-        periodEnd
-      });
+        periodEnd,
+        costs: AI_CREDIT_COSTS
+      };
     }
 
+    // 1. Try the atomic Postgres RPC first
     try {
-      const [profileRes, usageRes] = await Promise.all([
-        supabaseAdmin
-          .from('profiles')
-          .select('tier, subscription_tier')
-          .eq('id', userId)
-          .maybeSingle(),
-        supabaseAdmin
-          .from('ai_usage')
-          .select('credits')
-          .eq('user_id', userId)
-          .gte('created_at', periodStart)
-      ]);
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('get_ai_credit_balance', {
+        p_user_id: userId
+      });
+      if (!rpcErr && rpcData && typeof rpcData === 'object') {
+        return {
+          balance: Number(rpcData.balance ?? AI_CREDIT_ALLOWANCES.free),
+          used: Number(rpcData.used ?? 0),
+          allowance: Number(rpcData.allowance ?? AI_CREDIT_ALLOWANCES.free),
+          tier: getNormalizedCreditTier(rpcData.tier),
+          periodStart: rpcData.period_start || periodStart,
+          periodEnd: rpcData.period_end || periodEnd,
+          costs: AI_CREDIT_COSTS
+        };
+      }
+    } catch {}
 
-      const rawTier = String(
+    // 2. Fallback if the RPC migration has not been applied yet on the live DB
+    try {
+      const profileRes = await supabaseAdmin
+        .from('profiles')
+        .select('tier, subscription_tier')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const rawTier =
         profileRes.data?.subscription_tier ||
         profileRes.data?.tier ||
-        (req as any).user?.tier ||
-        'free'
-      ).toLowerCase();
+        'free';
+      const normalizedTier = getNormalizedCreditTier(rawTier);
+      const allowance = getMonthlyCreditAllowance(normalizedTier);
 
-      const normalizedTier =
-        rawTier === 'studio' || rawTier === 'sage'
-          ? 'studio'
-          : rawTier === 'plus' || rawTier === 'scholar'
-          ? 'plus'
-          : 'free';
+      // Try reading ai_credit_ledger first; fall back to ai_usage if ai_credit_ledger is not yet created
+      const ledgerRes = await supabaseAdmin
+        .from('ai_credit_ledger')
+        .select('delta')
+        .eq('user_id', userId)
+        .gte('created_at', periodStart);
 
-      const allowance =
-        normalizedTier === 'studio' ? 1000 : normalizedTier === 'plus' ? 250 : 0;
+      if (!ledgerRes.error && Array.isArray(ledgerRes.data)) {
+        const netDelta = ledgerRes.data.reduce((sum: number, r: any) => sum + (Number(r.delta) || 0), 0);
+        const balance = Math.max(0, allowance + netDelta);
+        const used = Math.max(0, -netDelta);
+        return {
+          balance,
+          used,
+          allowance,
+          tier: normalizedTier,
+          periodStart,
+          periodEnd,
+          costs: AI_CREDIT_COSTS
+        };
+      }
+
+      const usageRes = await supabaseAdmin
+        .from('ai_usage')
+        .select('credits')
+        .eq('user_id', userId)
+        .gte('created_at', periodStart);
 
       const used = Array.isArray(usageRes.data)
         ? usageRes.data.reduce((sum: number, r: any) => sum + (Number(r.credits) || 1), 0)
         : 0;
+      const balance = Math.max(0, allowance - used);
 
-      return res.json({
+      return {
+        balance,
         used,
         allowance,
         tier: normalizedTier,
         periodStart,
-        periodEnd
-      });
+        periodEnd,
+        costs: AI_CREDIT_COSTS
+      };
     } catch (err: any) {
-      console.warn('[AI Metering] /api/usage/ai-credits fallback:', err?.message || err);
-      return res.json({
+      console.warn('[AI Credits] Balance lookup fallback warning:', err?.message || err);
+      return {
+        balance: AI_CREDIT_ALLOWANCES.free,
         used: 0,
-        allowance: 0,
-        tier: 'free',
+        allowance: AI_CREDIT_ALLOWANCES.free,
+        tier: 'free' as const,
         periodStart,
-        periodEnd
-      });
+        periodEnd,
+        costs: AI_CREDIT_COSTS
+      };
     }
+  }
+
+  async function consumeAiCredits(
+    userId: string | undefined,
+    feature: string,
+    cost: number,
+    requestId?: string
+  ): Promise<{
+    success: boolean;
+    balance: number;
+    used: number;
+    allowance: number;
+    required: number;
+    periodEnd: string;
+    requestId: string;
+  }> {
+    const reqId = (requestId && requestId.trim()) || `${feature}_${userId || 'anon'}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const current = await getAiCreditBalanceForUser(userId);
+
+    if (!supabaseAdmin || !userId || cost <= 0) {
+      return {
+        success: true,
+        balance: current.balance,
+        used: current.used,
+        allowance: current.allowance,
+        required: cost,
+        periodEnd: current.periodEnd,
+        requestId: reqId
+      };
+    }
+
+    // 1. Try the atomic Postgres RPC first
+    try {
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('consume_ai_credits', {
+        p_user_id: userId,
+        p_cost: cost,
+        p_feature: feature,
+        p_request_id: reqId
+      });
+
+      if (!rpcErr && rpcData && typeof rpcData === 'object') {
+        return {
+          success: Boolean(rpcData.success),
+          balance: Number(rpcData.balance ?? 0),
+          used: Number(rpcData.used ?? 0),
+          allowance: Number(rpcData.allowance ?? current.allowance),
+          required: cost,
+          periodEnd: rpcData.period_end || current.periodEnd,
+          requestId: reqId
+        };
+      }
+    } catch {}
+
+    // 2. Fallback if RPC migration is not yet applied on the live DB
+    if (current.balance < cost) {
+      return {
+        success: false,
+        balance: current.balance,
+        used: current.used,
+        allowance: current.allowance,
+        required: cost,
+        periodEnd: current.periodEnd,
+        requestId: reqId
+      };
+    }
+
+    try {
+      const { error: ledgerErr } = await supabaseAdmin.from('ai_credit_ledger').insert({
+        user_id: userId,
+        delta: -cost,
+        entry_type: 'spend',
+        feature,
+        request_id: reqId,
+        period_start: current.periodStart
+      });
+
+      if (ledgerErr) {
+        // Fallback to ai_usage if ai_credit_ledger table is not yet migrated
+        await supabaseAdmin.from('ai_usage').insert({
+          user_id: userId,
+          credits: cost,
+          feature: `${feature}:${reqId}`
+        });
+      }
+    } catch (err: any) {
+      console.warn('[AI Credits] Fallback spend insert warning:', err?.message || err);
+    }
+
+    return {
+      success: true,
+      balance: Math.max(0, current.balance - cost),
+      used: current.used + cost,
+      allowance: current.allowance,
+      required: cost,
+      periodEnd: current.periodEnd,
+      requestId: reqId
+    };
+  }
+
+  async function refundAiCredits(
+    userId: string | undefined,
+    feature: string,
+    cost: number,
+    requestId: string
+  ): Promise<void> {
+    if (!supabaseAdmin || !userId || !requestId || cost <= 0) return;
+
+    try {
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('refund_ai_credits', {
+        p_user_id: userId,
+        p_request_id: requestId
+      });
+      if (!rpcErr && rpcData?.success) return;
+    } catch {}
+
+    try {
+      const now = new Date();
+      const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
+      const { error: ledgerErr } = await supabaseAdmin.from('ai_credit_ledger').insert({
+        user_id: userId,
+        delta: cost,
+        entry_type: 'refund',
+        feature,
+        request_id: `${requestId}:refund`,
+        period_start: periodStart,
+        metadata: { refunded_request_id: requestId }
+      });
+
+      if (ledgerErr) {
+        await supabaseAdmin
+          .from('ai_usage')
+          .delete()
+          .eq('user_id', userId)
+          .eq('feature', `${feature}:${requestId}`);
+      }
+    } catch (err: any) {
+      console.warn('[AI Credits] Refund fallback warning:', err?.message || err);
+    }
+  }
+
+  app.get(['/api/usage/ai-credits', '/api/credits/balance'], requireAuth, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const summary = await getAiCreditBalanceForUser(userId);
+    return res.json(summary);
   });
 
   // Magic Import
@@ -2438,25 +2726,40 @@ RULES:
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: Outline Planning Engine
+  // KORSIQ ACADEMIC STUDIO: Outline Planning Engine (2 credits)
   // =============================================================
   app.post('/api/ai/studio/plan', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
-    const { title, docType, subject, instructions, targetWordCount, citationStyle, references } = req.body;
+    const { title, docType, subject, instructions, targetWordCount, citationStyle, references, requestId } = req.body;
     const wordGoal = Number(targetWordCount) || 1500;
     const style = citationStyle || 'APA';
     const type = docType || 'assignment';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.studio_plan;
+
+    const spend = await consumeAiCredits(userId, 'studio_plan', cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json(getStudioPlanFallback(title || 'Academic Paper', type, subject, wordGoal, style));
+        await refundAiCredits(userId, 'studio_plan', cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
       const refSummary = (references || [])
         .map((r: any, idx: number) => `[Source ${idx + 1}] "${r.title}" by ${r.authors || 'Unknown'} (${r.year || 'n.d.'}): ${r.contentSnippet ? r.contentSnippet.slice(0, 300) : ''}`)
         .join('\n');
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2526,19 +2829,18 @@ Output JSON format:
         temperature: 0.3
       });
 
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_plan', 1);
-
       const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      return res.json(parsed);
+      return res.json({ ...parsed, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.warn('Academic studio plan AI fallback triggered:', error?.message || error);
-      return res.json(getStudioPlanFallback(title || 'Academic Paper', type, subject, wordGoal, style));
+      console.error('Academic studio plan AI failed, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, 'studio_plan', cost, spend.requestId);
+      return res.status(500).json({ error: error?.message || 'Failed to generate outline. Your credits have been refunded.' });
     }
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: Section Generation Engine
+  // KORSIQ ACADEMIC STUDIO: Section Generation Engine (3 credits / 10 full doc / 1 rewrite)
   // =============================================================
   app.post('/api/ai/studio/generate-section', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
     const {
@@ -2554,16 +2856,51 @@ Output JSON format:
       nextSectionTitle,
       references,
       existingContent,
-      mode
+      mode,
+      isFullDocumentFirstSection,
+      isFullDocumentContinuation,
+      requestId
     } = req.body;
 
     const wordCount = Number(targetWords) || 400;
     const style = citationStyle || 'APA';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+
+    // Determine exact credit cost:
+    // - Full document batch: 10 credits charged once on the first section, 0 on continuation sections
+    // - Rewrite / citation check mode on existing content: 1 credit
+    // - Standard section write: 3 credits
+    const isRewriteMode = Boolean(mode && ['expand', 'simplify', 'academic_tone', 'grammar', 'citations'].includes(mode));
+    const cost = isFullDocumentContinuation
+      ? 0
+      : isFullDocumentFirstSection
+      ? AI_CREDIT_COSTS.studio_full_doc
+      : isRewriteMode
+      ? AI_CREDIT_COSTS.studio_assist
+      : AI_CREDIT_COSTS.studio_section;
+    const featureKey = isFullDocumentFirstSection
+      ? 'studio_full_doc'
+      : isRewriteMode
+      ? 'studio_assist'
+      : 'studio_section';
+
+    const spend = await consumeAiCredits(userId, featureKey, cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json(getSectionGenerationFallback(sectionTitle || 'Section Analysis', sectionDescription || '', wordCount, style));
+        await refundAiCredits(userId, featureKey, cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
       const refList = (references || [])
@@ -2583,7 +2920,7 @@ Output JSON format:
         instructionModifier = `INSERT CITATIONS: Seamlessly integrate precise in-text citations using ${style} style based on the provided reference materials. Never fabricate fake citations.`;
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2622,32 +2959,51 @@ Return your response in clean Markdown formatting ready for direct insertion int
         temperature: 0.35
       });
 
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'studio_generate_section', 2);
-
       return res.json({
         content: aiResponse || '',
-        wordCount: (aiResponse || '').trim().split(/\s+/).filter(Boolean).length
+        wordCount: (aiResponse || '').trim().split(/\s+/).filter(Boolean).length,
+        creditsRemaining: spend.balance
       });
     } catch (error: any) {
-      console.warn('Section generation AI fallback:', error?.message || error);
-      return res.json(getSectionGenerationFallback(sectionTitle || 'Section Analysis', sectionDescription || '', wordCount, style));
+      console.error('Section generation AI failed, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, featureKey, cost, spend.requestId);
+      return res.status(500).json({ error: error?.message || 'Section generation failed. Your credits have been refunded.' });
     }
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: Comprehensive Document Review Engine
+  // KORSIQ ACADEMIC STUDIO: Comprehensive Document Review Engine (1 credit)
   // =============================================================
   app.post('/api/ai/studio/review', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
-    const { docTitle, docType, fullContent, citationStyle, references } = req.body;
+    const { docTitle, docType, fullContent, citationStyle, references, requestId } = req.body;
     const style = citationStyle || 'APA';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.studio_review;
+
+    if (!fullContent || fullContent.length < 50) {
+      return res.status(400).json({ error: 'Please write at least 50 characters before running Academic Review.' });
+    }
+
+    const spend = await consumeAiCredits(userId, 'studio_review', cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
       const apiKey = getAIKey();
-      if (!apiKey || !fullContent || fullContent.length < 50) {
-        return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
+      if (!apiKey) {
+        await refundAiCredits(userId, 'studio_review', cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2704,27 +3060,46 @@ Output JSON schema:
 
       const cleaned = (aiResponse || '').replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      return res.json(parsed);
+      return res.json({ ...parsed, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.warn('Academic review AI fallback:', error?.message || error);
-      return res.json(getStudioReviewFallback(docTitle || 'Academic Paper', style));
+      console.error('Academic review AI failed, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, 'studio_review', cost, spend.requestId);
+      return res.status(500).json({ error: error?.message || 'Document review failed. Your credits have been refunded.' });
     }
   });
 
   // =============================================================
-  // KORSIQ ACADEMIC STUDIO: In-Context Writing Assistant
+  // KORSIQ ACADEMIC STUDIO: In-Context Writing Assistant (1 credit)
   // =============================================================
   app.post('/api/ai/studio/assist', requireAuth, requirePaidTier(['plus', 'studio', 'scholar', 'sage']), apiRateLimiter, async (req, res) => {
-    const { selectedText, instruction, docTitle, sectionTitle } = req.body;
+    const { selectedText, instruction, docTitle, sectionTitle, requestId } = req.body;
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.studio_assist;
+
+    if (!selectedText) {
+      return res.status(400).json({ error: 'Please select text to transform.' });
+    }
+
+    const spend = await consumeAiCredits(userId, 'studio_assist', cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
+
     try {
       const apiKey = getAIKey();
-      if (!apiKey || !selectedText) {
-        return res.json({
-          text: `[Academic Revision] ${selectedText || 'Please select text to transform.'}`
-        });
+      if (!apiKey) {
+        await refundAiCredits(userId, 'studio_assist', cost, spend.requestId);
+        return res.status(503).json({ error: 'AI service is not configured on the server.' });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       const systemInstruction = `${studentContext}
 
@@ -2740,27 +3115,48 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         temperature: 0.3
       });
 
-      return res.json({ text: (aiResponse || selectedText).trim() });
+      return res.json({ text: (aiResponse || selectedText).trim(), creditsRemaining: spend.balance });
     } catch (err: any) {
-      return res.json({ text: selectedText });
+      await refundAiCredits(userId, 'studio_assist', cost, spend.requestId);
+      return res.status(500).json({ error: err?.message || 'Rewrite failed. Your credits have been refunded.' });
     }
   });
 
-  // KorsIQ Generate
+  // KorsIQ Generate (Flashcards: 2 credits, Quiz: 2 credits)
   app.post('/api/scolaris/generate', requireAuth, apiRateLimiter, async (req, res) => {
-    const { studyMaterial, mode } = req.body;
+    const { studyMaterial, mode, requestId } = req.body;
 
     if (!studyMaterial) {
       return res.status(400).json({ error: "No study material provided." });
     }
 
+    if (mode !== 'quiz' && mode !== 'flashcards') {
+      return res.status(400).json({ error: "Invalid mode. Use 'quiz' or 'flashcards'." });
+    }
+
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = mode === 'quiz' ? AI_CREDIT_COSTS.quiz : AI_CREDIT_COSTS.flashcards;
+
+    const spend = await consumeAiCredits(userId, mode, cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
+
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
+        await refundAiCredits(userId, mode, cost, spend.requestId);
         return res.status(503).json({ error: "Our AI service is temporarily unavailable. Please try again shortly." });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       let systemPrompt = "";
       let userPrompt = "";
@@ -2831,39 +3227,219 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         });
       }
 
-      res.json({ success: true, data: parsedData });
+      res.json({ success: true, data: parsedData, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.warn("KorsIQ Generation Warning:", error?.message || error);
-      const fallback = getMaterialsFallback(studyMaterial, mode as 'quiz' | 'flashcards');
-      if (mode === 'quiz') {
-        res.json({ success: true, data: { quiz: fallback } });
-      } else {
-        res.json({ success: true, data: { flashcards: fallback } });
-      }
+      console.warn("KorsIQ Generation failed, refunding credits:", error?.message || error);
+      await refundAiCredits(userId, mode, cost, spend.requestId);
+      res.status(500).json({ error: error?.message || "Generation failed. Your credits have been refunded." });
     }
   });
 
-  // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
-  app.post('/api/files/extract', requireAuth, apiRateLimiter, async (req, res) => {
+  // Authenticated profile update endpoint (saves department, major, institution, level, target_cgpa, etc. via service_role)
+  const handleProfileSave = async (req: any, res: any) => {
+    const userId = req.user?.uid || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: 'Database service is not configured on the server.' });
+    }
+
     try {
-      const { fileName, fileType, contentBase64 } = req.body;
-      
-      if (!contentBase64) {
-        return res.status(400).json({ success: false, error: 'contentBase64 parameter is required' });
+      const body = req.body || {};
+      const baseFields: Record<string, any> = {};
+      if (typeof body.name === 'string') baseFields.name = body.name.trim();
+      if (typeof body.email === 'string' && body.email.trim()) baseFields.email = body.email.trim();
+      if (typeof body.university === 'string') baseFields.institution = body.university.trim();
+      else if (typeof body.institution === 'string') baseFields.institution = body.institution.trim();
+      if (typeof body.level === 'string') baseFields.level = body.level.trim();
+      if (typeof body.age === 'number' && !isNaN(body.age)) baseFields.age = body.age;
+      if (typeof body.semesterEnd === 'string') baseFields.semester_end = body.semesterEnd;
+      else if (typeof body.semester_end === 'string') baseFields.semester_end = body.semester_end;
+      if (typeof body.targetCGPA === 'number' && !isNaN(body.targetCGPA)) baseFields.target_cgpa = body.targetCGPA;
+      else if (typeof body.target_cgpa === 'number' && !isNaN(body.target_cgpa)) baseFields.target_cgpa = body.target_cgpa;
+      if (typeof body.avatarIcon === 'string' && body.avatarIcon) baseFields.avatar_icon = body.avatarIcon;
+      else if (typeof body.avatar_icon === 'string' && body.avatar_icon) baseFields.avatar_icon = body.avatar_icon;
+      if (typeof body.onboarded === 'boolean') baseFields.onboarded = body.onboarded;
+      if (typeof body.tutorialSeen === 'boolean') baseFields.tutorial_seen = body.tutorialSeen;
+      else if (typeof body.tutorial_seen === 'boolean') baseFields.tutorial_seen = body.tutorial_seen;
+      if (body.notifications && typeof body.notifications === 'object') baseFields.notifications = body.notifications;
+
+      const extendedFields: Record<string, any> = {};
+      if (typeof body.department === 'string') extendedFields.department = body.department.trim();
+      if (typeof body.major === 'string') extendedFields.major = body.major.trim();
+      else if (typeof body.department === 'string') extendedFields.major = body.department.trim();
+      if (typeof body.academicGoals === 'string') extendedFields.academic_goals = body.academicGoals;
+      else if (typeof body.academic_goals === 'string') extendedFields.academic_goals = body.academic_goals;
+      if (typeof body.studyStyle === 'string') extendedFields.study_style = body.studyStyle;
+      else if (typeof body.study_style === 'string') extendedFields.study_style = body.study_style;
+      if (Array.isArray(body.assistanceAreas)) extendedFields.assistance_areas = body.assistanceAreas;
+      else if (Array.isArray(body.assistance_areas)) extendedFields.assistance_areas = body.assistance_areas;
+
+      const fullUpdate = { ...baseFields, ...extendedFields };
+      if (Object.keys(fullUpdate).length === 0) {
+        return res.status(400).json({ error: 'No profile fields provided to update.' });
       }
 
-      const buffer = Buffer.from(contentBase64, 'base64');
+      let { data: updated, error: updateErr } = await supabaseAdmin
+        .from('profiles')
+        .update(fullUpdate)
+        .eq('id', userId)
+        .select('*')
+        .maybeSingle();
+
+      let droppedExtendedFields = false;
+      if (updateErr && (updateErr.code === 'PGRST204' || updateErr.message?.includes('column') || updateErr.message?.includes('schema cache'))) {
+        // Try with just department & major if academic_goals/study_style/assistance_areas are missing
+        const deptOnlyUpdate: Record<string, any> = { ...baseFields };
+        if (extendedFields.department !== undefined) deptOnlyUpdate.department = extendedFields.department;
+        if (extendedFields.major !== undefined) deptOnlyUpdate.major = extendedFields.major;
+        const retryDept = await supabaseAdmin
+          .from('profiles')
+          .update(deptOnlyUpdate)
+          .eq('id', userId)
+          .select('*')
+          .maybeSingle();
+        if (!retryDept.error) {
+          updated = retryDept.data;
+          updateErr = null;
+        } else {
+          const retryBase = await supabaseAdmin
+            .from('profiles')
+            .update(baseFields)
+            .eq('id', userId)
+            .select('*')
+            .maybeSingle();
+          updated = retryBase.data;
+          updateErr = retryBase.error;
+          droppedExtendedFields = true;
+        }
+      }
+
+      // If row did not exist yet, insert it with Free plan defaults
+      if (!updateErr && !updated) {
+        const insertPayload = {
+          id: userId,
+          email: req.user?.email || baseFields.email || '',
+          tier: 'free',
+          is_pro: false,
+          ...fullUpdate
+        };
+        const ins = await supabaseAdmin.from('profiles').insert(insertPayload).select('*').maybeSingle();
+        updated = ins.data;
+        updateErr = ins.error;
+      }
+
+      if (updateErr) {
+        console.error('[Profile Save] Failed to save profile for user', userId, updateErr);
+        return res.status(500).json({ error: updateErr.message || 'Failed to save profile.', droppedExtendedFields });
+      }
+
+      return res.json({ success: true, profile: updated, droppedExtendedFields });
+    } catch (err: any) {
+      console.error('[Profile Save] Unexpected error:', err?.message || err);
+      return res.status(500).json({ error: err?.message || 'Failed to save profile.' });
+    }
+  };
+
+  app.patch('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
+  app.post('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
+
+  // Helper: Download a file buffer directly from Supabase Storage (bypasses Vercel 4.5MB body limit)
+  async function downloadStorageBufferForUser(
+    userId: string,
+    storagePath: string,
+    preferredBucket?: string
+  ): Promise<{ buffer: Buffer | null; error?: string }> {
+    if (!supabaseAdmin) {
+      return { buffer: null, error: 'Storage service is not configured on the server.' };
+    }
+    const cleanPath = String(storagePath || '').trim();
+    if (!cleanPath || cleanPath.includes('..')) {
+      return { buffer: null, error: 'Invalid storage path.' };
+    }
+    // Ownership guard: personal files live under users/<userId>/...
+    if (cleanPath.startsWith('users/') && userId && !cleanPath.startsWith(`users/${userId}/`)) {
+      return { buffer: null, error: 'Access denied to this storage object.' };
+    }
+
+    const candidateBuckets = Array.from(
+      new Set([preferredBucket || 'user-files', 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
+    );
+
+    let lastErr = 'Could not download file from storage.';
+    for (const bucketName of candidateBuckets) {
+      try {
+        const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
+        if (!error && blob) {
+          const ab = await blob.arrayBuffer();
+          return { buffer: Buffer.from(ab) };
+        }
+        if (error?.message) lastErr = error.message;
+      } catch (err: any) {
+        if (err?.message) lastErr = err.message;
+      }
+    }
+    return { buffer: null, error: lastErr };
+  }
+
+  // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
+  app.post('/api/files/extract', requireAuth, apiRateLimiter, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const { fileName, fileType, contentBase64, storagePath, bucket, fileId } = req.body;
+
+    const markUserFileStatus = async (status: 'ready' | 'failed') => {
+      if (fileId && userId && supabaseAdmin) {
+        try {
+          await supabaseAdmin
+            .from('user_files')
+            .update({ status })
+            .eq('id', fileId)
+            .eq('user_id', userId);
+        } catch {}
+      }
+    };
+
+    try {
+      let buffer: Buffer | null = null;
+
+      if (storagePath && typeof storagePath === 'string' && storagePath.trim()) {
+        const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
+        if (dl.buffer) {
+          buffer = dl.buffer;
+        } else if (!contentBase64) {
+          console.error('[Extract Error] Failed to download from storage:', storagePath, dl.error);
+          await markUserFileStatus('failed');
+          return res.status(200).json({
+            success: false,
+            error: dl.error || 'Uploaded, could not read text from cloud storage. Please retry.',
+            fileName
+          });
+        }
+      }
+
+      if (!buffer && contentBase64 && typeof contentBase64 === 'string') {
+        buffer = Buffer.from(contentBase64, 'base64');
+      }
+
+      if (!buffer) {
+        return res.status(400).json({ success: false, error: 'Either storagePath or contentBase64 is required.' });
+      }
+
       const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '');
 
       if (!result.success) {
+        console.error('[Extract Error] Extraction/OCR failed for', fileName, ':', result.error);
+        await markUserFileStatus('failed');
         return res.status(200).json({
           success: false,
-          error: result.error || "We couldn't read this document correctly. Please try uploading another copy.",
+          error: result.error || "Uploaded, could not read text. Please try again or use Retry.",
           isScannedPdf: result.isScannedPdf,
           fileName
         });
       }
 
+      await markUserFileStatus('ready');
       res.json({
         success: true,
         fileName,
@@ -2873,7 +3449,8 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         usedOcr: result.usedOcr
       });
     } catch (error: any) {
-      console.error('File extraction backend failed:', error);
+      console.error('[Extract Error] Backend exception for', fileName, ':', error?.message || error);
+      await markUserFileStatus('failed');
       res.status(500).json({ success: false, error: error?.message || 'File extraction failed' });
     }
   });
@@ -3070,11 +3647,25 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
 
   // Vision Document Scanner Endpoint: Parses handwritten notes & PDFs into structured study content
   app.post('/api/vision/scan', requireAuth, apiRateLimiter, async (req, res) => {
+    const userId = (req as any).user?.id || (req as any).user?.uid;
     try {
-      const { fileName, fileType, contentBase64 } = req.body;
+      const { fileName, fileType, contentBase64, storagePath, bucket } = req.body;
 
-      if (!contentBase64) {
-        return res.status(400).json({ error: 'contentBase64 parameter is required' });
+      let resolvedBase64 = typeof contentBase64 === 'string' && contentBase64.trim() ? contentBase64.trim() : '';
+      if (!resolvedBase64 && storagePath && typeof storagePath === 'string') {
+        const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
+        if (!dl.buffer) {
+          console.error('[Vision Scan Error] Could not download storagePath:', storagePath, dl.error);
+          return res.status(200).json({
+            success: false,
+            error: dl.error || 'Could not download file from storage for OCR scanning.'
+          });
+        }
+        resolvedBase64 = dl.buffer.toString('base64');
+      }
+
+      if (!resolvedBase64) {
+        return res.status(400).json({ error: 'Either storagePath or contentBase64 parameter is required' });
       }
 
       let mime = fileType || 'image/jpeg';
@@ -3121,7 +3712,7 @@ You MUST return a JSON object containing structured study assets with this exact
 
         const mediaInput = {
           inlineData: {
-            data: contentBase64,
+            data: resolvedBase64,
             mimeType: mime
           }
         };
@@ -3145,12 +3736,11 @@ You MUST return a JSON object containing structured study assets with this exact
       } else {
         // Fallback for non-Gemini: extract text first then generate JSON assets
         let textContent = '';
-        const buffer = Buffer.from(contentBase64, 'base64');
+        const buffer = Buffer.from(resolvedBase64, 'base64');
         const isPdf = mime === 'application/pdf' || fileName?.toLowerCase().endsWith('.pdf');
         if (isPdf) {
           textContent = await parsePdfBuffer(buffer);
         } else {
-          // Do not decode raw image binary as utf-8; only decode text-like files
           if (!mime.startsWith('image/')) {
             textContent = buffer.toString('utf-8');
           } else {
@@ -3159,6 +3749,13 @@ You MUST return a JSON object containing structured study assets with this exact
               error: 'Image scanning requires GEMINI_API_KEY to be configured in your hosting environment variables.'
             });
           }
+        }
+
+        if (!textContent || textContent.trim().length < 20) {
+          return res.json({
+            success: false,
+            error: 'Uploaded, could not read text from this scanned PDF. Ensure GEMINI_API_KEY is configured for Vision OCR.'
+          });
         }
 
         const rawContent = await runAICall({
@@ -3172,29 +3769,10 @@ You MUST return a JSON object containing structured study assets with this exact
         return res.json({ success: true, data: resultJson });
       }
     } catch (error: any) {
-      console.warn('Vision document scan backend warning:', error?.message || error);
-      // Resilient fallback return
-      return res.json({
-        success: true,
-        data: {
-          transcription: "Handwritten notes & course document scanned successfully. Core concepts extracted.",
-          summary: "# Document Overview\n\n- Key concepts identified from scanned document.\n- Formulas and definitions parsed for active recall.",
-          keyTerms: [
-            { term: "Document Subject", definition: "Scanned academic course note material" }
-          ],
-          flashcards: [
-            { id: 1, front: "What is the primary topic of this scanned material?", back: "The core course modules and definitions extracted from your notes." }
-          ],
-          quiz: [
-            {
-              id: 1,
-              question: "Which approach best reinforces memory when reviewing scanned handwritten notes?",
-              options: ["Active recall and spaced repetition", "Passive re-reading", "Cramming before exam", "Skipping practice questions"],
-              answer: "Active recall and spaced repetition",
-              explanation: "Active recall with flashcards and self-testing optimizes long-term memory retention."
-            }
-          ]
-        }
+      console.error('[Vision Scan Error] Failed for', req.body?.fileName, ':', error?.message || error);
+      return res.status(200).json({
+        success: false,
+        error: error?.message || 'Uploaded, could not read text during OCR scan. Please try again.'
       });
     }
   });
@@ -3436,7 +4014,7 @@ Always refer to this context when answering questions about the material, explai
         temperature: 0.5
       });
 
-      await recordAiUsage(userId, 'study_hub_chat', 1);
+      // Chat (AI tutor, Circle @korsiq) is NOT credit-metered (protected by rate limiting only)
 
       // Persist both the user message and the AI response to the database
       let savedUserMsg: any = null;
@@ -3498,33 +4076,50 @@ Always refer to this context when answering questions about the material, explai
     }
   });
 
-  // Study Materials
+  // Study Materials (Summary: 1 credit, Flashcards/Quiz/Test: 2 credits)
   app.post('/api/ai/materials', requireAuth, apiRateLimiter, async (req, res) => {
-    const { content, type } = req.body;
+    const { content, type, requestId } = req.body;
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const materialType = type === 'flashcards' || type === 'quiz' || type === 'test' ? type : 'summary';
+    const cost = materialType === 'summary' ? AI_CREDIT_COSTS.summary : AI_CREDIT_COSTS.flashcards;
+
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: "No study material provided." });
+    }
+
+    const val = validateExtractedText(content);
+    if (!val.isValid) {
+      return res.status(400).json({
+        error: val.reason || "We couldn't read this document correctly. Please try uploading another copy or text-based material."
+      });
+    }
+
+    const spend = await consumeAiCredits(userId, materialType, cost, requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
+
     try {
-      if (!content || typeof content !== 'string') {
-        return res.status(400).json({ error: "No study material provided." });
-      }
-
-      const val = validateExtractedText(content);
-      if (!val.isValid) {
-        return res.status(400).json({
-          error: val.reason || "We couldn't read this document correctly. Please try uploading another copy or text-based material."
-        });
-      }
-
       const cleanContent = normalizeExtractedText(content);
       const apiKey = getAIKey();
       if (!apiKey) {
-        return res.json(getMaterialsFallback(cleanContent, type));
+        await refundAiCredits(userId, materialType, cost, spend.requestId);
+        return res.status(503).json({ error: "AI service is not configured on the server. Your credits have been refunded." });
       }
 
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       let systemInstruction = "";
       let userContent = "";
 
-      if (type === 'summary') {
+      if (materialType === 'summary') {
         systemInstruction = `${studentContext}
 
 You are an elite, student-friendly academic tutor.
@@ -3535,8 +4130,8 @@ CRITICAL WRITING RULES:
 - Explain every key concept, formula, and rule in simple, intuitive, plain English that any student can immediately understand.
 - Format logically with clear Markdown headings (e.g., # Summary, ## Core Takeaways, ## Key Definitions), clean bullet points, and bolded terms.
 - Focus on practical understanding, real-world examples, and maximum clarity.`;
-        userContent = content;
-      } else if (type === 'flashcards') {
+        userContent = cleanContent;
+      } else if (materialType === 'flashcards') {
         systemInstruction = `${studentContext}
 
 You are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
@@ -3554,8 +4149,8 @@ You are an elite memorization assistant. Your job is to output structurally perf
       }
 
       Study Text:
-      "${content}"`;
-      } else if (type === 'quiz') {
+      "${cleanContent}"`;
+      } else if (materialType === 'quiz') {
         systemInstruction = `${studentContext}
 
 You are an elite academic assessment engine. Your job is to output structurally perfect JSON arrays representing multiple-choice quizzes. Do not include any introductory conversational text, explanations, or Markdown formatting outside of the raw JSON code structure itself.`;
@@ -3575,8 +4170,8 @@ You are an elite academic assessment engine. Your job is to output structurally 
       }
 
       Study Text:
-      "${content}"`;
-      } else if (type === 'test') {
+      "${cleanContent}"`;
+      } else if (materialType === 'test') {
         systemInstruction = `${studentContext}
 
 Generate a comprehensive exam simulation with 8 questions from the provided text content.
@@ -3588,24 +4183,21 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
             - "options": array of strings
             - "answer": string (must exactly match one of the options)
             - "explanation": string explaining why it is correct`;
-        userContent = content;
+        userContent = cleanContent;
       }
       
       const text = await runAICall({
         systemInstruction,
         messages: [{ role: 'user', content: userContent }],
-        jsonMode: type !== 'summary'
+        jsonMode: materialType !== 'summary'
       });
 
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, `materials_${type || 'summary'}`, 1);
-      
-      if (type === 'summary') {
+      if (materialType === 'summary') {
         res.json(text);
       } else {
         const parsed = JSON.parse(text || '{}');
         let data = parsed.flashcards || parsed.quiz || parsed.test || parsed;
         
-        // Defensive mapping to ensure complete compatibility in both answer/correctAnswer keys
         if (Array.isArray(data)) {
           data = data.map((item: any) => {
             if (item && item.correctAnswer && !item.answer) {
@@ -3618,30 +4210,41 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         res.json(data);
       }
     } catch (error: any) {
-      console.warn("Live API response failed. Falling back to offline fallback. Error details:", error?.message || error);
-      res.json(getMaterialsFallback(content, type));
+      console.warn("Materials AI generation failed, refunding credits:", error?.message || error);
+      await refundAiCredits(userId, materialType, cost, spend.requestId);
+      res.status(500).json({ error: error?.message || "Generation failed. Your credits have been refunded." });
     }
   });
 
-  // Podcast Generation via Google Gemini & Speech Audio Synthesis
+  // Podcast Generation via Google Gemini & Speech Audio Synthesis (6 credits)
   const handlePodcastGeneration = async (req: express.Request, res: express.Response) => {
     const studyText = req.body.topic || req.body.content || req.body.studyMaterial || req.body.fileContent || '';
+    const userId = (req as any).user?.id || (req as any).user?.uid;
+    const cost = AI_CREDIT_COSTS.podcast;
+
+    if (!studyText || typeof studyText !== 'string' || !studyText.trim()) {
+      return res.status(400).json({ error: "Please provide study text or select a material to generate a podcast." });
+    }
+
+    const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
+    if (!spend.success) {
+      return res.status(402).json({
+        error: 'Not enough credits',
+        code: 'INSUFFICIENT_CREDITS',
+        balance: spend.balance,
+        required: cost,
+        allowance: spend.allowance,
+        resetDate: spend.periodEnd
+      });
+    }
 
     try {
-      // Fetch server-authenticated student context
-      const studentContext = await getStudentContextForUser((req as any).user?.id || (req as any).user?.uid);
+      const studentContext = await getStudentContextForUser(userId);
 
       // Generate script using Google Gemini
-      let rawScript = '';
-      try {
-        rawScript = await generateGeminiPodcastScript(studyText, studentContext);
-      } catch (geminiErr: any) {
-        console.warn('Gemini podcast generation error:', geminiErr?.message || geminiErr);
-      }
-
-      if (!rawScript || typeof rawScript !== 'string') {
-        const fallbackObj = getPodcastFallback();
-        rawScript = fallbackObj.script;
+      const rawScript = await generateGeminiPodcastScript(studyText, studentContext);
+      if (!rawScript || typeof rawScript !== 'string' || !rawScript.trim()) {
+        throw new Error('Failed to generate podcast script from AI service.');
       }
 
       // Step 2: Clean script of Markdown, special symbols, and formatting noise before audio generation
@@ -3652,15 +4255,16 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       const validation = validateWavBuffer(wavBuffer);
       if (!validation.valid) {
         console.error('Audio validation failed for podcast output:', validation.error);
+        await refundAiCredits(userId, 'podcast', cost, spend.requestId);
         return res.status(500).json({ error: `Audio stream validation failed: ${validation.error || 'Corrupt media file generated.'}` });
       }
 
       const audioBase64 = wavBuffer.toString('base64');
-      await recordAiUsage((req as any).user?.id || (req as any).user?.uid, 'podcast_generate', 1);
-      res.json({ script, audioBase64, durationSec: validation.durationSec });
+      res.json({ script, audioBase64, durationSec: validation.durationSec, creditsRemaining: spend.balance });
     } catch (error: any) {
-      console.error('Podcast generation server error:', error?.message || error);
-      res.status(500).json({ error: "We couldn't generate your podcast right now. Please try again." });
+      console.error('Podcast generation server error, refunding credits:', error?.message || error);
+      await refundAiCredits(userId, 'podcast', cost, spend.requestId);
+      res.status(500).json({ error: "We couldn't generate your podcast right now. Your credits have been refunded." });
     }
   };
 
@@ -3674,19 +4278,95 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   const adminOtpCooldowns = new Map<string, number>();
   const adminIpRateLimits = new Map<string, number[]>();
 
+  // Checks both `admin_users` (20261109 migration) and `admins` (20261107 migration applied on live DB)
+  async function findAuthorizedAdmin(rawEmail: string): Promise<{ id: string; email: string; role: string; active: boolean } | null> {
+    if (!supabaseAdmin || !rawEmail) return null;
+    const cleanEmail = rawEmail.trim().toLowerCase();
+
+    // 1. Check `admin_users` table first
+    try {
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, email, role, active')
+        .ilike('email', cleanEmail)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (!userErr && userRow) {
+        return {
+          id: userRow.id,
+          email: String(userRow.email || cleanEmail).toLowerCase(),
+          role: userRow.role || 'super_admin',
+          active: Boolean(userRow.active)
+        };
+      }
+    } catch {}
+
+    // 2. Fallback to `admins` table (applied via 20261107_admin_system.sql)
+    try {
+      const { data: legacyRow, error: legacyErr } = await supabaseAdmin
+        .from('admins')
+        .select('id, email, role, is_active')
+        .ilike('email', cleanEmail)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (!legacyErr && legacyRow) {
+        return {
+          id: legacyRow.id,
+          email: String(legacyRow.email || cleanEmail).toLowerCase(),
+          role: legacyRow.role || 'super_admin',
+          active: Boolean(legacyRow.is_active)
+        };
+      }
+    } catch {}
+
+    return null;
+  }
+
   async function logAdminAction(adminEmail: string, action: string, details: any = {}, ipAddress: string = '') {
-    if (supabaseAdmin) {
-      try {
-        await supabaseAdmin.from('admin_audit_log').insert({
+    if (!supabaseAdmin) return;
+    try {
+      const { error } = await supabaseAdmin.from('admin_audit_log').insert({
+        admin_email: adminEmail,
+        action,
+        details,
+        ip_address: ipAddress
+      });
+      if (error) {
+        // Fallback to `admin_logs` table (20261107_admin_system.sql)
+        await supabaseAdmin.from('admin_logs').insert({
           admin_email: adminEmail,
           action,
           details,
           ip_address: ipAddress
         });
-      } catch (err) {
-        console.warn('[Admin Audit] Failed to record audit log:', err);
       }
+    } catch (err) {
+      console.warn('[Admin Audit] Failed to record audit log:', err);
     }
+  }
+
+  async function fetchAdminAuditLogs(limit = 100): Promise<any[]> {
+    if (!supabaseAdmin) return [];
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('admin_audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (!error && Array.isArray(data)) return data;
+    } catch {}
+
+    try {
+      const { data: fallbackData } = await supabaseAdmin
+        .from('admin_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (Array.isArray(fallbackData)) return fallbackData;
+    } catch {}
+    return [];
   }
 
   // 1. Submit email to request 6-digit OTP
@@ -3725,21 +4405,11 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         console.error(
           '[Admin Auth] Cannot process OTP request: SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing in server environment variables.'
         );
-        return res.json(GENERIC_SUCCESS_RESPONSE);
+        return res.status(503).json({ success: false, error: 'Admin authentication service is not configured on the server.' });
       }
 
-      // Check allowlist table `admin_users` (case-insensitive)
-      const { data: adminRow, error: adminErr } = await supabaseAdmin
-        .from('admin_users')
-        .select('id, email, role, active')
-        .ilike('email', rawEmail)
-        .eq('active', true)
-        .maybeSingle();
-
-      if (adminErr) {
-        console.error('[Admin Auth] Error querying admin_users table (ensure migration 20261109_admin_and_circles_reddit.sql was applied):', adminErr.message);
-        return res.json(GENERIC_SUCCESS_RESPONSE);
-      }
+      // Check allowlist across `admin_users` and `admins` (case-insensitive)
+      const adminRow = await findAuthorizedAdmin(rawEmail);
 
       if (!adminRow) {
         // Unknown or inactive email: do not send code, return identical message
@@ -3747,37 +4417,28 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         return res.json(GENERIC_SUCCESS_RESPONSE);
       }
 
-      // Authorized admin: trigger Supabase email OTP
-      let { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
-        email: rawEmail,
-        options: {
-          shouldCreateUser: false
-        }
-      });
-
-      // If the allowlisted admin email does not yet have a row in auth.users,
-      // provision their auth.users record via service role and re-send the OTP.
-      if (otpError) {
-        console.warn('[Admin Auth] Initial signInWithOtp failed for allowlisted admin, ensuring auth.users account exists:', otpError.message);
-        const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      // Ensure auth.users record exists for the allowlisted admin
+      try {
+        await supabaseAdmin.auth.admin.createUser({
           email: rawEmail,
           email_confirm: true
         });
-        if (createErr && !createErr.message?.toLowerCase().includes('already')) {
-          console.error('[Admin Auth] Failed to auto-provision auth.users record for admin:', createErr.message);
-        } else {
-          const retryOtp = await supabaseAuthClient.auth.signInWithOtp({
-            email: rawEmail,
-            options: {
-              shouldCreateUser: false
-            }
-          });
-          otpError = retryOtp.error;
+      } catch {}
+
+      // Trigger Supabase email OTP for the allowlisted admin
+      const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
+        email: rawEmail,
+        options: {
+          shouldCreateUser: true
         }
-      }
+      });
 
       if (otpError) {
         console.error('[Admin Auth] Supabase signInWithOtp error:', otpError.message);
+        return res.status(429).json({
+          success: false,
+          error: otpError.message || 'Could not dispatch OTP email right now. Please wait 60 seconds and try again.'
+        });
       }
 
       adminOtpCooldowns.set(rawEmail, now);
@@ -3808,30 +4469,53 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
 
     try {
-      // 1. Verify code via Supabase Auth
-      const { data, error } = await supabaseAuthClient.auth.verifyOtp({
+      // 1. Verify code via Supabase Auth (try 'email', then 'magiclink', then 'signup')
+      let verifyRes = await supabaseAuthClient.auth.verifyOtp({
         email: rawEmail,
         token,
         type: 'email'
       });
 
-      if (error || !data.user) {
-        await logAdminAction(rawEmail, 'admin_otp_verify_failed', { error: error?.message, ip }, ip);
+      if (verifyRes.error || !verifyRes.data?.user) {
+        const fallbackMagic = await supabaseAuthClient.auth.verifyOtp({
+          email: rawEmail,
+          token,
+          type: 'magiclink'
+        });
+        if (!fallbackMagic.error && fallbackMagic.data?.user) {
+          verifyRes = fallbackMagic;
+        } else {
+          const fallbackSignup = await supabaseAuthClient.auth.verifyOtp({
+            email: rawEmail,
+            token,
+            type: 'signup'
+          });
+          if (!fallbackSignup.error && fallbackSignup.data?.user) {
+            verifyRes = fallbackSignup;
+          }
+        }
+      }
+
+      if (verifyRes.error || !verifyRes.data?.user) {
+        await logAdminAction(rawEmail, 'admin_otp_verify_failed', { error: verifyRes.error?.message, ip }, ip);
         return res.status(401).json({ success: false, error: 'Invalid or expired 6-digit verification code.' });
       }
 
-      // 2. Cryptographically re-verify against admin_users allowlist (case-insensitive)
-      const { data: adminRow, error: allowErr } = await supabaseAdmin
-        .from('admin_users')
-        .select('id, email, role, active')
-        .ilike('email', rawEmail)
-        .eq('active', true)
-        .maybeSingle();
+      // 2. Cryptographically re-verify against allowlist (`admin_users` or `admins`)
+      const adminRow = await findAuthorizedAdmin(rawEmail);
 
-      if (allowErr || !adminRow) {
+      if (!adminRow) {
         await logAdminAction(rawEmail, 'admin_access_denied_not_allowlisted', { ip }, ip);
         return res.status(403).json({ success: false, error: 'Access denied: Email is not an authorized administrator.' });
       }
+
+      // Update last_login_at on `admins` if present (non-blocking)
+      try {
+        await supabaseAdmin
+          .from('admins')
+          .update({ last_login_at: new Date().toISOString() })
+          .ilike('email', rawEmail);
+      } catch {}
 
       await logAdminAction(rawEmail, 'admin_sign_in_success', { role: adminRow.role, ip }, ip);
 
@@ -3842,7 +4526,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
           email: adminRow.email.toLowerCase(),
           role: adminRow.role
         },
-        session: data.session
+        session: verifyRes.data.session
       });
     } catch (err: any) {
       console.error('[Admin Auth] Verify error:', err);
@@ -3875,15 +4559,10 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
       const email = data.user.email.toLowerCase().trim();
 
-      // Re-check active admin status in admin_users (case-insensitive)
-      const { data: adminRow, error: allowErr } = await supabaseAdmin
-        .from('admin_users')
-        .select('id, email, role, active')
-        .ilike('email', email)
-        .eq('active', true)
-        .maybeSingle();
+      // Re-check active admin status in allowlist (`admin_users` or `admins`)
+      const adminRow = await findAuthorizedAdmin(email);
 
-      if (allowErr || !adminRow) {
+      if (!adminRow) {
         return res.status(403).json({ success: false, error: 'Forbidden: Admin privileges inactive or revoked.' });
       }
 
@@ -3898,11 +4577,12 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   app.get('/api/admin/overview', requireAdminAuth, async (_req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
     try {
-      const [profilesRes, subsRes, groupsRes, logsRes] = await Promise.all([
+      const [profilesRes, subsRes, groupsRes, pendingTxRes, recentLogs] = await Promise.all([
         supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }),
         supabaseAdmin.from('subscriptions').select('id, amount_paid, status, created_at').eq('status', 'active'),
         supabaseAdmin.from('study_groups').select('id', { count: 'exact', head: true }),
-        supabaseAdmin.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(10)
+        supabaseAdmin.from('payment_transactions').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+        fetchAdminAuditLogs(10)
       ]);
 
       const now = new Date();
@@ -3918,7 +4598,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
           activeSubscriptions: subsRes.data?.length || 0,
           monthRevenue,
           totalCircles: groupsRes.count || 0,
-          recentLogs: logsRes.data || []
+          pendingPayments: pendingTxRes.count || 0,
+          recentLogs
         }
       });
     } catch (err: any) {
@@ -3934,7 +4615,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     try {
       let query = supabaseAdmin
         .from('profiles')
-        .select('id, email, name, university, department, level, tier, is_pro, subscription_status, created_at')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -3944,13 +4625,19 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
       const { data, error } = await query;
       if (error) throw error;
-      res.json({ success: true, users: data || [] });
+      const users = (data || []).map((u: any) => ({
+        ...u,
+        university: u.institution || u.university || '',
+        department: u.department || u.major || '',
+        tier: u.subscription_tier || u.tier || 'free'
+      }));
+      res.json({ success: true, users });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Failed to fetch users.' });
     }
   });
 
-  // 6. Admin Dashboard API: Subscriptions / Transactions
+  // 6. Admin Dashboard API: Subscriptions & Payment Transactions
   app.get('/api/admin/subscriptions', requireAdminAuth, async (_req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
     try {
@@ -3967,6 +4654,173 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
+  // 6b. Admin Dashboard API: Payment Transactions Ledger + Filter
+  app.get('/api/admin/payments', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const statusFilter = typeof req.query.status === 'string' ? req.query.status.trim().toLowerCase() : '';
+    try {
+      let txQuery = supabaseAdmin
+        .from('payment_transactions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (statusFilter && statusFilter !== 'all') {
+        txQuery = txQuery.eq('status', statusFilter);
+      }
+
+      const [{ data: transactions, error: txErr }, { data: subscriptions }] = await Promise.all([
+        txQuery,
+        supabaseAdmin.from('subscriptions').select('*').order('created_at', { ascending: false }).limit(100)
+      ]);
+
+      if (txErr) throw txErr;
+      res.json({
+        success: true,
+        transactions: transactions || [],
+        subscriptions: subscriptions || []
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Failed to fetch payment transactions.' });
+    }
+  });
+
+  // 6c. Admin Dashboard API: Verify a Pending Payment Reference with Paystack
+  app.post('/api/admin/payments/verify', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
+    const admin = (req as any).adminUser;
+
+    if (!reference) {
+      return res.status(400).json({ success: false, error: 'Payment reference is required.' });
+    }
+
+    const secretKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+    if (!secretKey) {
+      return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server.' });
+    }
+
+    try {
+      const { data: txRecord } = await supabaseAdmin
+        .from('payment_transactions')
+        .select('*')
+        .eq('reference', reference)
+        .maybeSingle();
+
+      const verifyResponse = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${secretKey}` }
+      });
+      const verifyData: any = await verifyResponse.json().catch(() => ({}));
+
+      if (!verifyResponse.ok || !verifyData.status || !verifyData.data) {
+        await logAdminAction(admin.email, 'admin_verify_payment_not_found', { reference, paystackMessage: verifyData?.message });
+        return res.status(400).json({
+          success: false,
+          error: verifyData?.message || 'Paystack could not find or verify this reference.'
+        });
+      }
+
+      const txData = verifyData.data;
+      const gatewayStatus = String(txData.status || '').toLowerCase();
+
+      if (gatewayStatus !== 'success') {
+        const mappedStatus = gatewayStatus === 'abandoned' ? 'abandoned' : gatewayStatus === 'failed' ? 'failed' : 'pending';
+        if (txRecord) {
+          await supabaseAdmin
+            .from('payment_transactions')
+            .update({
+              status: mappedStatus,
+              gateway_response: txData.gateway_response || `Paystack status: ${gatewayStatus}`
+            })
+            .eq('reference', reference);
+        }
+        await logAdminAction(admin.email, 'admin_verify_payment_non_success', { reference, gatewayStatus });
+        return res.json({
+          success: false,
+          status: mappedStatus,
+          error: `Paystack reports transaction status "${gatewayStatus}" (${txData.gateway_response || 'not paid'}).`
+        });
+      }
+
+      const userId = txRecord?.user_id || txData.metadata?.userId || txData.metadata?.user_id;
+      const rawPlan = String(txRecord?.plan_tier || txRecord?.plan || txData.metadata?.planTier || txData.metadata?.plan || '').toLowerCase();
+      const planKey: 'plus' | 'studio' =
+        rawPlan === 'studio' || rawPlan === 'sage' || Number(txData.amount) >= 1500000 ? 'studio' : 'plus';
+      const cycleKey: 'monthly' | 'annual' =
+        (txRecord?.metadata?.billingCycle || txData.metadata?.billingCycle || txData.metadata?.billing_cycle) === 'annual'
+          ? 'annual'
+          : 'monthly';
+
+      if (!userId) {
+        return res.status(400).json({ success: false, error: 'Payment succeeded on Paystack, but no user_id is linked to this reference.' });
+      }
+
+      const periodStart = txData.paid_at ? new Date(txData.paid_at) : new Date();
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + (cycleKey === 'annual' ? 365 : 30));
+      const periodEndIso = periodEnd.toISOString();
+      const amountNaira = (Number(txData.amount) || Number(txRecord?.amount_kobo) || 0) / 100;
+
+      await supabaseAdmin
+        .from('payment_transactions')
+        .update({
+          status: 'paid',
+          paid_at: periodStart.toISOString(),
+          gateway_response: txData.gateway_response || 'Approved',
+          channel: txData.channel || null
+        })
+        .eq('reference', reference);
+
+      await supabaseAdmin.from('subscriptions').upsert(
+        {
+          user_id: userId,
+          plan_tier: planKey,
+          billing_cycle: cycleKey,
+          status: 'active',
+          payment_provider: 'paystack',
+          payment_reference: reference,
+          payment_status: 'paid',
+          amount_paid: amountNaira,
+          currency: txData.currency || 'NGN',
+          current_period_start: periodStart.toISOString(),
+          current_period_end: periodEndIso,
+          paystack_customer_code: txData.customer?.customer_code || null,
+          paystack_authorization_code: txData.authorization?.authorization_code || null
+        },
+        { onConflict: 'payment_reference' }
+      );
+
+      await activatePaidProfile(
+        supabaseAdmin,
+        userId,
+        planKey,
+        true,
+        'active',
+        'paid',
+        periodEndIso,
+        txData.customer?.customer_code || undefined
+      );
+
+      await logAdminAction(admin.email, 'admin_verify_payment_activated', {
+        reference,
+        userId,
+        plan: planKey,
+        amountNaira
+      });
+
+      return res.json({
+        success: true,
+        status: 'paid',
+        plan: planKey,
+        periodEnd: periodEndIso,
+        message: `Verified with Paystack and activated ${planKey.toUpperCase()} plan for user ${userId}.`
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to verify payment with Paystack.' });
+    }
+  });
+
   // 7. Admin Dashboard API: Manual Grant / Revoke Subscription
   app.post('/api/admin/subscriptions/grant-tier', requireAdminAuth, async (req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
@@ -3980,29 +4834,40 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     try {
       const isPro = targetTier === 'plus' || targetTier === 'studio';
       const status = isPro ? 'active' : 'inactive';
+      const periodEnd = isPro ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
 
       // Update profile
-      await supabaseAdmin
+      const { error: profErr } = await supabaseAdmin
         .from('profiles')
         .update({
           tier: targetTier,
           is_pro: isPro,
           subscription_tier: targetTier,
-          subscription_status: status
+          subscription_status: status,
+          payment_status: isPro ? 'paid' : 'none',
+          subscription_end: periodEnd
         })
         .eq('id', userId);
+
+      if (profErr) {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ tier: targetTier, is_pro: isPro })
+          .eq('id', userId);
+      }
 
       // Record in subscriptions
       await supabaseAdmin.from('subscriptions').insert({
         user_id: userId,
         plan_tier: targetTier,
         billing_cycle: 'monthly',
-        status,
+        status: isPro ? 'manual_active' : 'inactive',
         payment_provider: 'manual_admin',
         payment_status: isPro ? 'paid' : 'none',
         amount_paid: 0,
         currency: 'NGN',
-        current_period_start: new Date().toISOString()
+        current_period_start: new Date().toISOString(),
+        current_period_end: periodEnd
       });
 
       await logAdminAction(admin.email, 'admin_grant_tier', { userId, targetTier });
@@ -4010,6 +4875,105 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       res.json({ success: true, message: `Successfully updated user tier to ${targetTier}.` });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Failed to update user tier.' });
+    }
+  });
+
+  // 7b. Admin Dashboard API: AI Credits Lookup & Adjustment
+  app.get('/api/admin/credits', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const queryVal = typeof req.query.user === 'string' ? req.query.user.trim() : '';
+    if (!queryVal) {
+      return res.status(400).json({ success: false, error: 'Enter a user email or UUID.' });
+    }
+
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(queryVal);
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .or(isUuid ? `id.eq.${queryVal}` : `email.ilike.${queryVal}`)
+        .maybeSingle();
+
+      if (userErr || !userRow) {
+        return res.status(404).json({ success: false, error: 'No user found matching that email or UUID.' });
+      }
+
+      const balanceInfo = await getAiCreditBalanceForUser(userRow.id);
+      const { data: ledgerRows } = await supabaseAdmin
+        .from('ai_credit_ledger')
+        .select('*')
+        .eq('user_id', userRow.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      return res.json({
+        success: true,
+        user: {
+          id: userRow.id,
+          email: userRow.email,
+          name: userRow.name,
+          tier: balanceInfo.tier
+        },
+        credits: balanceInfo,
+        ledger: ledgerRows || []
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to load user AI credits.' });
+    }
+  });
+
+  app.post('/api/admin/credits/adjust', requireAdminAuth, async (req, res) => {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
+    const admin = (req as any).adminUser;
+    const userQuery = typeof req.body?.user === 'string' ? req.body.user.trim() : '';
+    const delta = Number(req.body?.delta);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'Admin credit adjustment';
+
+    if (!userQuery || !Number.isFinite(delta) || delta === 0) {
+      return res.status(400).json({ success: false, error: 'Valid user (email or UUID) and non-zero credit delta are required.' });
+    }
+
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userQuery);
+      const { data: userRow } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, name')
+        .or(isUuid ? `id.eq.${userQuery}` : `email.ilike.${userQuery}`)
+        .maybeSingle();
+
+      if (!userRow) {
+        return res.status(404).json({ success: false, error: 'No user found matching that email or UUID.' });
+      }
+
+      const { error: insertErr } = await supabaseAdmin.from('ai_credit_ledger').insert({
+        user_id: userRow.id,
+        action: `admin_adjust:${reason.slice(0, 60)}`,
+        delta: Math.trunc(delta),
+        request_id: `admin_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
+      });
+
+      if (insertErr) {
+        return res.status(500).json({
+          success: false,
+          error: `Could not insert into ai_credit_ledger (${insertErr.message}). Ensure migration 20261110_ai_credit_ledger_and_rpc.sql is applied.`
+        });
+      }
+
+      await logAdminAction(admin.email, 'admin_adjust_credits', {
+        targetUserId: userRow.id,
+        targetEmail: userRow.email,
+        delta: Math.trunc(delta),
+        reason
+      });
+
+      const updatedBalance = await getAiCreditBalanceForUser(userRow.id);
+      return res.json({
+        success: true,
+        message: `${delta > 0 ? 'Granted' : 'Deducted'} ${Math.abs(Math.trunc(delta))} AI credits for ${userRow.email}.`,
+        credits: updatedBalance
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to adjust AI credits.' });
     }
   });
 
@@ -4050,14 +5014,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   app.get('/api/admin/audit-log', requireAdminAuth, async (_req, res) => {
     if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Database service unavailable.' });
     try {
-      const { data, error } = await supabaseAdmin
-        .from('admin_audit_log')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
-      res.json({ success: true, logs: data || [] });
+      const logs = await fetchAdminAuditLogs(100);
+      res.json({ success: true, logs });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit log.' });
     }

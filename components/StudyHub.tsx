@@ -96,9 +96,18 @@ const StudyHub: React.FC<StudyHubProps> = ({
       } catch {}
     }
   }, [selectedCourseId, courses]);
-  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'library' | 'scanner' | 'ai'>('summary');
+  const [activeTool, setActiveTool] = useState<'summary' | 'flashcards' | 'quiz' | 'test' | 'podcast' | 'library' | 'scanner' | 'ai'>('summary');
   const [landingView, setLandingView] = useState<'courses' | 'ai'>('courses');
   const [loading, setLoading] = useState(false);
+  const [insufficientCreditsNotice, setInsufficientCreditsNotice] = useState<{
+    required: number;
+    balance: number;
+    resetDate?: string;
+  } | null>(null);
+  const [failedExtractionFile, setFailedExtractionFile] = useState<{
+    file: UserFile;
+    error: string;
+  } | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
@@ -243,31 +252,53 @@ const StudyHub: React.FC<StudyHubProps> = ({
       setActiveCourseId(targetCourseId);
     }
     setIsSessionFileActive(true);
+    setFailedExtractionFile(null);
     addNotification('content', 'Loading File', `Loading ${file.fileName} into Study Hub workbench...`, 'hub');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    // Auto-fetch file content into workbench if signed download URL is available
-    if (file.downloadUrl) {
-      try {
+    setIsExtracting(true);
+    try {
+      // Extract directly from Supabase Storage path on the server first (bypasses Vercel 4.5MB limit)
+      let res = file.storagePath
+        ? await GeminiService.extractFileText(file.fileName, file.fileType, undefined, {
+            storagePath: file.storagePath,
+            fileId: file.id,
+          })
+        : { success: false, error: 'Missing storage path' };
+
+      if ((!res.success || !res.extractedText) && file.downloadUrl) {
         const resp = await fetch(file.downloadUrl);
         if (resp.ok) {
           const blob = await resp.blob();
           const base64 = await fileToBase64(blob);
-          const res = await GeminiService.extractFileText(file.fileName, file.fileType, base64);
-          if (res.success && res.extractedText) {
-            setFileContent(res.extractedText);
-            if (targetCourseId) {
-              const currentH = hubs[targetCourseId] || { courseId: targetCourseId };
-              const updatedH = { ...currentH, fileContent: res.extractedText, fileName: file.fileName } as StudyHubData;
-              setHubs(prev => ({ ...prev, [targetCourseId]: updatedH }));
-              await DBService.saveHub(updatedH);
-            }
-            addNotification('content', 'File Ready', `${file.fileName} loaded and ready in Study Hub workbench!`, 'hub');
-          }
+          res = await GeminiService.extractFileText(file.fileName, file.fileType, base64, { fileId: file.id });
         }
-      } catch (loadErr) {
-        console.warn('Auto-extract for selected recent file warning:', loadErr);
       }
+
+      if (res.success && res.extractedText) {
+        setFileContent(res.extractedText);
+        if (targetCourseId) {
+          const currentH = hubs[targetCourseId] || { courseId: targetCourseId };
+          const updatedH = { ...currentH, fileContent: res.extractedText, fileName: file.fileName } as StudyHubData;
+          setHubs(prev => ({ ...prev, [targetCourseId]: updatedH }));
+          await DBService.saveHub(updatedH);
+        }
+        setRefreshFilesTrigger(prev => prev + 1);
+        addNotification('content', 'File Ready', `${file.fileName} loaded and ready in Study Hub workbench!`, 'hub');
+      } else {
+        setFailedExtractionFile({
+          file,
+          error: res.error || 'Uploaded, could not read text from this document.'
+        });
+      }
+    } catch (loadErr: any) {
+      console.warn('Auto-extract for selected recent file warning:', loadErr);
+      setFailedExtractionFile({
+        file,
+        error: loadErr?.message || 'Uploaded, could not read text from this document.'
+      });
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -455,24 +486,61 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
     setIsExtracting(true);
     setIsSessionFileActive(true);
-    addNotification('content', 'Processing File', `Reading and extracting text from ${file.name}...`, 'hub');
+    setFailedExtractionFile(null);
+    addNotification('content', 'Uploading File', `Uploading ${file.name} to cloud storage and extracting text...`, 'hub');
+
+    const userId = getCurrentUserId();
+    const activeCourse = courses.find(c => c.id === activeCourseId);
+    let uploadedFile: UserFile | null = null;
 
     try {
+      // Step 1: Upload to Supabase Storage FIRST so the file is always saved in user_files
+      // and large files bypass Vercel's 4.5MB serverless request body limit.
+      if (userId && activeCourseId) {
+        try {
+          uploadedFile = await DBService.uploadFileToStorage(
+            userId,
+            activeCourseId,
+            file,
+            activeCourse?.code,
+            activeCourse?.title,
+            'processing'
+          );
+          setRefreshFilesTrigger(prev => prev + 1);
+        } catch (stErr: any) {
+          console.warn('Direct storage upload warning:', stErr);
+        }
+      }
+
+      // Step 2: Extract text using storagePath on the server (or plain text / base64 fallback for small files)
       const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
       let content = '';
 
       if (isPlainTextFile) {
         content = await file.text();
+        if (uploadedFile && userId) {
+          await DBService.updateUserFileStatus(uploadedFile.id, userId, 'ready');
+        }
       } else {
-        const base64 = await fileToBase64(file);
-        const res = await GeminiService.extractFileText(file.name, file.type, base64);
+        const canSendBase64Fallback = !uploadedFile?.storagePath && file.size <= 3 * 1024 * 1024;
+        const base64Fallback = canSendBase64Fallback ? await fileToBase64(file) : undefined;
+        const res = await GeminiService.extractFileText(file.name, file.type, base64Fallback, {
+          storagePath: uploadedFile?.storagePath,
+          fileId: uploadedFile?.id,
+        });
+
         if (res.success && res.extractedText) {
           content = res.extractedText;
         } else {
-          if (res.isScannedPdf) {
-            throw new Error(res.error || "This PDF contains scanned images without selectable text. Please use the Document Scanner tool to parse scanned notes and worksheets.");
+          if (uploadedFile && userId) {
+            await DBService.updateUserFileStatus(uploadedFile.id, userId, 'failed');
+            setRefreshFilesTrigger(prev => prev + 1);
           }
-          throw new Error(res.error || "We couldn't read this document correctly. Please try uploading another copy.");
+          const errReason = res.error || "Uploaded, could not read text from this document.";
+          if (uploadedFile) {
+            setFailedExtractionFile({ file: { ...uploadedFile, status: 'failed' }, error: errReason });
+          }
+          throw new Error(errReason);
         }
       }
 
@@ -480,98 +548,30 @@ const StudyHub: React.FC<StudyHubProps> = ({
         setFileContent(content);
         const name = file.name;
 
-        // Save file to user-isolated Supabase Storage & database
-        const userId = getCurrentUserId();
-        if (userId && activeCourseId) {
-          const activeCourse = courses.find(c => c.id === activeCourseId);
-          try {
-            await DBService.uploadFileToStorage(
-              userId,
-              activeCourseId,
-              file,
-              activeCourse?.code,
-              activeCourse?.title
-            );
-            addNotification('content', 'Storage Confirmed', `${name} safely preserved in cloud storage.`, 'hub');
-          } catch (stErr: any) {
-            console.warn('Storage save warning:', stErr);
-            addNotification('content', 'Storage Notice', `Document parsed for study session, but could not be persisted to cloud storage: ${stErr?.message || 'Storage unavailable'}.`, 'hub');
-          }
-        }
-        
-        // Analyze uploaded file with Gemini
-        addNotification('content', 'Analyzing Document', `Generating academic summary for ${name}...`, 'hub');
-        let summaryText = '';
-        try {
-          const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
-          if (sumRes) {
-            summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
-            addNotification('content', 'Analysis Complete', `Summary and core takeaways synthesized for ${name}.`, 'hub');
-          }
-        } catch (sumErr: any) {
-          console.warn('Summary generation warning:', sumErr);
-          addNotification('content', 'Analysis Notice', `Document loaded. Analysis synthesis notice: ${sumErr?.message || 'Summary unavailable'}.`, 'hub');
-        }
-
         const updatedHub = { 
           ...activeHub, 
           fileContent: content, 
           fileName: name,
-          summary: summaryText || activeHub.summary
         } as StudyHubData;
 
         setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
         await DBService.saveHub(updatedHub);
         setRefreshFilesTrigger(prev => prev + 1);
-        addNotification('content', 'Summary Ready', `Read and summarized core takeaways from ${name}!`, 'hub');
+        addNotification('content', 'Material Ready', `${name} uploaded and ready in Study Hub.`, 'hub');
         setActiveTool('summary');
       } else {
-        const errMsg = "We couldn't read any text from this document. Please try uploading another copy.";
-        throw new Error(errMsg);
+        if (uploadedFile && userId) {
+          await DBService.updateUserFileStatus(uploadedFile.id, userId, 'failed');
+          setFailedExtractionFile({
+            file: { ...uploadedFile, status: 'failed' },
+            error: 'Uploaded, could not read text from this document.'
+          });
+        }
+        throw new Error('Uploaded, could not read text from this document.');
       }
     } catch (err: any) {
-      console.warn("Server file processing failed:", err?.message || err);
-      const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
-      
-      if (isPlainTextFile) {
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const content = event.target?.result as string;
-          if (content && content.trim().length > 0) {
-            setFileContent(content);
-            const name = file.name;
-
-            // Generate summary for plain text
-            let summaryText = '';
-            try {
-              const sumRes = await GeminiService.generateStudyMaterials(content, 'summary');
-              if (sumRes) {
-                summaryText = typeof sumRes === 'string' ? sumRes : (sumRes.text || JSON.stringify(sumRes));
-              }
-            } catch (sumErr) {
-              console.warn('Summary warning:', sumErr);
-            }
-
-            const updatedHub = { 
-              ...activeHub, 
-              fileContent: content, 
-              fileName: file.name,
-              summary: summaryText || activeHub.summary
-            } as StudyHubData;
-
-            setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
-            await DBService.saveHub(updatedHub);
-            setRefreshFilesTrigger(prev => prev + 1);
-            addNotification('content', 'Summary Ready', `Loaded and summarized ${file.name}.`, 'hub');
-            setActiveTool('summary');
-          }
-        };
-        reader.readAsText(file);
-      } else {
-        const alertMsg = err?.message || "We couldn't read this document correctly. Please try uploading another copy.";
-        addNotification('content', 'Extraction Warning', alertMsg, 'hub');
-        alert(alertMsg);
-      }
+      console.warn("File extraction warning:", err?.message || err);
+      addNotification('content', 'Extraction Notice', err?.message || 'Uploaded, could not read text.', 'hub');
     } finally {
       setIsExtracting(false);
       if (e.target) e.target.value = '';
@@ -585,19 +585,57 @@ const StudyHub: React.FC<StudyHubProps> = ({
     addNotification('content', 'Vision Scanner Active', `Scanning handwritten notes & course material for ${file.name}...`, 'hub');
 
     try {
-      const base64 = await fileToBase64(file);
-      setScannedDocPreview(`data:${file.type || 'image/jpeg'};base64,${base64}`);
+      const userId = getCurrentUserId();
+      const activeCourse = courses.find(c => c.id === activeCourseId);
+      let uploadedScanFile: UserFile | null = null;
 
-      const res = await GeminiService.scanDocumentWithVision(file.name, file.type, base64);
+      if (userId && activeCourseId) {
+        try {
+          uploadedScanFile = await DBService.uploadFileToStorage(
+            userId,
+            activeCourseId,
+            file,
+            activeCourse?.code,
+            activeCourse?.title,
+            'processing'
+          );
+          setRefreshFilesTrigger(prev => prev + 1);
+        } catch {}
+      }
+
+      if (file.type.startsWith('image/') && file.size <= 4 * 1024 * 1024) {
+        const previewB64 = await fileToBase64(file);
+        setScannedDocPreview(`data:${file.type || 'image/jpeg'};base64,${previewB64}`);
+      }
+
+      const base64Fallback = !uploadedScanFile?.storagePath && file.size <= 3 * 1024 * 1024
+        ? await fileToBase64(file)
+        : undefined;
+
+      const res = await GeminiService.scanDocumentWithVision(file.name, file.type, base64Fallback, {
+        storagePath: uploadedScanFile?.storagePath,
+      });
       if (res.success && res.data) {
+        if (uploadedScanFile && userId) {
+          await DBService.updateUserFileStatus(uploadedScanFile.id, userId, 'ready');
+          setRefreshFilesTrigger(prev => prev + 1);
+        }
         setScannedDocResult(res.data);
         addNotification('content', 'Vision Scan Complete', `Successfully converted ${file.name} into structured study notes, flashcards & quiz!`, 'hub');
       } else {
-        throw new Error(res.error || 'Failed to scan document');
+        if (uploadedScanFile && userId) {
+          await DBService.updateUserFileStatus(uploadedScanFile.id, userId, 'failed');
+          setRefreshFilesTrigger(prev => prev + 1);
+          setFailedExtractionFile({
+            file: { ...uploadedScanFile, status: 'failed' },
+            error: res.error || 'Uploaded, could not read text during OCR scan.'
+          });
+        }
+        throw new Error(res.error || 'Uploaded, could not read text during OCR scan.');
       }
     } catch (err: any) {
       console.error('Vision scan error:', err);
-      addNotification('content', 'Scan Warning', 'Completed scan using fallback AI parsing.', 'hub');
+      addNotification('content', 'Scan Error', err?.message || 'Uploaded, could not read text during OCR scan.', 'hub');
     } finally {
       setIsScanningDoc(false);
     }
@@ -632,6 +670,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       return;
     }
 
+    setInsufficientCreditsNotice(null);
     setLoading(true);
     try {
       const data = await GeminiService.generateStudyMaterials(fileContent, type);
@@ -642,8 +681,48 @@ const StudyHub: React.FC<StudyHubProps> = ({
       addNotification('content', `${type.toUpperCase()} Ready`, `Your ${type} for ${currentCourse?.code} has been generated.`, 'hub');
     } catch (err: any) {
       console.error(err);
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? (type === 'summary' ? 1 : 2),
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
       const msg = err?.message || "AI Processing failed.";
       alert(`AI Processing warning: ${msg}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generatePodcastTool = async () => {
+    const source = (fileContent && fileContent.trim()) || activeHub.summary || `${currentCourse?.code}: ${currentCourse?.title}`;
+    if (!source || !source.trim()) return alert("Upload or select study material first!");
+
+    setInsufficientCreditsNotice(null);
+    setLoading(true);
+    try {
+      const res = await GeminiService.generatePodcast(source);
+      const updatedHub = {
+        ...activeHub,
+        podcastUrl: res.wavUrl || undefined,
+        transcript: res.script
+      } as StudyHubData;
+      setHubs({ ...hubs, [activeCourseId]: updatedHub });
+      await DBService.saveHub(updatedHub);
+      addNotification('content', 'AI Podcast Ready', `Your audio overview for ${currentCourse?.code} has been generated.`, 'hub');
+    } catch (err: any) {
+      console.error(err);
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? 6,
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
+      alert(err?.message || "We couldn't generate your podcast right now.");
     } finally {
       setLoading(false);
     }
@@ -679,12 +758,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
   };
 
   const tools = [
-    { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: 'Key Concepts' },
-    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History' },
+    { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: '1 credit' },
+    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History (Free)' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
-    { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: 'Memory Active' },
-    { id: 'quiz', label: 'Quick Quiz', icon: ICONS.CheckCircle, desc: 'Self-Testing' },
-    { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: 'Timed Exam' },
+    { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: '2 credits' },
+    { id: 'quiz', label: 'Practice Quiz', icon: ICONS.CheckCircle, desc: '2 credits' },
+    { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: '2 credits' },
+    { id: 'podcast', label: 'AI Podcast', icon: <AudioWaveform size={18} />, desc: '6 credits' },
   ];
 
   if (!activeCourseId || !currentCourse) {
@@ -1003,6 +1083,83 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
         {/* Main Workbench Display */}
         <div className="lg:col-span-8 xl:col-span-9 min-h-[500px] bg-white rounded-xl p-6 sm:p-8 relative border border-slate-200 shadow-2xs transition-all duration-300">
+          {insufficientCreditsNotice && (
+            <div
+              role="alert"
+              className="mb-6 p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-bold">
+                    Not enough credits ({insufficientCreditsNotice.balance} remaining, {insufficientCreditsNotice.required} required)
+                  </p>
+                  <p className="text-amber-800">
+                    {insufficientCreditsNotice.resetDate
+                      ? `Your monthly credits reset on ${new Date(insufficientCreditsNotice.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}. `
+                      : ''}
+                    Upgrade your plan in Settings for up to 200 monthly AI credits.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {onNavigate && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('profile')}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[40px] cursor-pointer"
+                  >
+                    Upgrade
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setInsufficientCreditsNotice(null)}
+                  className="p-2 text-amber-700 hover:text-amber-900 rounded-lg cursor-pointer"
+                  aria-label="Dismiss credit alert"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {failedExtractionFile && (
+            <div
+              role="alert"
+              className="mb-6 p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertCircle size={18} className="text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-bold">
+                    Uploaded, could not read text ({failedExtractionFile.file.fileName})
+                  </p>
+                  <p className="text-rose-800">
+                    {failedExtractionFile.error} Your file is saved in your Library — click Retry to try extracting text again.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSelectRecentFile(failedExtractionFile.file)}
+                  className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[40px] cursor-pointer"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFailedExtractionFile(null)}
+                  className="p-2 text-rose-700 hover:text-rose-900 rounded-lg cursor-pointer"
+                  aria-label="Dismiss extraction alert"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {loading && (
             <div className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-200 rounded-xl">
                <div className="relative w-16 h-16 mb-6">
@@ -1050,8 +1207,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="space-y-12">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-10 gap-4">
                   <h3 className="text-3xl sm:text-4xl font-serif font-bold tracking-tight text-slate-900">Executive Summary</h3>
-                  <button onClick={() => generateTool('summary')} className="flex items-center gap-3 text-xs font-bold uppercase tracking-widest text-blue-700 hover:text-blue-800 transition-all p-3 bg-blue-50 rounded-xl border border-blue-100">
-                     <span className="group-hover:rotate-180 transition-transform duration-700">{ICONS.RotateCcw}</span> Regenerate
+                  <button onClick={() => generateTool('summary')} className="flex items-center gap-3 text-xs font-bold uppercase tracking-widest text-blue-700 hover:text-blue-800 transition-all p-3 bg-blue-50 rounded-xl border border-blue-100 cursor-pointer">
+                     <span className="group-hover:rotate-180 transition-transform duration-700">{ICONS.RotateCcw}</span> Regenerate — 1 credit
                   </button>
                 </div>
                 <div className="prose max-w-none text-slate-700 text-lg sm:text-xl leading-[1.7] space-y-8 font-medium prose-slate prose-p:leading-relaxed prose-headings:font-serif">
@@ -1062,16 +1219,15 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
             {activeTool === 'summary' && !activeHub.summary && fileContent && (
               <div className="flex flex-col items-center justify-center h-[400px] gap-8">
-                  <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 animate-bounce">
+                  <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
                     {ICONS.FileText}
                   </div>
                   <button 
                     onClick={() => generateTool('summary')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Summary
+                    Generate Summary — 1 credit
                   </button>
-                  <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Powered by Gemini AI</p>
               </div>
             )}
 
@@ -1797,9 +1953,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('test')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs cursor-pointer"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Practice Test
+                    Generate Practice Test — 2 credits
                   </button>
               </div>
             )}
@@ -1811,9 +1967,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('quiz')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Quiz
+                    Practice Quiz — 2 credits
                   </button>
               </div>
             )}
@@ -1825,10 +1981,55 @@ const StudyHub: React.FC<StudyHubProps> = ({
                   </div>
                   <button 
                     onClick={() => generateTool('flashcards')} 
-                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-xs transition-colors text-xs"
+                    className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Cards
+                    Flashcards — 2 credits
                   </button>
+              </div>
+            )}
+
+            {activeTool === 'podcast' && (
+              <div className="space-y-8 animate-in fade-in duration-300">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-6 gap-4">
+                  <div>
+                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">AI Podcast Overview</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Generate a two-host academic audio overview and transcript from your course material.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={generatePodcastTool}
+                    className="px-4 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0"
+                  >
+                    {activeHub.transcript ? 'Regenerate AI Podcast — 6 credits' : 'AI Podcast — 6 credits'}
+                  </button>
+                </div>
+
+                {activeHub.podcastUrl && (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <p className="text-xs font-semibold text-slate-700">Audio Stream</p>
+                    <audio ref={audioRef} controls src={activeHub.podcastUrl} className="w-full" />
+                  </div>
+                )}
+
+                {activeHub.transcript ? (
+                  <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 max-h-[420px] overflow-y-auto">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Podcast Script</p>
+                    <div className="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                      {activeHub.transcript}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-[260px] gap-4 text-center">
+                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+                      <AudioWaveform size={28} />
+                    </div>
+                    <p className="text-xs text-slate-500 max-w-sm">
+                      Turn your uploaded lecture notes into a structured study dialogue.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

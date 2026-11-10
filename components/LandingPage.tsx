@@ -22,6 +22,28 @@ interface LandingPageProps {
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) => {
   const [activeModal, setActiveModal] = useState<'privacy' | 'terms' | 'contact' | 'about' | null>(null);
+  const [activeScreenshot, setActiveScreenshot] = useState<'overview' | 'hub' | 'studio'>('overview');
+
+  const screenshots: Record<'overview' | 'hub' | 'studio', { label: string; src: string; alt: string; path: string }> = {
+    overview: {
+      label: 'Overview',
+      src: '/screenshots/overview.png',
+      alt: 'KorsIQ Overview workspace showing priorities, study schedule, course snapshot, and recent documents',
+      path: 'korsiq.app/overview'
+    },
+    hub: {
+      label: 'Study Hub',
+      src: '/screenshots/study-hub.png',
+      alt: 'KorsIQ Study Hub showing course workbenches and discipline-tailored AI study chat',
+      path: 'korsiq.app/study-hub'
+    },
+    studio: {
+      label: 'Academic Studio',
+      src: '/screenshots/studio.png',
+      alt: 'KorsIQ Academic Studio showing structured academic planning, section drafting, and Word/PDF export',
+      path: 'korsiq.app/studio'
+    }
+  };
 
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
@@ -87,142 +109,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart, onSignIn }) =
           </button>
         </div>
 
-        {/* Hero Interactive Screen Preview (Matching Spec Mockup) */}
+        {/* Real Product Screenshots inside Browser Frame */}
         <div className="mt-10 sm:mt-12 text-left">
-          <div className="rounded-xl border border-[#E5E7EB] dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden transition-all">
-            {/* Top Bar of Mockup */}
-            <div className="px-4 py-3 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/70">
-              <div className="flex items-center gap-2">
-                <KorsIQLogo variant="icon" size={20} />
-                <span className="text-xs font-semibold text-[#111827] dark:text-white hidden sm:inline">Overview</span>
+          {/* Screen Switcher Tabs */}
+          <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
+            {(['overview', 'hub', 'studio'] as const).map((key) => {
+              const item = screenshots[key];
+              const isSelected = activeScreenshot === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveScreenshot(key)}
+                  className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold min-h-[44px] transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#2563EB] text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm bg-white dark:bg-slate-900 overflow-hidden">
+            {/* Browser Frame Top Bar */}
+            <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700" />
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700" />
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700" />
               </div>
-              <div className="flex items-center gap-2 sm:gap-3">
-                <div className="hidden sm:flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-[#5B6472] dark:text-slate-400 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 px-2 py-0.5 rounded flex items-center gap-1">
-                    <Plus size={10} /> Task
-                  </span>
-                  <span className="text-[11px] font-medium text-[#5B6472] dark:text-slate-400 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 px-2 py-0.5 rounded flex items-center gap-1">
-                    <Plus size={10} /> Course
-                  </span>
-                </div>
-                <div className="w-6 h-6 rounded-full flex items-center justify-center text-[#5B6472] dark:text-slate-400">
-                  <Bell size={13} />
-                </div>
-                <div className="w-6 h-6 rounded-full bg-[#EFF6FF] dark:bg-blue-950/60 border border-[#2563EB]/20 text-[#2563EB] text-[10px] font-bold flex items-center justify-center">
-                  CO
-                </div>
+              <div className="px-3 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                {screenshots[activeScreenshot].path}
               </div>
+              <div className="w-10" />
             </div>
 
-            {/* Mockup Header Greeting */}
-            <div className="p-4 sm:p-6 pb-2 sm:pb-3 border-b border-slate-100 dark:border-slate-800/60">
-              <h3 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">Good morning, Chidi</h3>
-              <p className="text-xs text-[#5B6472] dark:text-slate-400">Saturday, 7 November</p>
-            </div>
-
-            {/* Mockup Main Columns */}
-            <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 bg-white dark:bg-slate-900">
-              {/* Left Column in Mockup */}
-              <div className="space-y-4">
-                {/* Today's Priorities */}
-                <div className="rounded-lg border border-[#E5E7EB] dark:border-slate-800 p-3 sm:p-4 bg-white dark:bg-slate-900">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-xs font-semibold text-[#111827] dark:text-white">Today's priorities</h4>
-                  </div>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between py-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3.5 h-3.5 rounded border border-slate-300 dark:border-slate-600 flex items-center justify-center" />
-                        <span className="text-[#111827] dark:text-slate-200">Finish CSC 201 assignment</span>
-                      </div>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Due Mon</span>
-                    </div>
-                    <div className="flex items-center justify-between py-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3.5 h-3.5 rounded border border-slate-300 dark:border-slate-600 flex items-center justify-center" />
-                        <span className="text-[#111827] dark:text-slate-200">Revise MTH 203 past questions</span>
-                      </div>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">40 min</span>
-                    </div>
-                    <div className="hidden sm:flex items-center justify-between py-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3.5 h-3.5 rounded border border-slate-300 dark:border-slate-600 flex items-center justify-center" />
-                        <span className="text-[#111827] dark:text-slate-200">Read chapter 4 for GST 211</span>
-                      </div>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Today</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Upcoming Deadlines */}
-                <div className="rounded-lg border border-[#E5E7EB] dark:border-slate-800 p-3 sm:p-4 bg-white dark:bg-slate-900">
-                  <h4 className="text-xs font-semibold text-[#111827] dark:text-white mb-2">Upcoming deadlines</h4>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">CSC 201 assignment</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Mon 9 Nov</span>
-                    </div>
-                    <div className="flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">MTH 203 test</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Thu 12 Nov</span>
-                    </div>
-                    <div className="hidden sm:flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">GST 211 report</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Mon 16 Nov</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column in Mockup */}
-              <div className="space-y-4">
-                {/* Study Schedule */}
-                <div className="rounded-lg border border-[#E5E7EB] dark:border-slate-800 p-3 sm:p-4 bg-white dark:bg-slate-900">
-                  <h4 className="text-xs font-semibold text-[#111827] dark:text-white mb-2">Study schedule</h4>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">MTH 203 revision</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Today, 4:00 pm</span>
-                    </div>
-                    <div className="hidden sm:flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">CSC 201 practice questions</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Sun, 10:00 am</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Course Snapshot (CGPA) */}
-                <div className="rounded-lg border border-[#E5E7EB] dark:border-slate-800 p-3 sm:p-4 bg-white dark:bg-slate-900">
-                  <h4 className="text-xs font-semibold text-[#111827] dark:text-white mb-2">Course snapshot</h4>
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <p className="text-[10px] text-[#5B6472] dark:text-slate-400">Current CGPA</p>
-                      <p className="text-lg sm:text-xl font-bold text-[#111827] dark:text-white">4.12</p>
-                    </div>
-                    <div className="w-px h-8 bg-[#E5E7EB] dark:bg-slate-800" />
-                    <div>
-                      <p className="text-[10px] text-[#5B6472] dark:text-slate-400">Target CGPA</p>
-                      <p className="text-lg sm:text-xl font-bold text-[#2563EB]">4.50</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Recent Documents */}
-                <div className="hidden sm:block rounded-lg border border-[#E5E7EB] dark:border-slate-800 p-3 sm:p-4 bg-white dark:bg-slate-900">
-                  <h4 className="text-xs font-semibold text-[#111827] dark:text-white mb-2">Recent documents</h4>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">GST 211 report draft</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Edited 2 days ago</span>
-                    </div>
-                    <div className="flex items-center justify-between py-1">
-                      <span className="text-[#111827] dark:text-slate-200">CSC 201 assignment outline</span>
-                      <span className="text-[11px] text-[#5B6472] dark:text-slate-400">Edited last week</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* Real Screenshot Image */}
+            <img
+              src={screenshots[activeScreenshot].src}
+              alt={screenshots[activeScreenshot].alt}
+              loading="lazy"
+              width={1920}
+              height={1200}
+              className="w-full h-auto block bg-white dark:bg-slate-950"
+            />
           </div>
         </div>
       </section>

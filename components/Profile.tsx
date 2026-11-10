@@ -43,6 +43,87 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
   });
 
+  // Manual Paystack receipt verification state
+  const currentUid = getCurrentUserId() || (profile as any)?.id || '';
+  const pendingRefKey = currentUid ? `scolaris_pending_payment_ref_${currentUid}` : '';
+  const [receiptRefInput, setReceiptRefInput] = useState<string>(() => {
+    try {
+      return pendingRefKey ? (localStorage.getItem(pendingRefKey) || '') : '';
+    } catch {
+      return '';
+    }
+  });
+  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
+  const [receiptVerifyFeedback, setReceiptVerifyFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  const handleManualReceiptVerify = async (e?: React.FormEvent, useEmailLookup = false) => {
+    if (e) e.preventDefault();
+    const refToVerify = useEmailLookup ? '' : receiptRefInput.trim();
+    if (!useEmailLookup && !refToVerify) {
+      setReceiptVerifyFeedback({
+        type: 'error',
+        message: 'Paste your Paystack transaction reference from your email receipt.'
+      });
+      return;
+    }
+
+    setIsVerifyingReceipt(true);
+    setReceiptVerifyFeedback(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch('/api/subscription/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          reference: refToVerify || undefined,
+          email: profile.email
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setReceiptVerifyFeedback({
+          type: 'error',
+          message: data.error || data.message || 'Could not verify that payment reference. Check the reference on your Paystack receipt and try again.'
+        });
+        return;
+      }
+
+      try {
+        if (pendingRefKey) localStorage.removeItem(pendingRefKey);
+      } catch {}
+
+      const updatedProfile: UserProfile = {
+        ...profile,
+        tier: data.tier || 'plus',
+        isPro: true,
+        subscriptionTier: data.tier || 'plus',
+        subscriptionStatus: 'active',
+        paymentStatus: 'paid',
+        subscriptionEnd: data.currentPeriodEnd || profile.subscriptionEnd || ''
+      };
+      setProfile(updatedProfile);
+      setEditedProfile(updatedProfile);
+      setReceiptRefInput('');
+      setReceiptVerifyFeedback({
+        type: 'success',
+        message: data.message || `Payment verified! Your plan is now ${data.tier === 'studio' ? 'KorsIQ Premium' : 'KorsIQ Plus'}.`
+      });
+    } catch (err: any) {
+      setReceiptVerifyFeedback({
+        type: 'error',
+        message: err?.message || 'Unable to connect to verification server. Please try again.'
+      });
+    } finally {
+      setIsVerifyingReceipt(false);
+    }
+  };
+
   useEffect(() => {
     setEditedProfile(profile);
   }, [profile]);
@@ -60,27 +141,38 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
         setIsLoadingFiles(false);
       });
 
-    // Fetch real AI credit usage for the current billing period
+    // Fetch real AI credit balance & usage for the current billing period
     const loadAiCreditsUsage = async () => {
       try {
         const token = await getAccessToken();
-        const res = await fetch('/api/usage/ai-credits', {
+        const res = await fetch('/api/credits/balance', {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         if (res.ok) {
           const data = await res.json();
           if (typeof data.used === 'number') setAiCreditsUsed(data.used);
-          if (data.periodEnd) setAiPeriodEnd(data.periodEnd);
+          if (data.periodEnd || data.resetDate) setAiPeriodEnd(data.periodEnd || data.resetDate);
           return;
         }
       } catch {}
 
-      // Direct RLS-backed Supabase fallback
+      // Direct RLS-backed Supabase fallback (ai_credit_ledger -> ai_usage)
       try {
         const authUid = getCurrentUserId();
         if (authUid) {
           const now = new Date();
           const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+          const { data: ledgerRows, error: ledgerErr } = await supabase
+            .from('ai_credit_ledger')
+            .select('delta')
+            .eq('user_id', authUid)
+            .gte('created_at', periodStart);
+          if (!ledgerErr && Array.isArray(ledgerRows) && ledgerRows.length > 0) {
+            const netSpent = ledgerRows.reduce((acc: number, row: any) => acc + -(Number(row.delta) || 0), 0);
+            setAiCreditsUsed(Math.max(0, netSpent));
+            return;
+          }
+
           const { data } = await supabase
             .from('ai_usage')
             .select('credits')
@@ -97,13 +189,59 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
     loadAiCreditsUsage();
   }, [profile.email, profile.tier, profile.subscriptionTier]);
 
-  const handleSaveIdentity = async () => {
-    setProfile(editedProfile);
-    const uid = getCurrentUserId();
-    if (uid) {
-      await DBService.saveProfile(uid, editedProfile).catch(() => {});
+  const [isSavingIdentity, setIsSavingIdentity] = useState(false);
+  const [identityFeedback, setIdentityFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setEditedProfile(profile);
     }
-    setIsEditing(false);
+  }, [profile, isEditing]);
+
+  const handleSaveIdentity = async () => {
+    const uid = getCurrentUserId() || (profile as any)?.id || '';
+    const trimmedDept = (editedProfile.department ?? editedProfile.major ?? '').trim();
+    const normalizedProfile: UserProfile = {
+      ...editedProfile,
+      department: trimmedDept,
+      major: trimmedDept || editedProfile.major || '',
+    };
+
+    if (!uid) {
+      setProfile(normalizedProfile);
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSavingIdentity(true);
+    setIdentityFeedback(null);
+    try {
+      const result = await DBService.saveProfile(uid, normalizedProfile);
+      if (result?.error || result?.droppedExtendedFields) {
+        setIdentityFeedback({
+          type: 'error',
+          message: "Could not save your profile changes. Please check your connection and try again."
+        });
+        return;
+      }
+      setProfile(normalizedProfile);
+      setIsEditing(false);
+      setIdentityFeedback({
+        type: 'success',
+        message: 'Academic profile saved.'
+      });
+      setTimeout(() => setIdentityFeedback(null), 3000);
+    } catch (err) {
+      setIdentityFeedback({
+        type: 'error',
+        message: "Could not save your profile changes. Please try again."
+      });
+    } finally {
+      setIsSavingIdentity(false);
+    }
   };
 
   const parseBytes = (fileSizeStr: string): number => {
@@ -156,14 +294,15 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
           {activeTab === 'identity' && (
             <button 
               type="button"
+              disabled={isSavingIdentity}
               onClick={() => isEditing ? handleSaveIdentity() : setIsEditing(true)}
-              className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer min-h-[44px] ${
+              className={`px-4 py-2 rounded-lg font-semibold text-xs transition-all cursor-pointer min-h-[44px] disabled:opacity-60 ${
                 isEditing 
                 ? 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm' 
                 : 'bg-white dark:bg-slate-800 text-[#111827] dark:text-white border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50'
               }`}
             >
-              {isEditing ? 'Save Changes' : 'Edit Profile'}
+              {isEditing ? (isSavingIdentity ? 'Saving...' : 'Save Changes') : 'Edit Profile'}
             </button>
           )}
         </div>
@@ -239,6 +378,11 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div>
                     <span className="text-2xl font-bold text-[#111827] dark:text-white">{currentPlan.price}</span>
+                    {profile.isPro && profile.subscriptionEnd && (
+                      <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 mt-1">
+                        Active · Renews {new Date(profile.subscriptionEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    )}
                   </div>
                   <p className="text-xs text-[#5B6472] max-w-sm">
                     {currentPlan.tagline}
@@ -271,48 +415,95 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 </p>
               </div>
 
-              {/* AI Credits Card (Backed by real ai_usage metering) */}
+              {/* AI Credits Card (Backed by atomic ai_credit_ledger) */}
               <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Cpu size={16} className="text-[#2563EB]" />
                     <h3 className="font-bold text-sm text-[#111827] dark:text-white">AI credits</h3>
                   </div>
-                  {currentPlan.aiCreditsAllowance > 0 ? (
-                    <span className="text-xs text-[#5B6472]">
-                      {aiCreditsUsed} of {currentPlan.aiCreditsAllowance} credits used this period
-                    </span>
-                  ) : (
-                    <span className="text-xs text-[#5B6472]">Free plan</span>
-                  )}
+                  <span className="text-xs font-semibold text-[#111827] dark:text-white">
+                    {Math.max(0, currentPlan.aiCreditsAllowance - aiCreditsUsed)} of {currentPlan.aiCreditsAllowance} credits remaining
+                  </span>
                 </div>
 
-                {currentPlan.aiCreditsAllowance > 0 ? (
-                  <>
-                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div
-                        className="bg-[#2563EB] h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${Math.min(100, Math.round((aiCreditsUsed / currentPlan.aiCreditsAllowance) * 100))}%`
-                        }}
-                      />
-                    </div>
-                    <p className="text-xs text-[#5B6472]">
-                      Resets on {new Date(aiPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.
-                    </p>
-                  </>
-                ) : (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                    <p className="text-xs text-[#5B6472]">
-                      AI credits are not included in Free.
-                    </p>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-[#2563EB] h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.min(100, Math.round((Math.max(0, currentPlan.aiCreditsAllowance - aiCreditsUsed) / Math.max(1, currentPlan.aiCreditsAllowance)) * 100))}%`
+                    }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#5B6472]">
+                  <span>
+                    {aiCreditsUsed} used this period · Resets on {new Date(aiPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                  {planKey !== 'studio' && (
                     <button
                       type="button"
                       onClick={() => setShowPlansModal(true)}
-                      className="px-3.5 py-2 border border-[#2563EB] text-[#2563EB] hover:bg-[#EFF6FF] dark:hover:bg-blue-950/40 rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0"
+                      className="text-xs font-semibold text-[#2563EB] hover:underline cursor-pointer"
                     >
-                      Upgrade plan
+                      Get more credits →
                     </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-[#5B6472]">
+                  Summary (1) · Flashcards (2) · Practice Quiz (2) · AI Podcast (6) · Studio Outline (2) · Studio Section (3) · Full Document (10) · AI Tutor &amp; Circle @korsiq chat are free.
+                </p>
+              </div>
+
+              {/* Have a receipt? Verify payment (Manual Recovery Box) */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CreditCard size={16} className="text-[#2563EB]" />
+                    <h3 className="font-bold text-sm text-[#111827] dark:text-white">Have a receipt? Verify payment</h3>
+                  </div>
+                </div>
+                <p className="text-xs text-[#5B6472]">
+                  Paid on Paystack and haven&apos;t seen your plan update? Paste the reference from your Paystack receipt below to verify and activate your subscription immediately.
+                </p>
+                <form onSubmit={(e) => handleManualReceiptVerify(e, false)} className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={receiptRefInput}
+                    onChange={(e) => setReceiptRefInput(e.target.value)}
+                    placeholder="e.g. KQ_PLUS_... or Paystack reference"
+                    className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-slate-950 border border-[#E5E7EB] dark:border-slate-700 rounded-lg text-[#111827] dark:text-white min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isVerifyingReceipt}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors"
+                  >
+                    {isVerifyingReceipt ? 'Verifying...' : 'Verify payment'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isVerifyingReceipt}
+                    onClick={() => handleManualReceiptVerify(undefined, true)}
+                    className="px-3.5 py-2 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-[#111827] dark:text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0 transition-colors"
+                  >
+                    Check by email
+                  </button>
+                </form>
+                {receiptVerifyFeedback && (
+                  <div
+                    role="alert"
+                    className={`p-3 rounded-lg text-xs flex items-center gap-2 border ${
+                      receiptVerifyFeedback.type === 'success'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
+                    }`}
+                  >
+                    {receiptVerifyFeedback.type === 'success' ? (
+                      <Check size={15} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle size={15} className="text-rose-600 shrink-0" />
+                    )}
+                    <span>{receiptVerifyFeedback.message}</span>
                   </div>
                 )}
               </div>
@@ -479,6 +670,45 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 )}
               </div>
             </div>
+
+            {identityFeedback && (
+              <div
+                role="status"
+                className={`p-3 rounded-lg border text-xs font-medium flex items-center gap-2 ${
+                  identityFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300'
+                }`}
+              >
+                {identityFeedback.type === 'success' ? <Check size={14} /> : <AlertCircle size={14} />}
+                <span>{identityFeedback.message}</span>
+              </div>
+            )}
+
+            {isEditing && (
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
+                <button
+                  type="button"
+                  disabled={isSavingIdentity}
+                  onClick={() => {
+                    setEditedProfile(profile);
+                    setIsEditing(false);
+                    setIdentityFeedback(null);
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5B6472] hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[44px] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingIdentity}
+                  onClick={handleSaveIdentity}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm min-h-[44px] disabled:opacity-60 cursor-pointer"
+                >
+                  {isSavingIdentity ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -670,6 +900,10 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                       <Check size={14} className="text-[#2563EB] shrink-0" />
                       <span>Public study circles</span>
                     </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#2563EB] shrink-0" />
+                      <span>20 monthly AI credits</span>
+                    </li>
                   </ul>
                 </div>
                 <button
@@ -677,7 +911,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   onClick={() => setShowPlansModal(false)}
                   className="w-full py-2.5 bg-[#2563EB] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px]"
                 >
-                  Current Plan
+                  {planKey === 'free' ? 'Current Plan' : 'Free Plan'}
                 </button>
               </div>
 
@@ -714,7 +948,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     </li>
                     <li className="flex items-center gap-2">
                       <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>200 monthly AI study credits</span>
+                      <span>150 monthly AI credits</span>
                     </li>
                   </ul>
                 </div>
@@ -727,7 +961,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  {profile.tier === 'plus' ? 'Current Plan' : 'Upgrade to Plus'}
+                  {planKey === 'plus' ? 'Current Plan' : 'Upgrade to Plus'}
                 </button>
               </div>
 
@@ -761,7 +995,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     </li>
                     <li className="flex items-center gap-2">
                       <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>1,000 AI credits, 10 GB storage</span>
+                      <span>200 monthly AI credits, 10 GB storage</span>
                     </li>
                   </ul>
                 </div>
@@ -774,7 +1008,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                   }}
                   className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold cursor-pointer min-h-[44px] transition-colors"
                 >
-                  {profile.tier === 'studio' ? 'Current Plan' : 'Upgrade to KorsIQ Premium'}
+                  {planKey === 'studio' ? 'Current Plan' : 'Upgrade to KorsIQ Premium'}
                 </button>
               </div>
             </div>

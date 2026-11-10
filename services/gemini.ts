@@ -139,12 +139,24 @@ async function safeFetchJson(url: string, options: RequestInit, fallbackErrorMes
       } catch {
         data = { error: fallbackErrorMessage };
       }
-      if (!response.ok || data.error) {
-        throw new Error(data.error || fallbackErrorMessage);
+      if (!response.ok || (data && typeof data === 'object' && data.error)) {
+        const errObj: any = new Error((data && data.error) || fallbackErrorMessage);
+        errObj.status = response.status;
+        if (data && typeof data === 'object') {
+          errObj.code = data.code;
+          errObj.balance = data.balance;
+          errObj.required = data.required;
+          errObj.allowance = data.allowance;
+          errObj.resetDate = data.resetDate;
+        }
+        throw errObj;
       }
       return data;
     } catch (err: any) {
       lastError = err;
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        break;
+      }
       if (attempts < maxAttempts && (err.message?.includes('Failed to fetch') || err.name === 'TypeError')) {
         await new Promise(r => setTimeout(r, 400));
         continue;
@@ -282,12 +294,24 @@ export const GeminiService = {
     }
   },
 
-  async extractFileText(fileName: string, fileType: string, contentBase64: string): Promise<{ success: boolean; extractedText?: string; error?: string; isScannedPdf?: boolean; fileName?: string; fileTypeDetected?: string; pageCount?: number }> {
+  async extractFileText(
+    fileName: string,
+    fileType: string,
+    contentBase64?: string,
+    options?: { storagePath?: string; bucket?: string; fileId?: string }
+  ): Promise<{ success: boolean; extractedText?: string; error?: string; isScannedPdf?: boolean; fileName?: string; fileTypeDetected?: string; pageCount?: number }> {
     try {
       const response = await fetch('/api/files/extract', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify({ fileName, fileType, contentBase64 })
+        body: JSON.stringify({
+          fileName,
+          fileType,
+          contentBase64: contentBase64 || undefined,
+          storagePath: options?.storagePath || undefined,
+          bucket: options?.bucket || undefined,
+          fileId: options?.fileId || undefined,
+        })
       });
       const data = await response.json().catch(() => ({}));
       if (data && typeof data.success === 'boolean') {
@@ -311,12 +335,23 @@ export const GeminiService = {
     }
   },
 
-  async scanDocumentWithVision(fileName: string, fileType: string, contentBase64: string): Promise<{ success: boolean; data?: any; error?: string }> {
+  async scanDocumentWithVision(
+    fileName: string,
+    fileType: string,
+    contentBase64?: string,
+    options?: { storagePath?: string; bucket?: string }
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
       const response = await fetch('/api/vision/scan', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify({ fileName, fileType, contentBase64 })
+        body: JSON.stringify({
+          fileName,
+          fileType,
+          contentBase64: contentBase64 || undefined,
+          storagePath: options?.storagePath || undefined,
+          bucket: options?.bucket || undefined,
+        })
       });
       const data = await response.json().catch(() => ({}));
       if (data && typeof data.success === 'boolean') {
@@ -395,8 +430,30 @@ export const GeminiService = {
   },
 
   // ==========================================
-  // KORSIQ ACADEMIC STUDIO WRAPPERS
+  // KORSIQ ACADEMIC STUDIO & CREDITS WRAPPERS
   // ==========================================
+
+  async getCreditBalance(): Promise<{
+    tier: string;
+    allowance: number;
+    used: number;
+    remaining: number;
+    balance: number;
+    periodStart: string;
+    periodEnd: string;
+    resetDate: string;
+  } | null> {
+    try {
+      const response = await fetch('/api/credits/balance', {
+        method: 'GET',
+        headers: await getHeaders()
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  },
 
   async generateStudioPlan(payload: {
     title: string;
@@ -406,18 +463,13 @@ export const GeminiService = {
     targetWordCount: number;
     citationStyle: string;
     references?: any[];
-  }): Promise<{ abstractPlan?: string; totalEstimatedWords?: number; outline: any[] }> {
-    try {
-      const response = await fetch('/api/ai/studio/plan', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify(payload)
-      });
-      return await response.json();
-    } catch (err: any) {
-      console.warn('generateStudioPlan error:', err);
-      throw err;
-    }
+    requestId?: string;
+  }): Promise<{ abstractPlan?: string; totalEstimatedWords?: number; outline: any[]; creditsRemaining?: number }> {
+    return await safeFetchJson('/api/ai/studio/plan', {
+      method: 'POST',
+      headers: await getHeaders(),
+      body: JSON.stringify(payload)
+    }, 'Failed to generate academic outline.');
   },
 
   async generateStudioSection(payload: {
@@ -434,18 +486,15 @@ export const GeminiService = {
     references?: any[];
     existingContent?: string;
     mode?: string;
-  }): Promise<{ content: string; wordCount: number }> {
-    try {
-      const response = await fetch('/api/ai/studio/generate-section', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify(payload)
-      });
-      return await response.json();
-    } catch (err: any) {
-      console.warn('generateStudioSection error:', err);
-      throw err;
-    }
+    isFullDocumentFirstSection?: boolean;
+    isFullDocumentContinuation?: boolean;
+    requestId?: string;
+  }): Promise<{ content: string; wordCount: number; creditsRemaining?: number }> {
+    return await safeFetchJson('/api/ai/studio/generate-section', {
+      method: 'POST',
+      headers: await getHeaders(),
+      body: JSON.stringify(payload)
+    }, 'Failed to write section.');
   },
 
   async reviewStudioDocument(payload: {
@@ -454,24 +503,20 @@ export const GeminiService = {
     fullContent: string;
     citationStyle: string;
     references?: any[];
+    requestId?: string;
   }): Promise<{
     academicQualityScore: number;
     summary: string;
     strengths: string[];
     weaknesses: string[];
     suggestions: any[];
+    creditsRemaining?: number;
   }> {
-    try {
-      const response = await fetch('/api/ai/studio/review', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify(payload)
-      });
-      return await response.json();
-    } catch (err: any) {
-      console.warn('reviewStudioDocument error:', err);
-      throw err;
-    }
+    return await safeFetchJson('/api/ai/studio/review', {
+      method: 'POST',
+      headers: await getHeaders(),
+      body: JSON.stringify(payload)
+    }, 'Failed to review academic document.');
   },
 
   async assistStudioText(payload: {
@@ -479,17 +524,12 @@ export const GeminiService = {
     instruction: string;
     docTitle?: string;
     sectionTitle?: string;
-  }): Promise<{ text: string }> {
-    try {
-      const response = await fetch('/api/ai/studio/assist', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify(payload)
-      });
-      return await response.json();
-    } catch (err: any) {
-      console.warn('assistStudioText error:', err);
-      return { text: payload.selectedText };
-    }
+    requestId?: string;
+  }): Promise<{ text: string; creditsRemaining?: number }> {
+    return await safeFetchJson('/api/ai/studio/assist', {
+      method: 'POST',
+      headers: await getHeaders(),
+      body: JSON.stringify(payload)
+    }, 'Failed to rewrite text.');
   }
 };

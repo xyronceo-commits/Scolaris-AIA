@@ -29,6 +29,7 @@ export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetabl
 
 interface StudyPlannerViewProps {
   initialTab?: string;
+  openAddCourseSignal?: number;
   courses: Course[];
   setCourses: React.Dispatch<React.SetStateAction<Course[]>>;
   schedule: StudySession[];
@@ -44,6 +45,7 @@ interface StudyPlannerViewProps {
 
 export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   initialTab = 'today',
+  openAddCourseSignal = 0,
   courses,
   setCourses,
   schedule,
@@ -56,13 +58,28 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   onToggleTheme,
   hubs
 }) => {
-  // Primary tabs: Today (default), Week, Exams
+  // Primary tabs: Today (default), Week, Exams, Courses
   const [activeTab, setActiveTab] = useState<PlannerViewMode>(() => {
+    if (openAddCourseSignal > 0) return 'courses';
     if (['courses', 'timetable', 'cgpa', 'analytics', 'week', 'exams'].includes(initialTab)) {
       return initialTab as PlannerViewMode;
     }
     return 'today';
   });
+  const [courseFormSignal, setCourseFormSignal] = useState<number>(openAddCourseSignal);
+
+  useEffect(() => {
+    if (['courses', 'timetable', 'cgpa', 'analytics', 'week', 'exams', 'today'].includes(initialTab)) {
+      setActiveTab(initialTab as PlannerViewMode);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (openAddCourseSignal > 0) {
+      setActiveTab('courses');
+      setCourseFormSignal(s => s + 1);
+    }
+  }, [openAddCourseSignal]);
 
   const [tasks, setTasks] = useState<AcademicTask[]>([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
@@ -172,18 +189,24 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
 
         {/* ONE Primary Action */}
         <button
-          onClick={() => openNewTaskModal(activeTab === 'exams' ? 'exam' : 'general')}
+          onClick={() => {
+            if (activeTab === 'courses') {
+              setCourseFormSignal(s => s + 1);
+            } else {
+              openNewTaskModal(activeTab === 'exams' ? 'exam' : 'general');
+            }
+          }}
           className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs min-h-[44px] transition-colors cursor-pointer"
         >
           <Plus size={16} />
-          <span>{activeTab === 'exams' ? '+ Add Exam' : '+ Add task'}</span>
+          <span>{activeTab === 'courses' ? '+ Add course' : activeTab === 'exams' ? '+ Add Exam' : '+ Add task'}</span>
         </button>
       </div>
 
-      {/* Primary Tabs (Today / Week / Exams) & Secondary switcher */}
+      {/* Primary Tabs (Today / Week / Exams / Courses) & Secondary switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-2">
-        {/* Core 3 Tabs */}
-        <div className="flex gap-1">
+        {/* Core Tabs */}
+        <div className="flex flex-wrap gap-1">
           <button
             onClick={() => setActiveTab('today')}
             className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors min-h-[44px] flex items-center gap-1.5 cursor-pointer ${
@@ -231,6 +254,23 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             {examTasks.length > 0 && (
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300">
                 {examTasks.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('courses')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors min-h-[44px] flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'courses'
+                ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold border border-blue-200 dark:border-blue-900'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <BookOpen size={15} />
+            <span>Courses</span>
+            {courses.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                {courses.length}
               </span>
             )}
           </button>
@@ -407,6 +447,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             setActiveTab('today');
           }}
           profile={profile}
+          openFormSignal={courseFormSignal}
         />
       )}
 

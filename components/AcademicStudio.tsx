@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText,
   Plus,
-  Sparkles,
+  BookOpen as Sparkles,
   BookOpen,
   ArrowRight,
   ArrowLeft,
@@ -20,7 +20,7 @@ import {
   ChevronRight,
   ChevronDown,
   Layers,
-  Wand2,
+  Edit3 as Wand2,
   RefreshCw,
   Sliders,
   Check,
@@ -154,6 +154,11 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+  const [insufficientCreditsNotice, setInsufficientCreditsNotice] = useState<{
+    required: number;
+    balance: number;
+    resetDate?: string;
+  } | null>(null);
 
   // Mobile Bottom Sheets & Quiet Upgrade State
   const [mobileSheet, setMobileSheet] = useState<'outline' | 'sources' | 'cite' | 'versions' | null>(null);
@@ -390,7 +395,16 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       showToast('Academic plan & outline generated! Please review and approve your outline.');
     } catch (err: any) {
       console.error('Failed to generate studio plan:', err);
-      showToast('Could not generate plan right now. Please try again.');
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setIsCreatingDoc(false);
+        setInsufficientCreditsNotice({
+          required: err.required ?? 2,
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
+      showToast(err?.message || 'Could not generate plan right now. Please try again.');
     } finally {
       setIsPlanningLoading(false);
     }
@@ -518,6 +532,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
     const outlineItem = activeDocument.outline.find((o) => o.id === sec.outlineItemId);
     const targetWordGoal = outlineItem?.targetWords || 400;
 
+    setInsufficientCreditsNotice(null);
     setIsSectionGenerating(true);
     try {
       const result = await GeminiService.generateStudioSection({
@@ -538,13 +553,21 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       showToast(`Section "${sec.title}" generated successfully!`);
     } catch (err: any) {
       console.error('Section generation failed:', err);
-      showToast('Section generation failed. Please try again.');
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? 3,
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
+      showToast(err?.message || 'Section generation failed. Please try again.');
     } finally {
       setIsSectionGenerating(false);
     }
   };
 
-  // BATCH GENERATE ALL EMPTY/APPROVED SECTIONS SEQUENTIALLY
+  // BATCH GENERATE ALL EMPTY/APPROVED SECTIONS SEQUENTIALLY (10 credits total)
   const handleBatchGenerateAll = async () => {
     if (!activeDocument) return;
     const pendingSections = activeDocument.sections.filter((s) => !s.content || s.content.trim().length === 0);
@@ -553,6 +576,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       return;
     }
 
+    setInsufficientCreditsNotice(null);
     setBatchProgress({ current: 0, total: pendingSections.length, title: 'Starting sequential generation...' });
 
     let updatedSections = [...activeDocument.sections];
@@ -574,6 +598,8 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
           studentInstructions: outlineItem?.personalInstructions,
           references: activeDocument.references,
           mode: 'generate',
+          isFullDocumentFirstSection: i === 0,
+          isFullDocumentContinuation: i > 0,
         });
 
         const words = result.content.trim().split(/\s+/).filter(Boolean).length;
@@ -587,8 +613,18 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
         if (sec.id === activeSectionId) {
           setEditorText(result.content);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn(`Batch failed on section ${sec.title}:`, err);
+        if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+          setBatchProgress(null);
+          setInsufficientCreditsNotice({
+            required: err.required ?? 10,
+            balance: err.balance ?? 0,
+            resetDate: err.resetDate
+          });
+          return;
+        }
+        break;
       }
     }
 
@@ -605,11 +641,12 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
     showToast('Batch generation complete! All sections drafted.');
   };
 
-  // IN-CONTEXT AI TEXT ASSISTANT
+  // IN-CONTEXT AI TEXT ASSISTANT (1 credit)
   const handleContextualAssist = async (instruction: string) => {
     if (!activeDocument || !editorText) return;
 
     const textToTransform = selectedTextSnippet || editorText;
+    setInsufficientCreditsNotice(null);
     setIsAssistLoading(true);
 
     try {
@@ -630,16 +667,24 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       }
       setSelectedTextSnippet('');
       showToast('Text updated by AI assistant.');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Contextual assist error:', err);
-      showToast('AI assistance failed.');
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? 1,
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
+      showToast(err?.message || 'AI assistance failed.');
     } finally {
       setIsAssistLoading(false);
     }
   };
 
   // =========================================================
-  // DOCUMENT REVIEW & QUALITY AUDIT
+  // DOCUMENT REVIEW & QUALITY AUDIT (1 credit)
   // =========================================================
 
   const handleRunDocumentReview = async () => {
@@ -651,6 +696,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       return;
     }
 
+    setInsufficientCreditsNotice(null);
     setIsReviewLoading(true);
     setActiveRightTab('review');
     try {
@@ -675,7 +721,15 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
       showToast('Academic audit complete!');
     } catch (err: any) {
       console.error('Audit failed:', err);
-      showToast('Failed to complete document audit.');
+      if (err?.status === 402 || err?.code === 'INSUFFICIENT_CREDITS') {
+        setInsufficientCreditsNotice({
+          required: err.required ?? 1,
+          balance: err.balance ?? 0,
+          resetDate: err.resetDate
+        });
+        return;
+      }
+      showToast(err?.message || 'Failed to complete document audit.');
     } finally {
       setIsReviewLoading(false);
     }
@@ -889,6 +943,48 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-16 font-sans text-slate-900 dark:text-slate-100">
+      {insufficientCreditsNotice && (
+        <div
+          role="alert"
+          className="p-4 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-900 text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-0.5 text-xs">
+              <p className="font-bold">
+                Not enough credits ({insufficientCreditsNotice.balance} remaining, {insufficientCreditsNotice.required} required)
+              </p>
+              <p className="text-amber-800 dark:text-amber-300">
+                {insufficientCreditsNotice.resetDate
+                  ? `Your monthly credits reset on ${new Date(insufficientCreditsNotice.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}. `
+                  : ''}
+                Upgrade your plan for up to 200 monthly AI credits.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setCheckoutPlan('studio');
+                setShowCheckoutModal(true);
+              }}
+              className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[40px] cursor-pointer"
+            >
+              Upgrade
+            </button>
+            <button
+              type="button"
+              onClick={() => setInsufficientCreditsNotice(null)}
+              className="p-2 text-amber-700 hover:text-amber-900 rounded-lg cursor-pointer"
+              aria-label="Dismiss credit alert"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Toast Banner */}
       <AnimatePresence>
         {feedbackToast && (
@@ -1504,7 +1600,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                           onClick={() => handleContextualAssist('Elevate academic tone and vocabulary')}
                           className="px-2.5 py-1 bg-[#2563EB] hover:bg-blue-500 rounded text-xs font-semibold cursor-pointer"
                         >
-                          Rewrite
+                          Rewrite — 1 credit
                         </button>
                         <button
                           onClick={() => setSelectedTextSnippet('')}
@@ -1538,16 +1634,26 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                   </p>
                 </div>
 
-                {/* Action Buttons: Draft this section, Revise selection, Check citations */}
+                {/* Action Buttons: Write Section (3), Full Document (10), Rewrite (1), Review (1) */}
                 <div className="space-y-2">
                   <button
                     type="button"
                     onClick={() => handleGenerateActiveSection('generate')}
-                    disabled={isSectionGenerating}
+                    disabled={isSectionGenerating || !!batchProgress}
                     className="w-full py-2.5 px-3 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50 min-h-[44px]"
                   >
                     <Wand2 size={14} />
-                    <span>{isSectionGenerating ? 'Drafting...' : 'Draft this section'}</span>
+                    <span>{isSectionGenerating ? 'Drafting...' : 'Write Section — 3 credits'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBatchGenerateAll}
+                    disabled={isSectionGenerating || !!batchProgress}
+                    className="w-full py-2 px-3 bg-white dark:bg-slate-800 border border-[#2563EB]/40 hover:bg-blue-50/50 dark:hover:bg-slate-700 text-[#2563EB] dark:text-blue-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 min-h-[44px]"
+                  >
+                    <Layers size={14} />
+                    <span>{batchProgress ? 'Drafting Full Document...' : 'Generate Full Document — 10 credits'}</span>
                   </button>
 
                   <button
@@ -1556,13 +1662,13 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                       if (selectedTextSnippet) {
                         handleContextualAssist('Elevate academic tone and vocabulary');
                       } else {
-                        handleGenerateActiveSection('academic_tone');
+                        handleContextualAssist('Improve academic clarity, structure, and scholarly tone');
                       }
                     }}
-                    disabled={isSectionGenerating || !editorText}
+                    disabled={isSectionGenerating || isAssistLoading || !editorText}
                     className="w-full py-2 px-3 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-[#111827] dark:text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 min-h-[44px]"
                   >
-                    <span>Revise selection</span>
+                    <span>{isAssistLoading ? 'Rewriting...' : 'Rewrite — 1 credit'}</span>
                   </button>
 
                   <button
@@ -1571,7 +1677,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     disabled={isReviewLoading}
                     className="w-full py-2 px-3 bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-[#111827] dark:text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 min-h-[44px]"
                   >
-                    <span>Check citations</span>
+                    <span>{isReviewLoading ? 'Checking...' : 'Check citations — 1 credit'}</span>
                   </button>
                 </div>
 
@@ -2096,7 +2202,7 @@ export const AcademicStudio: React.FC<AcademicStudioProps> = ({
                     ) : (
                       <>
                         <Wand2 size={14} />
-                        <span>Generate Academic Plan</span>
+                        <span>Generate Outline — 2 credits</span>
                       </>
                     )}
                   </button>
