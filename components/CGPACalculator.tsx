@@ -1106,6 +1106,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
                       </div>
                       <button
                         onClick={() => {
+                          if (!window.confirm(`Delete "${sem.label}"? This will remove these course grades from your calculated CGPA.`)) return;
                           const updated = semesters.filter((_, idx) => idx !== sIdx);
                           updateSemesters(updated);
                         }}

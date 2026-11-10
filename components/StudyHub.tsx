@@ -426,6 +426,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const handleDeleteLibraryFile = async (fileId: string) => {
     if (!activeCourseId) return;
     const existingFiles = activeHub.libraryFiles || [];
+    const targetFile = existingFiles.find(f => f.id === fileId);
+    if (!window.confirm(`Delete "${targetFile?.fileName || 'this resource'}" from course library?`)) return;
+
     const updatedFiles = existingFiles.filter(f => f.id !== fileId);
     
     const updatedHub = {
