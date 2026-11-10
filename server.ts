@@ -26,9 +26,49 @@ import {
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
 
 export function cleanEnvKey(name: string): string {
-  const val = process.env[name];
+  if (!name || typeof process === 'undefined' || !process.env) return '';
+  // 1. Direct lookup
+  let val = process.env[name];
+  // 2. Case-insensitive and trimmed key lookup fallback (vital for Linux/Vercel hostings)
+  if (!val) {
+    const target = name.trim().toUpperCase();
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.trim().toUpperCase() === target && typeof v === 'string') {
+        val = v;
+        break;
+      }
+    }
+  }
   if (!val || typeof val !== 'string') return '';
-  return val.trim().replace(/^["']|["']$/g, '').trim();
+  return val.replace(/^["']+|["']+$/g, '').replace(/[\r\n]/g, '').trim();
+}
+
+export function getPaystackSecretKey(): string {
+  return (
+    cleanEnvKey('PAYSTACK_SECRET_KEY') ||
+    cleanEnvKey('PAYSTACK_SECRET') ||
+    cleanEnvKey('PAYSTACK_KEY') ||
+    cleanEnvKey('SCOLARIS_PAYSTACK_SECRET_KEY') ||
+    cleanEnvKey('VITE_PAYSTACK_SECRET_KEY')
+  );
+}
+
+export function getPaystackPlusPlanCode(): string {
+  return (
+    cleanEnvKey('PAYSTACK_PLUS_PLAN_CODE') ||
+    cleanEnvKey('PAYSTACK_PLAN_PLUS') ||
+    cleanEnvKey('PAYSTACK_PLUS_CODE') ||
+    'PLN_2s5jpok47fzrpp3'
+  );
+}
+
+export function getPaystackStudioPlanCode(): string {
+  return (
+    cleanEnvKey('PAYSTACK_STUDIO_PLAN_CODE') ||
+    cleanEnvKey('PAYSTACK_PLAN_STUDIO') ||
+    cleanEnvKey('PAYSTACK_STUDIO_CODE') ||
+    'PLN_z34ejcjcs5od3mf'
+  );
 }
 
 // Supabase configuration
@@ -53,6 +93,9 @@ if (!supabaseAuthClient) {
 }
 if (!supabaseAdmin) {
   console.warn('SUPABASE_SERVICE_ROLE_KEY is not set: admin dashboard data and audit logging are disabled.');
+}
+if (!getPaystackSecretKey()) {
+  console.warn('Paystack secret key is not configured: set PAYSTACK_SECRET_KEY in hosting environment variables to enable payments and verification.');
 }
 
 // Storage S3 endpoint for the shared library bucket (override with SUPABASE_S3_ENDPOINT if needed)
@@ -539,7 +582,17 @@ export async function createExpressApp() {
 
   // API Routes
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'healthy' });
+    const paystackKey = getPaystackSecretKey();
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      services: {
+        supabase: Boolean(supabaseAuthClient),
+        supabaseAdmin: Boolean(supabaseAdmin),
+        gemini: Boolean(pickGeminiKey()),
+        paystack: Boolean(paystackKey)
+      }
+    });
   });
 
   // SEO Static Deliverables
@@ -577,14 +630,14 @@ export async function createExpressApp() {
       name: 'KorsIQ Plus',
       amountNaira: 7500,
       amountKobo: 750000,
-      planCode: cleanEnvKey('PAYSTACK_PLUS_PLAN_CODE') || 'PLN_2s5jpok47fzrpp3'
+      planCode: getPaystackPlusPlanCode()
     },
     studio: {
       tier: 'studio' as const,
       name: 'KorsIQ Studio',
       amountNaira: 15000,
       amountKobo: 1500000,
-      planCode: cleanEnvKey('PAYSTACK_STUDIO_PLAN_CODE') || 'PLN_z34ejcjcs5od3mf'
+      planCode: getPaystackStudioPlanCode()
     }
   };
 
@@ -663,12 +716,12 @@ export async function createExpressApp() {
         });
       }
 
-      const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+      const paystackKey = getPaystackSecretKey();
       if (!paystackKey) {
         console.error('[Subscription Initialize] PAYSTACK_SECRET_KEY is not configured on the server.');
         return res.status(503).json({
           success: false,
-          error: 'Payment gateway is not configured on the server (missing PAYSTACK_SECRET_KEY).'
+          error: 'Payment gateway is not configured on the server (missing PAYSTACK_SECRET_KEY in server environment).'
         });
       }
 
@@ -824,11 +877,11 @@ export async function createExpressApp() {
         }
       }
 
-      const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+      const paystackKey = getPaystackSecretKey();
       if (!paystackKey) {
         return res.status(503).json({
           success: false,
-          error: 'Payment verification is unavailable: PAYSTACK_SECRET_KEY is not configured on the server.'
+          error: 'Payment verification is unavailable: PAYSTACK_SECRET_KEY is not configured on the server. If recently added in Vercel environment variables, please redeploy the project.'
         });
       }
 
@@ -1123,7 +1176,7 @@ export async function createExpressApp() {
 
   // Paystack Webhook Handler (Supports both canonical /api/subscription/webhook and /api/paystack/webhook)
   app.post(['/api/subscription/webhook', '/api/paystack/webhook'], async (req: AuthenticatedRequest, res) => {
-    const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+    const paystackKey = getPaystackSecretKey();
     if (!paystackKey) {
       return res.status(400).json({ error: 'Paystack secret is not configured' });
     }
@@ -4842,9 +4895,9 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       return res.status(400).json({ success: false, error: 'Payment reference is required.' });
     }
 
-    const secretKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+    const secretKey = getPaystackSecretKey();
     if (!secretKey) {
-      return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server.' });
+      return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server. If recently added in Vercel environment variables, please redeploy the project.' });
     }
 
     try {
