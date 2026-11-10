@@ -167,6 +167,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
 
   // Transcript Upload & Review Modal State
   const [isUploadingTranscript, setIsUploadingTranscript] = useState(false);
+  const [transcriptUploadError, setTranscriptUploadError] = useState<string | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [extractedCoursesReview, setExtractedCoursesReview] = useState<CGPACourseRecord[]>([]);
   const [transcriptSemesterLabel, setTranscriptSemesterLabel] = useState('Imported Semester');
@@ -376,38 +377,111 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
     }
   };
 
+  // Helper: read File as base64 string or compress large image client-side to stay under Vercel's 4.5 MB payload limit
+  const prepareFileBase64 = async (file: File): Promise<{ base64: string; mimeType: string }> => {
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(file.name);
+    const MAX_RAW_BYTES = 3 * 1024 * 1024; // 3 MB raw (~4 MB base64)
+
+    if (isImage && file.size > 1.5 * 1024 * 1024) {
+      // Compress large photo client-side via canvas
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          try {
+            const maxDim = 1800;
+            let { width, height } = img;
+            if (width > maxDim || height > maxDim) {
+              const scale = maxDim / Math.max(width, height);
+              width = Math.round(width * scale);
+              height = Math.round(height * scale);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('Could not initialize image compressor.'));
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.84));
+          } catch (err) {
+            reject(err);
+          }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('Could not read the selected image file.'));
+        };
+        img.src = objectUrl;
+      });
+      const base64 = dataUrl.split(',')[1] || '';
+      if (base64.length > 4 * 1024 * 1024) {
+        throw new Error('Please upload a file under 3 MB. This image is still too large after compression.');
+      }
+      return { base64, mimeType: 'image/jpeg' };
+    }
+
+    if (file.size > MAX_RAW_BYTES) {
+      throw new Error(`Please upload a file under 3 MB (this file is ${(file.size / (1024 * 1024)).toFixed(1)} MB). Try a smaller PDF or a clearer photo.`);
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read the file from your device.'));
+      reader.readAsDataURL(file);
+    });
+
+    const base64 = dataUrl.split(',')[1] || '';
+    if (!base64) {
+      throw new Error('The selected file appears to be empty.');
+    }
+    return { base64, mimeType: file.type || (isImage ? 'image/jpeg' : 'application/pdf') };
+  };
+
   // Transcript File Upload & Text Extraction
   const handleTranscriptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setTranscriptUploadError(null);
     setIsUploadingTranscript(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const extractRes = await GeminiService.extractFileText(file.name, file.type, base64);
-        
-        if (extractRes.success && extractRes.extractedText) {
-          // Parse course records via server AI
-          const parseRes = await GeminiService.parseTranscript(extractRes.extractedText);
-          if (parseRes.success && parseRes.courses && parseRes.courses.length > 0) {
-            setExtractedCoursesReview(parseRes.courses);
-            setTranscriptSemesterLabel(file.name.replace(/\.[^/.]+$/, '').slice(0, 30));
-            setShowReviewModal(true);
-          } else {
-            alert("No course grade records could be detected in this document. Please check the document format or enter courses manually.");
-          }
-        } else {
-          alert(extractRes.error || "Unable to extract text from this document. Please try a clearer scan or PDF.");
-        }
-        setIsUploadingTranscript(false);
-      };
-      reader.readAsDataURL(file);
+      const { base64, mimeType } = await prepareFileBase64(file);
+      const extractRes = await GeminiService.extractFileText(file.name, mimeType, base64);
+
+      if (!extractRes.success || !extractRes.extractedText) {
+        setTranscriptUploadError(
+          extractRes.error ||
+            "This PDF looks scanned and we couldn't read the text. Try a clearer file or enter grades manually."
+        );
+        return;
+      }
+
+      const parseRes = await GeminiService.parseTranscript(extractRes.extractedText);
+      if (parseRes.success && Array.isArray(parseRes.courses) && parseRes.courses.length > 0) {
+        setExtractedCoursesReview(parseRes.courses);
+        setTranscriptSemesterLabel(file.name.replace(/\.[^/.]+$/, '').slice(0, 30));
+        setShowReviewModal(true);
+      } else {
+        setTranscriptUploadError(
+          parseRes.error ||
+            "We read the document text, but could not detect course codes and grades. Please try a clearer transcript or enter your grades manually."
+        );
+      }
     } catch (err: any) {
       console.error('handleTranscriptUpload error:', err);
+      setTranscriptUploadError(
+        err?.message || "Couldn't read that transcript file. Please upload a PDF or clear photo under 3 MB, or enter grades manually."
+      );
+    } finally {
       setIsUploadingTranscript(false);
-      alert("Error reading document. Please try again.");
+      if (e.target) {
+        e.target.value = '';
+      }
     }
   };
 
@@ -948,31 +1022,59 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
       {activeTab === 'records' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-sans font-bold text-slate-900">Academic Records & Transcripts</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Upload official transcripts or past semester results (PDF or photo) to automatically import your grades.
-              </p>
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-sans font-bold text-slate-900 dark:text-white">Academic Records & Transcripts</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Upload official transcripts or past semester results (PDF or photo under 3 MB) to automatically import your grades.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  ref={transcriptInputRef}
+                  type="file"
+                  accept=".pdf,image/jpeg,image/png,image/webp"
+                  onChange={handleTranscriptUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => {
+                    setTranscriptUploadError(null);
+                    transcriptInputRef.current?.click();
+                  }}
+                  disabled={isUploadingTranscript}
+                  className="px-4 py-2.5 min-h-[44px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Upload size={14} className={isUploadingTranscript ? 'animate-bounce' : ''} />
+                  <span>{isUploadingTranscript ? 'Extracting Results...' : 'Upload Transcript (PDF / Photo)'}</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                ref={transcriptInputRef}
-                type="file"
-                accept=".pdf,image/*"
-                onChange={handleTranscriptUpload}
-                className="hidden"
-              />
-              <button
-                onClick={() => transcriptInputRef.current?.click()}
-                disabled={isUploadingTranscript}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            {transcriptUploadError && (
+              <div
+                role="alert"
+                className="flex items-start justify-between gap-3 p-3.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/30 text-rose-800 dark:text-rose-200 text-xs"
               >
-                <Upload size={14} className={isUploadingTranscript ? 'animate-bounce' : ''} />
-                <span>{isUploadingTranscript ? 'Extracting Results...' : 'Upload Transcript (PDF/Image)'}</span>
-              </button>
-            </div>
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle size={15} className="text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-semibold">Could not import transcript</p>
+                    <p className="text-rose-700 dark:text-rose-300 leading-relaxed">{transcriptUploadError}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptUploadError(null)}
+                  className="text-rose-500 hover:text-rose-700 dark:hover:text-rose-300 p-1 cursor-pointer shrink-0"
+                  aria-label="Dismiss error"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Semesters & Courses List */}

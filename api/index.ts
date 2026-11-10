@@ -5,6 +5,43 @@ import { createExpressApp } from './_server.cjs';
 let cachedAppPromise: Promise<any> | null = null;
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  // Preserve Vercel's pre-parsed or lazy req.body so express.json() does not drop or overwrite it
+  const bodyDescriptor = Object.getOwnPropertyDescriptor(req, 'body');
+  if (bodyDescriptor) {
+    try {
+      const preParsed = (req as any).body;
+      if (preParsed !== undefined && preParsed !== null) {
+        let normalizedBody = preParsed;
+        if (Buffer.isBuffer(preParsed)) {
+          (req as any).rawBody = preParsed;
+          const ct = String(req.headers['content-type'] || '').toLowerCase();
+          if (ct.includes('application/json') && preParsed.length > 0) {
+            normalizedBody = JSON.parse(preParsed.toString('utf8'));
+          }
+        } else if (typeof preParsed === 'string' && preParsed.length > 0) {
+          (req as any).rawBody = Buffer.from(preParsed, 'utf8');
+          const ct = String(req.headers['content-type'] || '').toLowerCase();
+          if (ct.includes('application/json')) {
+            normalizedBody = JSON.parse(preParsed);
+          }
+        } else if (typeof preParsed === 'object') {
+          if (!(req as any).rawBody) {
+            (req as any).rawBody = Buffer.from(JSON.stringify(preParsed), 'utf8');
+          }
+        }
+        Object.defineProperty(req, 'body', {
+          value: normalizedBody,
+          writable: true,
+          configurable: true,
+          enumerable: true
+        });
+        (req as any)._body = true;
+      }
+    } catch (err: any) {
+      console.warn('[Vercel API Entry] Pre-parsed body normalization warning:', err?.message || err);
+    }
+  }
+
   if (!cachedAppPromise) {
     cachedAppPromise = createExpressApp();
   }

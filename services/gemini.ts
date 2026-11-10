@@ -313,6 +313,13 @@ export const GeminiService = {
           fileId: options?.fileId || undefined,
         })
       });
+      if (response.status === 413) {
+        return {
+          success: false,
+          error: 'Please upload a file under 3 MB. Larger files exceed the direct upload limit.',
+          fileName
+        };
+      }
       const data = await response.json().catch(() => ({}));
       if (data && typeof data.success === 'boolean') {
         return data;

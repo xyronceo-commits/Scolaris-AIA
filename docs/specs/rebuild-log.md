@@ -261,6 +261,40 @@ The following existing features do not have a dedicated slot in the 6 main deskt
   - Responsive multi-column footer with KorsIQ brand tagline, Product, Company, and Legal links, plus accessible modal dialogs for Terms, Privacy, About, and Contact.
 - **Verification:** Both `npm run lint` and `npm run build` pass cleanly.
 
+---
+
+## Phase 13: Transcript Upload, Deletes, Podcast & Circle Discovery — Reproduction & Root-Cause Log
+
+### Task 1 Verification Findings (Before Code Changes)
+
+1. **Test Cases Executed (`POST /api/files/extract` -> `POST /api/ai/transcript-parse`):**
+   - **(a) Text PDF (`CSC201 Data Structures...`):**
+     - `/api/files/extract`: HTTP `200 OK` — `{"success":true,"extractedText":"CSC201 Data Structures and Algorithms 3 Units Grade A MTH203 Linear Algebra 3 Units Grade B GS","fileTypeDetected":"pdf","pageCount":1}`.
+     - `/api/ai/transcript-parse`: `runAICall` attempts `GEMINI_PRIMARY_MODEL` (`gemini-3.6-flash`) and `GEMINI_FALLBACK_MODELS` (`gemini-3.5-flash`, `gemini-3.5-flash-lite`), which are non-existent Gemini model IDs and fail with `404 Not Found` (`models/gemini-2.5-flash` was omitted from the fallback array). Falls back to regex `getTranscriptFallback(text)`.
+   - **(b) Scanned PDF (no selectable text stream):**
+     - `processDocumentBuffer`: returns `{"success":false,"extractedText":"","error":"This PDF appears to be scanned or image-based without selectable text. Please upload a PDF with selectable text, or convert it using OCR first.","isScannedPdf":true,"fileTypeDetected":"pdf"}`.
+     - `/api/files/extract`: `extractDocumentWithOcrFallback` invokes `ocrPdfWithGemini`, which calls `OCR_MODEL = 'gemini-3.6-flash'` with no fallback models. The Gemini API rejects `gemini-3.6-flash` with `404`, causing `/api/files/extract` to return HTTP `200 OK` with `{"success":false,"isScannedPdf":true,"error":"This PDF looks scanned and we couldn't read the text from it. Please upload a clearer scan or a PDF with selectable text."}`.
+   - **(c) JPG Photo (`image/jpeg`):**
+     - `components/CGPACalculator.tsx` file input accepts `.pdf,image/*`, and `handleTranscriptUpload` sends the file to `GeminiService.extractFileText` -> `POST /api/files/extract`.
+     - `lib/documentProcessor.ts` (`processDocumentBuffer`) only checks for `pdf`, `docx`, `pptx`, and `txt`. Because `image/jpeg` matches none of those, `detectedType` defaults to `'txt'`, decodes raw JPEG bytes as UTF-8, fails `validateExtractedText` on non-printable binary characters, and returns HTTP `200 OK` with `{"success":false,"extractedText":"","error":"We couldn't read this document correctly due to binary character corruption.","fileTypeDetected":"txt"}`.
+   - **(d) File over 3 MB (3.5 MB raw binary):**
+     - Base64 encoding inflates 3.5 MB (`3,670,016` bytes) to `4,893,356` chars, and the JSON request body reaches `4,893,439` bytes (`4.67 MB`).
+     - Exceeds Vercel's hard `4.5 MB` (`4,718,592` bytes) serverless function request body limit, failing at the platform edge with HTTP `413 FUNCTION_PAYLOAD_TOO_LARGE` before reaching Express.
+2. **Vercel `req.body` Inspection (`api/index.ts` & `server.ts`):**
+   - `api/index.ts` forwards `(req, res)` directly to the Express `app`. When Vercel's Node runtime pre-parses `req.body` (as an object, Buffer, or string) and consumes the incoming stream before `express.json()` runs, or attaches a lazy getter, `express.json()` may not populate `req.rawBody` or may leave `req.body` unparsed if `req.body` is a Buffer/string. Adding a normalization middleware before `express.json()` ensures pre-parsed bodies are always preserved on `req.body`.
+3. **Frontend Error Handling (`components/CGPACalculator.tsx` `handleTranscriptUpload`):**
+   - `FileReader.onload` runs an `async () => { ... }` callback *outside* the outer `try / catch`. Any rejected promise inside `onload` is unhandled, leaving `isUploadingTranscript` stuck at `true` indefinitely and never resetting the file input.
+
+### Task 4 Verification Findings (Before Code Changes)
+
+1. **Where Credits Are Deducted:**
+   - In `server.ts` (`handlePodcastGeneration`, lines 4228–4239), `const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId)` is executed **before** `generateGeminiPodcastScript` and `generateGeminiPodcastAudio` are called.
+2. **Why Podcast Generation Fails:**
+   - `generateGeminiPodcastScript` calls `runAICall`, which iterates `GEMINI_PRIMARY_MODEL` (`gemini-3.6-flash`) and `GEMINI_FALLBACK_MODELS` (`gemini-3.5-flash`, `gemini-3.5-flash-lite`) — none of which exist in the Gemini API (`gemini-2.5-flash` was missing).
+   - Additionally, `generateGeminiPodcastAudio` uses `gemini-2.5-flash-preview-tts` (single model, no fallback or retry on transient failure).
+   - When generation fails after `consumeAiCredits` already deducted 5 credits, if `refundAiCredits` fails (or if the client times out before refund completes), the user loses 5 credits and gets no podcast. Charging credits **only after** both the script and validated WAV audio (`validateWavBuffer(wavBuffer).valid`) succeed prevents any credit loss on failed generations.
+
+
 
 
 
