@@ -48,8 +48,7 @@ export function getPaystackSecretKey(): string {
     cleanEnvKey('PAYSTACK_SECRET_KEY') ||
     cleanEnvKey('PAYSTACK_SECRET') ||
     cleanEnvKey('PAYSTACK_KEY') ||
-    cleanEnvKey('SCOLARIS_PAYSTACK_SECRET_KEY') ||
-    cleanEnvKey('VITE_PAYSTACK_SECRET_KEY')
+    cleanEnvKey('SCOLARIS_PAYSTACK_SECRET_KEY')
   );
 }
 
@@ -310,7 +309,49 @@ export async function createExpressApp() {
   const app = express();
   const PORT = 3000;
 
-  app.use(cors());
+  // Security: Disable X-Powered-By fingerprinting
+  app.disable('x-powered-by');
+
+  // Security: Standard OWASP protection headers
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-XSS-Protection', '0');
+    next();
+  });
+
+  // Security: Restrict CORS to authorized application origins and local dev
+  const allowedOrigins = [
+    'https://scolaris-aia.vercel.app',
+    'https://korsiq.com',
+    'https://www.korsiq.com',
+    cleanEnvKey('APP_URL'),
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ''
+  ].filter(Boolean) as string[];
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, server-to-server, Paystack webhooks)
+      if (!origin) return callback(null, true);
+      // Allow localhost in development
+      if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      // Allow Vercel preview and production deployments
+      try {
+        const host = new URL(origin).hostname;
+        if (host.endsWith('.vercel.app') || allowedOrigins.some(o => o.toLowerCase() === origin.toLowerCase())) {
+          return callback(null, true);
+        }
+      } catch {}
+      // Fallback: allow request but do not reflect unauthorized origin
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-paystack-signature', 'x-requested-with']
+  }));
 
   // URL normalizer: ensure incoming paths match Express /api routes on all hosting providers
   app.use((req, _res, next) => {
@@ -867,7 +908,7 @@ export async function createExpressApp() {
   app.post('/api/subscription/verify', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { reference } = req.body;
-      let cleanRef = (typeof reference === 'string' ? reference.trim() : '');
+      let cleanRef = (typeof reference === 'string' ? reference.trim() : '').replace(/[^a-zA-Z0-9_-]/g, '');
       const uid = req.user!.uid;
       const userEmail = (req.user?.email || req.body?.email || '').toLowerCase().trim();
       const client = supabaseAdmin || supabaseAuthClient;
@@ -1504,19 +1545,21 @@ export async function createExpressApp() {
       }
 
       const buffer = Buffer.from(contentBase64, 'base64');
-      const cleanName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const safeCourseId = typeof courseId === 'string' ? courseId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const safeGroupId = typeof groupId === 'string' ? groupId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const cleanName = path.basename(String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_'));
       const randomId = Math.random().toString(36).substring(2, 8);
       const fileId = `file_${Date.now()}_${randomId}`;
 
       let bucket = reqBucket;
       let fileKey = '';
 
-      if (groupId) {
+      if (safeGroupId) {
         bucket = bucket || 'group-materials';
-        fileKey = `groups/${groupId}/${fileId}_${cleanName}`;
-      } else if (courseId && uid) {
+        fileKey = `groups/${safeGroupId}/${fileId}_${cleanName}`;
+      } else if (safeCourseId && uid) {
         bucket = bucket || 'user-files';
-        fileKey = `users/${uid}/courses/${courseId}/${fileId}_${cleanName}`;
+        fileKey = `users/${uid}/courses/${safeCourseId}/${fileId}_${cleanName}`;
       } else if (uid) {
         bucket = bucket || 'user-files';
         fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
@@ -1561,19 +1604,21 @@ export async function createExpressApp() {
         return res.status(400).json({ error: 'fileName is required' });
       }
 
-      const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const safeCourseId = typeof courseId === 'string' ? courseId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const safeGroupId = typeof groupId === 'string' ? groupId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const cleanName = path.basename(fileName.replace(/[^a-zA-Z0-9._-]/g, '_'));
       const randomId = Math.random().toString(36).substring(2, 8);
       const fileId = `file_${Date.now()}_${randomId}`;
 
       let bucket = targetBucket;
       let fileKey = '';
 
-      if (groupId) {
+      if (safeGroupId) {
         bucket = bucket || 'group-materials';
-        fileKey = `groups/${groupId}/${fileId}_${cleanName}`;
-      } else if (courseId) {
+        fileKey = `groups/${safeGroupId}/${fileId}_${cleanName}`;
+      } else if (safeCourseId) {
         bucket = bucket || 'user-files';
-        fileKey = `users/${uid}/courses/${courseId}/${fileId}_${cleanName}`;
+        fileKey = `users/${uid}/courses/${safeCourseId}/${fileId}_${cleanName}`;
       } else {
         bucket = bucket || 'user-files';
         fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
@@ -1608,8 +1653,8 @@ export async function createExpressApp() {
     try {
       const { key, bucket: reqBucket, downloadName } = req.body;
       const cleanKey = typeof key === 'string' ? key.trim() : '';
-      if (!cleanKey) {
-        return res.status(400).json({ error: 'key is required' });
+      if (!cleanKey || cleanKey.includes('..') || cleanKey.includes('\\') || cleanKey.startsWith('/')) {
+        return res.status(400).json({ error: 'Invalid or unsafe storage path.' });
       }
 
       const uid = req.user?.uid;
@@ -1622,7 +1667,7 @@ export async function createExpressApp() {
       const s3 = getS3();
 
       const filename = typeof downloadName === 'string' && downloadName.trim()
-        ? downloadName.trim()
+        ? path.basename(downloadName.trim())
         : cleanKey.split('/').pop() || 'download';
 
       const command = new GetObjectCommand({
@@ -1645,8 +1690,8 @@ export async function createExpressApp() {
       const uid = req.user?.uid;
       const { key, bucket: reqBucket } = req.body;
       const cleanKey = typeof key === 'string' ? key.trim() : '';
-      if (!cleanKey) {
-        return res.status(400).json({ error: 'key is required' });
+      if (!cleanKey || cleanKey.includes('..') || cleanKey.includes('\\') || cleanKey.startsWith('/')) {
+        return res.status(400).json({ error: 'Invalid or unsafe storage path.' });
       }
 
       // Ownership guard
@@ -4857,8 +4902,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
-  // 2. Verify 6-digit OTP
-  app.post('/api/admin/auth/verify-otp', async (req, res) => {
+  // 2. Verify 6-digit OTP (Rate limited to thwart brute-forcing)
+  app.post('/api/admin/auth/verify-otp', apiRateLimiter, async (req, res) => {
     const ip = req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
     const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
@@ -5026,7 +5071,10 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         .limit(50);
 
       if (search) {
-        query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+        const safeSearch = search.replace(/[,()"'%_]/g, '').trim();
+        if (safeSearch) {
+          query = query.or(`email.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%`);
+        }
       }
 
       const { data, error } = await query;
@@ -5294,10 +5342,14 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
     try {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(queryVal);
+      const safeVal = queryVal.replace(/[,()"'%_]/g, '').trim();
+      if (!isUuid && !safeVal) {
+        return res.status(400).json({ success: false, error: 'Invalid user search query.' });
+      }
       const { data: userRow, error: userErr } = await supabaseAdmin
         .from('profiles')
         .select('*')
-        .or(isUuid ? `id.eq.${queryVal}` : `email.ilike.${queryVal}`)
+        .or(isUuid ? `id.eq.${queryVal}` : `email.ilike.${safeVal}`)
         .maybeSingle();
 
       if (userErr || !userRow) {
@@ -5341,10 +5393,14 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
     try {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userQuery);
+      const safeVal = userQuery.replace(/[,()"'%_]/g, '').trim();
+      if (!isUuid && !safeVal) {
+        return res.status(400).json({ success: false, error: 'Invalid user format.' });
+      }
       const { data: userRow } = await supabaseAdmin
         .from('profiles')
         .select('id, email, name')
-        .or(isUuid ? `id.eq.${userQuery}` : `email.ilike.${userQuery}`)
+        .or(isUuid ? `id.eq.${userQuery}` : `email.ilike.${safeVal}`)
         .maybeSingle();
 
       if (!userRow) {
@@ -5445,8 +5501,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     return `KQ-${p1}-${p2}`;
   }
 
-  // Create Study Circle (Backed by service role to guarantee creation)
-  app.post('/api/circles/create', async (req, res) => {
+  // Create Study Circle (Backed by service role to guarantee creation, authenticated & rate limited)
+  app.post('/api/circles/create', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const {
         name,
@@ -5459,7 +5515,6 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         academicSession,
         groupImage,
         inviteCode: clientCode,
-        ownerId,
         ownerName
       } = req.body;
 
@@ -5467,13 +5522,19 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         return res.status(400).json({ success: false, error: 'Circle name and course code are required.' });
       }
 
+      // Security: enforce ownerId from authenticated session to prevent spoofing
+      const ownerId = req.user!.uid;
+      const userEmail = req.user?.email || '';
+      const fallbackName = userEmail ? userEmail.split('@')[0] : 'Circle Creator';
+      const effectiveOwnerName = (typeof ownerName === 'string' && ownerName.trim()) || fallbackName;
+
       const groupId = `group_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
       const inviteCode = (clientCode && String(clientCode).trim().toUpperCase()) || generateServerCircleInviteCode();
       const createdAt = new Date().toISOString();
 
       const initialMember = {
-        userId: ownerId || 'creator',
-        name: ownerName || 'Circle Creator',
+        userId: ownerId,
+        name: effectiveOwnerName,
         role: 'owner',
         joinedAt: createdAt
       };
@@ -5483,9 +5544,9 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         groupId,
         type: 'announcement',
         title: 'Circle Initialized',
-        description: `Welcome to ${name}! Study circle initialized by ${ownerName || 'Creator'}.`,
-        actorName: ownerName || 'Creator',
-        actorId: ownerId || '',
+        description: `Welcome to ${name}! Study circle initialized by ${effectiveOwnerName}.`,
+        actorName: effectiveOwnerName,
+        actorId: ownerId,
         timestamp: Date.now()
       };
 
@@ -5510,7 +5571,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         university: String(university || '').trim(),
         academic_session: String(academicSession || '').trim(),
         group_image: String(groupImage || '').trim(),
-        owner_id: ownerId || 'creator',
+        owner_id: ownerId,
         members: [initialMember],
         member_count: 1,
         messages: [welcomeMessage],
@@ -5529,15 +5590,14 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
             .maybeSingle();
 
           if (!dbErr && dbData) {
-            if (ownerId) {
-              await supabaseAdmin.from('circle_members').upsert({
-                circle_id: dbData.id,
-                user_id: ownerId,
-                user_name: ownerName || 'Circle Creator',
-                role: 'owner',
-                joined_at: createdAt
-              }, { onConflict: 'circle_id,user_id' });
-            }
+            await supabaseAdmin.from('circle_members').upsert({
+              circle_id: dbData.id,
+              user_id: ownerId,
+              user_name: effectiveOwnerName,
+              role: 'owner',
+              joined_at: createdAt
+            }, { onConflict: 'circle_id,user_id' });
+
             return res.json({
               success: true,
               group: {
@@ -5605,8 +5665,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
-  // Find Study Circle by Code
-  app.get('/api/circles/find', async (req, res) => {
+  // Find Study Circle by Code (Rate limited to thwart brute-forcing)
+  app.get('/api/circles/find', apiRateLimiter, async (req, res) => {
     try {
       const code = String(req.query.code || '').trim().toUpperCase();
       if (!code) return res.status(400).json({ success: false, error: 'Invite code is required.' });
@@ -5658,8 +5718,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
-  // Search Study Circles (Public/General and Private)
-  app.get('/api/circles/search', async (req, res) => {
+  // Search Study Circles (Public/General Circles Only - protects private circles from discovery)
+  app.get('/api/circles/search', apiRateLimiter, async (req, res) => {
     try {
       const q = String(req.query.q || '').trim();
       if (!supabaseAdmin) {
@@ -5669,12 +5729,15 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       let query = supabaseAdmin
         .from('study_groups')
         .select('*')
+        .eq('type', 'general')
         .order('updated_at', { ascending: false })
         .limit(30);
 
       if (q) {
-        const safe = q.replace(/[%_]/g, '');
-        query = query.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+        const safe = q.replace(/[,()"'%_]/g, '').trim();
+        if (safe) {
+          query = query.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%`);
+        }
       }
 
       const { data, error } = await query;
@@ -5685,8 +5748,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         name: row.name,
         description: row.description || '',
         course: row.course,
-        type: row.type || 'private',
-        visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
+        type: row.type || 'general',
+        visibility: row.visibility || 'public',
         inviteCode: row.invite_code,
         inviteCodeActive: row.invite_code_active !== false,
         department: row.department || '',
@@ -5711,12 +5774,15 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
-  // Join Study Circle
-  app.post('/api/circles/join', async (req, res) => {
+  // Join Study Circle (Authenticated, Rate limited, and strictly validated)
+  app.post('/api/circles/join', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { groupId, code, userId, userName } = req.body;
-      if (!groupId || !userId) {
-        return res.status(400).json({ success: false, error: 'Group ID and User ID are required.' });
+      const { groupId, code, userName } = req.body;
+      const userId = req.user!.uid;
+      const effectiveUserName = (typeof userName === 'string' && userName.trim()) || req.user?.email?.split('@')[0] || 'Student';
+
+      if (!groupId) {
+        return res.status(400).json({ success: false, error: 'Group ID is required.' });
       }
 
       if (supabaseAdmin) {
@@ -5730,12 +5796,16 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
           return res.status(404).json({ success: false, error: 'Circle not found.' });
         }
 
-        if (group.type === 'private' && code) {
-          if ((group.invite_code || '').toUpperCase() !== String(code).trim().toUpperCase()) {
-            return res.status(400).json({ success: false, error: 'Invalid invite code.' });
+        // Security: Strictly enforce private circle invite code check
+        const isPrivate = group.type === 'private' || group.visibility === 'private';
+        if (isPrivate) {
+          const providedCode = String(code || '').trim().toUpperCase();
+          const expectedCode = String(group.invite_code || '').trim().toUpperCase();
+          if (!providedCode || providedCode !== expectedCode) {
+            return res.status(403).json({ success: false, error: 'A valid invitation code is required to join a private circle.' });
           }
           if (group.invite_code_active === false) {
-            return res.status(400).json({ success: false, error: 'This invitation code has been revoked.' });
+            return res.status(403).json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
           }
         }
 
@@ -5745,7 +5815,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         if (!isMember) {
           members.push({
             userId,
-            name: userName || 'Student',
+            name: effectiveUserName,
             role: 'member',
             joinedAt: new Date().toISOString()
           });
@@ -5762,7 +5832,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
           await supabaseAdmin.from('circle_members').upsert({
             circle_id: groupId,
             user_id: userId,
-            user_name: userName || 'Student',
+            user_name: effectiveUserName,
             role: 'member',
             joined_at: new Date().toISOString()
           }, { onConflict: 'circle_id,user_id' });
@@ -5833,6 +5903,17 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       }).catch(() => {});
     }
   }
+
+  // OWASP: Global Centralized Error Handler - prevent internal stack trace disclosure (CWE-209)
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[Global Server Error]:', err?.message || err);
+    if (res.headersSent) return;
+    const status = typeof err?.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+    res.status(status).json({
+      success: false,
+      error: status < 500 && err?.message ? err.message : 'An internal server error occurred. Please try again later.'
+    });
+  });
 
   return app;
 }
