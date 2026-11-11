@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { isAiSender } from './lib/brand';
 import { GoogleGenAI } from '@google/genai';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { 
   processDocumentBuffer, 
@@ -96,6 +96,28 @@ if (!supabaseAdmin) {
 }
 if (!getPaystackSecretKey()) {
   console.warn('Paystack secret key is not configured: set PAYSTACK_SECRET_KEY in hosting environment variables to enable payments and verification.');
+}
+
+export function getSupabaseS3AccessKeyId(): string {
+  return cleanEnvKey('SUPABASE_S3_ACCESS_KEY_ID') || cleanEnvKey('S3_ACCESS_KEY_ID') || cleanEnvKey('AWS_ACCESS_KEY_ID');
+}
+
+export function getSupabaseS3SecretAccessKey(): string {
+  return cleanEnvKey('SUPABASE_S3_SECRET_ACCESS_KEY') || cleanEnvKey('S3_SECRET_ACCESS_KEY') || cleanEnvKey('AWS_SECRET_ACCESS_KEY');
+}
+
+export function getSupabaseS3Region(): string {
+  return cleanEnvKey('SUPABASE_S3_REGION') || cleanEnvKey('AWS_REGION') || 'eu-west-2';
+}
+
+export function isS3Configured(): boolean {
+  return Boolean(getSupabaseS3AccessKeyId() && getSupabaseS3SecretAccessKey() && getSupabaseS3Endpoint());
+}
+
+if (!isS3Configured()) {
+  console.warn('Supabase S3 storage keys are not configured: set SUPABASE_S3_ACCESS_KEY_ID and SUPABASE_S3_SECRET_ACCESS_KEY to enable high-speed storage, direct uploads, and AI audio persistence.');
+} else {
+  console.log('✓ Supabase S3 storage is configured and active.');
 }
 
 // Storage S3 endpoint for the shared library bucket (override with SUPABASE_S3_ENDPOINT if needed)
@@ -562,14 +584,14 @@ export async function createExpressApp() {
   let s3Client: S3Client | null = null;
   const getS3 = () => {
     if (!s3Client) {
-      const accessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
-      const secretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
+      const accessKeyId = getSupabaseS3AccessKeyId();
+      const secretAccessKey = getSupabaseS3SecretAccessKey();
       if (!accessKeyId || !secretAccessKey) {
         throw new Error('Supabase S3 access keys SUPABASE_S3_ACCESS_KEY_ID and SUPABASE_S3_SECRET_ACCESS_KEY are not configured.');
       }
       s3Client = new S3Client({
         endpoint: getSupabaseS3Endpoint(),
-        region: process.env.SUPABASE_S3_REGION || 'eu-west-2',
+        region: getSupabaseS3Region(),
         forcePathStyle: true,
         credentials: {
           accessKeyId,
@@ -579,6 +601,33 @@ export async function createExpressApp() {
     }
     return s3Client;
   };
+
+  function inferBucketFromKey(key: string, explicitBucket?: string): string {
+    if (explicitBucket && typeof explicitBucket === 'string' && explicitBucket.trim()) {
+      return explicitBucket.trim();
+    }
+    const clean = String(key || '').trim();
+    if (clean.startsWith('users/')) return 'user-files';
+    if (clean.startsWith('groups/')) return 'group-materials';
+    if (clean.startsWith('library/')) return 'scolaris-library';
+    return cleanEnvKey('SUPABASE_S3_BUCKET_NAME') || 'user-files';
+  }
+
+  async function downloadBufferViaS3(bucketName: string, key: string): Promise<Buffer | null> {
+    if (!isS3Configured()) return null;
+    try {
+      const s3 = getS3();
+      const cmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
+      const res = await s3.send(cmd);
+      if (res.Body) {
+        const bytes = await res.Body.transformToByteArray();
+        return Buffer.from(bytes);
+      }
+    } catch {
+      // not found in this bucket or S3 error
+    }
+    return null;
+  }
 
   // API Routes
   app.get('/api/health', (req, res) => {
@@ -590,7 +639,8 @@ export async function createExpressApp() {
         supabase: Boolean(supabaseAuthClient),
         supabaseAdmin: Boolean(supabaseAdmin),
         gemini: Boolean(pickGeminiKey()),
-        paystack: Boolean(paystackKey)
+        paystack: Boolean(paystackKey),
+        s3: isS3Configured()
       }
     });
   });
@@ -613,10 +663,14 @@ export async function createExpressApp() {
   // Get S3 configuration details
   app.get('/api/s3/config', (req, res) => {
     res.json({
-      configured: !!(process.env.SUPABASE_S3_ACCESS_KEY_ID && process.env.SUPABASE_S3_SECRET_ACCESS_KEY),
+      configured: isS3Configured(),
       endpoint: getSupabaseS3Endpoint(),
-      region: process.env.SUPABASE_S3_REGION || 'eu-west-2',
-      bucket: process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library'
+      region: getSupabaseS3Region(),
+      buckets: {
+        userFiles: 'user-files',
+        groupMaterials: 'group-materials',
+        library: 'scolaris-library'
+      }
     });
   });
 
@@ -1441,31 +1495,50 @@ export async function createExpressApp() {
   });
 
   // Standard S3 Upload Proxy Route
-  app.post('/api/s3/upload', requireAuth, apiRateLimiter, async (req, res) => {
+  app.post('/api/s3/upload', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { fileName, fileType, contentBase64 } = req.body;
+      const uid = req.user?.uid;
+      const { fileName, fileType, contentBase64, courseId, groupId, bucket: reqBucket } = req.body;
       if (!fileName || !contentBase64) {
         return res.status(400).json({ error: 'fileName and contentBase64 parameters are required' });
       }
 
       const buffer = Buffer.from(contentBase64, 'base64');
-      const bucket = process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library';
-      
+      const cleanName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
       const randomId = Math.random().toString(36).substring(2, 8);
-      const fileKey = `uploads/${Date.now()}-${randomId}-${fileName}`;
+      const fileId = `file_${Date.now()}_${randomId}`;
+
+      let bucket = reqBucket;
+      let fileKey = '';
+
+      if (groupId) {
+        bucket = bucket || 'group-materials';
+        fileKey = `groups/${groupId}/${fileId}_${cleanName}`;
+      } else if (courseId && uid) {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/courses/${courseId}/${fileId}_${cleanName}`;
+      } else if (uid) {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
+      } else {
+        bucket = bucket || cleanEnvKey('SUPABASE_S3_BUCKET_NAME') || 'scolaris-library';
+        fileKey = `uploads/${Date.now()}-${randomId}-${cleanName}`;
+      }
 
       const s3 = getS3();
+      const contentType = fileType || 'application/octet-stream';
       const command = new PutObjectCommand({
         Bucket: bucket,
         Key: fileKey,
         Body: buffer,
-        ContentType: fileType || 'application/octet-stream',
+        ContentType: contentType,
       });
 
       await s3.send(command);
 
       res.json({
         success: true,
+        fileId,
         fileName,
         key: fileKey,
         bucket,
@@ -1477,26 +1550,121 @@ export async function createExpressApp() {
     }
   });
 
-  // S3 Presign Download Proxy Route
-  app.post('/api/s3/presign', requireAuth, apiRateLimiter, async (req, res) => {
+  // Direct S3 Upload Presign Route (allows client to upload directly to S3, bypassing Vercel 4.5MB limit)
+  app.post('/api/s3/presign-upload', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { key } = req.body;
-      if (!key) {
+      const uid = req.user?.uid;
+      if (!uid) return res.status(401).json({ error: 'Authentication required' });
+
+      const { fileName, fileType, courseId, groupId, targetBucket } = req.body;
+      if (!fileName || typeof fileName !== 'string') {
+        return res.status(400).json({ error: 'fileName is required' });
+      }
+
+      const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const randomId = Math.random().toString(36).substring(2, 8);
+      const fileId = `file_${Date.now()}_${randomId}`;
+
+      let bucket = targetBucket;
+      let fileKey = '';
+
+      if (groupId) {
+        bucket = bucket || 'group-materials';
+        fileKey = `groups/${groupId}/${fileId}_${cleanName}`;
+      } else if (courseId) {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/courses/${courseId}/${fileId}_${cleanName}`;
+      } else {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
+      }
+
+      const s3 = getS3();
+      const contentType = typeof fileType === 'string' && fileType.trim() ? fileType.trim() : 'application/octet-stream';
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: fileKey,
+        ContentType: contentType
+      });
+
+      const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
+
+      res.json({
+        success: true,
+        fileId,
+        key: fileKey,
+        bucket,
+        uploadUrl,
+        publicUrl: `${getSupabasePublicObjectBase()}/${bucket}/${fileKey}`
+      });
+    } catch (error: any) {
+      console.error('S3 Presign Upload Error:', error);
+      res.status(500).json({ error: error?.message || 'Failed to generate presigned upload URL' });
+    }
+  });
+
+  // S3 Presign Download Proxy Route (supports dynamic bucket detection and attachment headers)
+  app.post('/api/s3/presign', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { key, bucket: reqBucket, downloadName } = req.body;
+      const cleanKey = typeof key === 'string' ? key.trim() : '';
+      if (!cleanKey) {
         return res.status(400).json({ error: 'key is required' });
       }
 
-      const bucket = process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library';
+      const uid = req.user?.uid;
+      // Ownership check for user-isolated paths: users/<userId>/...
+      if (cleanKey.startsWith('users/') && uid && !cleanKey.startsWith(`users/${uid}/`)) {
+        return res.status(403).json({ error: 'Access denied to this storage object.' });
+      }
+
+      const bucket = inferBucketFromKey(cleanKey, reqBucket);
       const s3 = getS3();
+
+      const filename = typeof downloadName === 'string' && downloadName.trim()
+        ? downloadName.trim()
+        : cleanKey.split('/').pop() || 'download';
+
       const command = new GetObjectCommand({
         Bucket: bucket,
-        Key: key,
+        Key: cleanKey,
+        ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`
       });
 
       const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-      res.json({ presignedUrl });
+      res.json({ presignedUrl, bucket, key: cleanKey });
     } catch (error: any) {
       console.error('S3 Presign Error:', error);
       res.status(500).json({ error: error?.message || 'Failed to generate presigned download URL' });
+    }
+  });
+
+  // S3 Secure Delete Route
+  app.post('/api/s3/delete', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    try {
+      const uid = req.user?.uid;
+      const { key, bucket: reqBucket } = req.body;
+      const cleanKey = typeof key === 'string' ? key.trim() : '';
+      if (!cleanKey) {
+        return res.status(400).json({ error: 'key is required' });
+      }
+
+      // Ownership guard
+      if (cleanKey.startsWith('users/') && uid && !cleanKey.startsWith(`users/${uid}/`)) {
+        return res.status(403).json({ error: 'Access denied: cannot delete another user file.' });
+      }
+
+      const bucket = inferBucketFromKey(cleanKey, reqBucket);
+      const s3 = getS3();
+      await s3.send(new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: cleanKey
+      }));
+
+      res.json({ success: true, key: cleanKey, bucket });
+    } catch (error: any) {
+      console.error('S3 Delete Error:', error);
+      res.status(500).json({ error: error?.message || 'Failed to delete object from storage' });
     }
   });
 
@@ -3487,15 +3655,12 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
   app.patch('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
   app.post('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
 
-  // Helper: Download a file buffer directly from Supabase Storage (bypasses Vercel 4.5MB body limit)
+  // Helper: Download a file buffer directly from S3 or Supabase Storage (bypasses Vercel 4.5MB body limit)
   async function downloadStorageBufferForUser(
     userId: string,
     storagePath: string,
     preferredBucket?: string
   ): Promise<{ buffer: Buffer | null; error?: string }> {
-    if (!supabaseAdmin) {
-      return { buffer: null, error: 'Storage service is not configured on the server.' };
-    }
     const cleanPath = String(storagePath || '').trim();
     if (!cleanPath || cleanPath.includes('..')) {
       return { buffer: null, error: 'Invalid storage path.' };
@@ -3506,23 +3671,38 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     }
 
     const candidateBuckets = Array.from(
-      new Set([preferredBucket || 'user-files', 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
+      new Set([preferredBucket || inferBucketFromKey(cleanPath), 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
     );
 
-    let lastErr = 'Could not download file from storage.';
-    for (const bucketName of candidateBuckets) {
-      try {
-        const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
-        if (!error && blob) {
-          const ab = await blob.arrayBuffer();
-          return { buffer: Buffer.from(ab) };
+    // 1. High-speed S3 direct streaming download
+    if (isS3Configured()) {
+      for (const bucketName of candidateBuckets) {
+        const s3Buf = await downloadBufferViaS3(bucketName, cleanPath);
+        if (s3Buf && s3Buf.length > 0) {
+          return { buffer: s3Buf };
         }
-        if (error?.message) lastErr = error.message;
-      } catch (err: any) {
-        if (err?.message) lastErr = err.message;
       }
     }
-    return { buffer: null, error: lastErr };
+
+    // 2. Supabase Admin REST download fallback
+    if (supabaseAdmin) {
+      let lastErr = 'Could not download file from storage.';
+      for (const bucketName of candidateBuckets) {
+        try {
+          const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
+          if (!error && blob) {
+            const ab = await blob.arrayBuffer();
+            return { buffer: Buffer.from(ab) };
+          }
+          if (error?.message) lastErr = error.message;
+        } catch (err: any) {
+          if (err?.message) lastErr = err.message;
+        }
+      }
+      return { buffer: null, error: lastErr };
+    }
+
+    return { buffer: null, error: 'Neither S3 nor Supabase storage is configured.' };
   }
 
   // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
@@ -4454,10 +4634,36 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       // Step 4: BOTH script and valid playable audio succeeded -> now consume credits
       const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
       const audioBase64 = wavBuffer.toString('base64');
+
+      let persistentAudioUrl: string | null = null;
+      let podcastStorageKey: string | null = null;
+      if (isS3Configured() && wavBuffer) {
+        try {
+          podcastStorageKey = `users/${userId}/podcasts/podcast_${Date.now()}_${crypto.randomBytes(3).toString('hex')}.wav`;
+          const s3 = getS3();
+          await s3.send(new PutObjectCommand({
+            Bucket: 'user-files',
+            Key: podcastStorageKey,
+            Body: wavBuffer,
+            ContentType: 'audio/wav'
+          }));
+          const getCmd = new GetObjectCommand({
+            Bucket: 'user-files',
+            Key: podcastStorageKey
+          });
+          // 7-day presigned streaming playback URL
+          persistentAudioUrl = await getSignedUrl(s3, getCmd, { expiresIn: 7 * 24 * 3600 });
+        } catch (s3AudioErr: any) {
+          console.warn('[Podcast S3 Storage] Could not persist audio track to S3:', s3AudioErr?.message || s3AudioErr);
+        }
+      }
+
       res.json({
         success: true,
         script,
         audioBase64,
+        audioUrl: persistentAudioUrl,
+        storageKey: podcastStorageKey,
         durationSec: validation.durationSec,
         creditsCharged: spend.success ? cost : 0,
         creditsRemaining: spend.balance

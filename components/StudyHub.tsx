@@ -386,7 +386,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         const response = await fetch('/api/s3/presign', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ key: file.s3Key })
+          body: JSON.stringify({ key: file.s3Key, downloadName: file.fileName })
         });
         const data = await response.json();
         if (data.presignedUrl) {
