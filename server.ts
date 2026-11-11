@@ -243,6 +243,8 @@ async function parsePdfBuffer(buffer: Buffer): Promise<string> {
 
 export async function createExpressApp() {
   const app = express();
+  // Behind Vercel's proxy: use the real client IP (req.ip) so per-IP limits are not shared by every visitor.
+  app.set('trust proxy', 1);
   const PORT = 3000;
 
   app.use(cors());
@@ -321,6 +323,29 @@ export async function createExpressApp() {
       return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
     }
   };
+
+  // Best-effort fixed-window limiter keyed by user. State is in memory, so on serverless it is per instance
+  // and resets on cold start. It slows brute-forcing but is not a hard global limit.
+  const makeUserLimiter = (max: number, windowMs: number) => {
+    const hits = new Map<string, { count: number; reset: number }>();
+    return (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+      const key = req.user?.uid || req.ip || 'anon';
+      const now = Date.now();
+      const entry = hits.get(key);
+      if (!entry || entry.reset <= now) {
+        hits.set(key, { count: 1, reset: now + windowMs });
+        return next();
+      }
+      if (entry.count >= max) {
+        res.setHeader('Retry-After', String(Math.ceil((entry.reset - now) / 1000)));
+        return res.status(429).json({ success: false, error: 'Too many requests. Please wait a moment and try again.' });
+      }
+      entry.count += 1;
+      next();
+    };
+  };
+  const circleLookupLimiter = makeUserLimiter(15, 60_000);
+  const circleWriteLimiter = makeUserLimiter(20, 60_000);
 
   // Helper to fetch server-authenticated student profile & courses for AI tailoring
   const getStudentContextForUser = async (userId?: string): Promise<string> => {
@@ -537,6 +562,14 @@ export async function createExpressApp() {
     return s3Client;
   };
 
+  // The /api/s3/* routes need Supabase S3 keys. Without them, say so clearly instead of throwing a 500.
+  const requireS3Configured = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!process.env.SUPABASE_S3_ACCESS_KEY_ID || !process.env.SUPABASE_S3_SECRET_ACCESS_KEY) {
+      return res.status(503).json({ success: false, error: 'File storage service is not configured on the server.' });
+    }
+    next();
+  };
+
   // API Routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'healthy' });
@@ -558,7 +591,7 @@ export async function createExpressApp() {
   });
 
   // Get S3 configuration details
-  app.get('/api/s3/config', (req, res) => {
+  app.get('/api/s3/config', requireAuth, (req, res) => {
     res.json({
       configured: !!(process.env.SUPABASE_S3_ACCESS_KEY_ID && process.env.SUPABASE_S3_SECRET_ACCESS_KEY),
       endpoint: getSupabaseS3Endpoint(),
@@ -1388,7 +1421,7 @@ export async function createExpressApp() {
   });
 
   // Standard S3 Upload Proxy Route
-  app.post('/api/s3/upload', requireAuth, apiRateLimiter, async (req, res) => {
+  app.post('/api/s3/upload', requireAuth, requireS3Configured, apiRateLimiter, async (req, res) => {
     try {
       const { fileName, fileType, contentBase64 } = req.body;
       if (!fileName || !contentBase64) {
@@ -1425,7 +1458,7 @@ export async function createExpressApp() {
   });
 
   // S3 Presign Download Proxy Route
-  app.post('/api/s3/presign', requireAuth, apiRateLimiter, async (req, res) => {
+  app.post('/api/s3/presign', requireAuth, requireS3Configured, apiRateLimiter, async (req, res) => {
     try {
       const { key } = req.body;
       if (!key) {
@@ -3435,6 +3468,27 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
   app.post('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
 
   // Helper: Download a file buffer directly from Supabase Storage (bypasses Vercel 4.5MB body limit)
+  // True if the user owns, belongs to, or may read (public/general) the circle. Uses the service role,
+  // so it must be called before any circle data is returned.
+  async function userCanReadCircle(circleId: string, uid: string): Promise<boolean> {
+    if (!supabaseAdmin || !circleId || !uid) return false;
+    const { data: g } = await supabaseAdmin
+      .from('study_groups')
+      .select('id,type,visibility,owner_id,members')
+      .eq('id', circleId)
+      .maybeSingle();
+    if (!g) return false;
+    if (g.type === 'general' || g.visibility === 'public' || g.owner_id === uid) return true;
+    if (((g.members || []) as any[]).some((m) => (typeof m === 'string' ? m === uid : m?.userId === uid))) return true;
+    const { data: cm } = await supabaseAdmin
+      .from('circle_members')
+      .select('id')
+      .eq('circle_id', circleId)
+      .eq('user_id', uid)
+      .maybeSingle();
+    return !!cm;
+  }
+
   async function downloadStorageBufferForUser(
     userId: string,
     storagePath: string,
@@ -3447,14 +3501,26 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     if (!cleanPath || cleanPath.includes('..')) {
       return { buffer: null, error: 'Invalid storage path.' };
     }
-    // Ownership guard: personal files live under users/<userId>/...
-    if (cleanPath.startsWith('users/') && userId && !cleanPath.startsWith(`users/${userId}/`)) {
+    // Strict allowlist of path shapes the app really uses. Anything else is denied.
+    //   users/<uid>/...            personal files: only the owner may read
+    //   groups/<circleId>/...      circle materials: only circle members may read
+    const KNOWN_BUCKETS = ['user-files', 'group-materials', 'scolaris-library'];
+    const parts = cleanPath.split('/');
+    let candidateBuckets: string[];
+    if (parts[0] === 'users') {
+      if (!userId || parts[1] !== userId) {
+        return { buffer: null, error: 'Access denied to this storage object.' };
+      }
+      const pref = preferredBucket && KNOWN_BUCKETS.includes(preferredBucket) ? preferredBucket : 'user-files';
+      candidateBuckets = Array.from(new Set([pref, 'user-files', 'scolaris-library']));
+    } else if (parts[0] === 'groups') {
+      if (!userId || !parts[1] || !(await userCanReadCircle(parts[1], userId))) {
+        return { buffer: null, error: 'Access denied to this storage object.' };
+      }
+      candidateBuckets = ['group-materials', 'scolaris-library'];
+    } else {
       return { buffer: null, error: 'Access denied to this storage object.' };
     }
-
-    const candidateBuckets = Array.from(
-      new Set([preferredBucket || 'user-files', 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
-    );
 
     let lastErr = 'Could not download file from storage.';
     for (const bucketName of candidateBuckets) {
@@ -3520,9 +3586,12 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
       if (!result.success) {
         console.error('[Extract Error] Extraction/OCR failed for', fileName, ':', result.error);
         await markUserFileStatus('failed');
+        const tooLargeForOcr = buffer.length > OCR_MAX_PDF_BYTES;
         return res.status(200).json({
           success: false,
-          error: result.error || "Uploaded, could not read text. Please try again or use Retry.",
+          error: tooLargeForOcr
+            ? `This file is ${(buffer.length / 1048576).toFixed(1)} MB. Scanned files over ${OCR_MAX_PDF_BYTES / 1048576} MB can't be read automatically. Upload a smaller or compressed copy, or paste the text instead.`
+            : (result.error || "Uploaded, could not read text. Please try again or use Retry."),
           isScannedPdf: result.isScannedPdf,
           fileName
         });
@@ -5187,7 +5256,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   }
 
   // Create Study Circle (Backed by service role to guarantee creation)
-  app.post('/api/circles/create', async (req, res) => {
+  app.post('/api/circles/create', requireAuth, circleWriteLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const {
         name,
@@ -5200,9 +5269,12 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         academicSession,
         groupImage,
         inviteCode: clientCode,
-        ownerId,
-        ownerName
+        ownerName: bodyOwnerName
       } = req.body;
+
+      // Identity always comes from the verified token, never from the request body.
+      const ownerId = req.user!.uid;
+      const ownerName = String(bodyOwnerName || '').trim().slice(0, 80) || 'Circle Creator';
 
       if (!name || !course) {
         return res.status(400).json({ success: false, error: 'Circle name and course code are required.' });
@@ -5347,200 +5419,200 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
   });
 
   // Find Study Circle by Code
-  app.get('/api/circles/find', async (req, res) => {
+  // ---------------------------------------------------------------------------------------------
+  // Circle lookup / search / join. All require a signed-in user and never trust client-supplied ids.
+  // These routes use the service role, so they must enforce visibility themselves.
+  // ---------------------------------------------------------------------------------------------
+  const rowHasMember = (row: any, uid: string) =>
+    row.owner_id === uid ||
+    ((row.members || []) as any[]).some((m) => (typeof m === 'string' ? m === uid : m?.userId === uid));
+
+  const circleView = (row: any, opts: { full: boolean; inviteCode?: string }) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    course: row.course,
+    type: row.type || 'private',
+    visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
+    inviteCode: opts.full ? row.invite_code : (opts.inviteCode || ''),
+    inviteCodeActive: row.invite_code_active !== false,
+    department: row.department || '',
+    level: row.level || '',
+    university: row.university || '',
+    academicSession: row.academic_session || '',
+    groupImage: row.group_image || '',
+    ownerId: row.owner_id,
+    members: opts.full ? row.members || [] : [],
+    memberCount: row.member_count || (row.members ? row.members.length : 1),
+    messages: opts.full ? row.messages || [] : [],
+    sharedMaterials: [],
+    discussions: opts.full ? row.discussions || [] : [],
+    activityFeed: opts.full ? row.activity_feed || [] : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  });
+
+  // Look up a circle by invite code: returns a join preview only (no members, messages or discussions)
+  app.get('/api/circles/find', requireAuth, circleLookupLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const code = String(req.query.code || '').trim().toUpperCase();
       if (!code) return res.status(400).json({ success: false, error: 'Invite code is required.' });
+      if (!/^[A-Z0-9-]{4,24}$/.test(code)) {
+        return res.status(404).json({ success: false, error: "That code doesn't match any circle. Check the code and try again." });
+      }
+      if (!supabaseAdmin) {
+        return res.status(503).json({ success: false, error: 'Circle lookup is temporarily unavailable.' });
+      }
 
-      if (supabaseAdmin) {
-        const { data, error } = await supabaseAdmin
-          .from('study_groups')
-          .select('*')
-          .ilike('invite_code', code)
-          .maybeSingle();
+      // Exact match only: ilike would treat % and _ as wildcards and let a guess match any circle.
+      const { data, error } = await supabaseAdmin
+        .from('study_groups')
+        .select('*')
+        .eq('invite_code', code)
+        .maybeSingle();
 
-        if (!error && data) {
-          if (data.invite_code_active === false) {
-            return res.json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
-          }
-          return res.json({
-            success: true,
-            group: {
-              id: data.id,
-              name: data.name,
-              description: data.description || '',
-              course: data.course,
-              type: data.type,
-              visibility: data.visibility || 'private',
-              inviteCode: data.invite_code,
-              inviteCodeActive: data.invite_code_active !== false,
-              department: data.department || '',
-              level: data.level || '',
-              university: data.university || '',
-              academicSession: data.academic_session || '',
-              groupImage: data.group_image || '',
-              ownerId: data.owner_id,
-              members: data.members || [],
-              memberCount: data.member_count || (data.members ? data.members.length : 1),
-              messages: data.messages || [],
-              sharedMaterials: [],
-              discussions: data.discussions || [],
-              activityFeed: data.activity_feed || [],
-              createdAt: data.created_at,
-              updatedAt: data.updated_at
-            }
-          });
+      if (!error && data) {
+        if (data.invite_code_active === false) {
+          return res.json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
         }
+        const isMemberAlready = rowHasMember(data, req.user!.uid);
+        return res.json({ success: true, group: circleView(data, { full: isMemberAlready, inviteCode: code }) });
       }
 
       res.status(404).json({ success: false, error: "That code doesn't match any circle. Check the code and try again." });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Error looking up circle.' });
+      console.error('[circles/find]', err?.message || err);
+      res.status(500).json({ success: false, error: 'Error looking up circle.' });
     }
   });
 
-  // Search Study Circles (Public/General and Private)
-  app.get('/api/circles/search', async (req, res) => {
+  // Search circles: public/general circles plus circles the user belongs to. Never other people's private circles.
+  app.get('/api/circles/search', requireAuth, circleLookupLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const q = String(req.query.q || '').trim();
+      const uid = req.user!.uid;
+      const safe = String(req.query.q || '').trim().slice(0, 60).replace(/[%_,()"'\\*]/g, '');
       if (!supabaseAdmin) {
         return res.json({ success: true, groups: [] });
       }
 
-      let query = supabaseAdmin
+      const textFilter = safe
+        ? `name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%`
+        : null;
+
+      // 1. Public / general circles
+      let publicQuery = supabaseAdmin
         .from('study_groups')
         .select('*')
+        .or('type.eq.general,visibility.eq.public')
         .order('updated_at', { ascending: false })
         .limit(30);
+      if (textFilter) publicQuery = publicQuery.or(textFilter);
 
-      if (q) {
-        const safe = q.replace(/[%_]/g, '');
-        query = query.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+      // 2. Circles the user owns or belongs to
+      const [{ data: memberRows }, { data: ownedRows }] = await Promise.all([
+        supabaseAdmin.from('circle_members').select('circle_id').eq('user_id', uid),
+        supabaseAdmin.from('study_groups').select('id').eq('owner_id', uid)
+      ]);
+      const myIds = Array.from(new Set([
+        ...(memberRows || []).map((r: any) => r.circle_id),
+        ...(ownedRows || []).map((r: any) => r.id)
+      ].filter(Boolean)));
+
+      let mineQuery: any = null;
+      if (myIds.length > 0) {
+        mineQuery = supabaseAdmin
+          .from('study_groups')
+          .select('*')
+          .in('id', myIds)
+          .order('updated_at', { ascending: false })
+          .limit(30);
+        if (textFilter) mineQuery = mineQuery.or(textFilter);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const [publicRes, mineRes] = await Promise.all([publicQuery, mineQuery ? mineQuery : Promise.resolve({ data: [], error: null })]);
+      if (publicRes.error) throw publicRes.error;
 
-      const groups = (data || []).map((row: any) => ({
-        id: row.id,
-        name: row.name,
-        description: row.description || '',
-        course: row.course,
-        type: row.type || 'private',
-        visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
-        inviteCode: row.invite_code,
-        inviteCodeActive: row.invite_code_active !== false,
-        department: row.department || '',
-        level: row.level || '',
-        university: row.university || '',
-        academicSession: row.academic_session || '',
-        groupImage: row.group_image || '',
-        ownerId: row.owner_id,
-        members: row.members || [],
-        memberCount: row.member_count || (row.members ? row.members.length : 1),
-        messages: [],
-        sharedMaterials: [],
-        discussions: [],
-        activityFeed: [],
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+      const merged = new Map<string, any>();
+      for (const row of [...(publicRes.data || []), ...((mineRes as any).data || [])]) merged.set(row.id, row);
+
+      const groups = Array.from(merged.values())
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+        .slice(0, 30)
+        .map((row) => circleView(row, { full: rowHasMember(row, uid) }))
+        // Search results are a directory: never include chat history or discussions.
+        .map((g: any) => ({ ...g, messages: [], discussions: [], activityFeed: [] }));
 
       res.json({ success: true, groups });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Error searching circles.' });
+      console.error('[circles/search]', err?.message || err);
+      res.status(500).json({ success: false, error: 'Error searching circles.' });
     }
   });
 
-  // Join Study Circle
-  app.post('/api/circles/join', async (req, res) => {
+  // Join a circle. Identity comes from the token. Private circles always require the matching invite code.
+  app.post('/api/circles/join', requireAuth, circleWriteLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { groupId, code, userId, userName } = req.body;
-      if (!groupId || !userId) {
-        return res.status(400).json({ success: false, error: 'Group ID and User ID are required.' });
+      const { groupId, code, userName } = req.body || {};
+      const userId = req.user!.uid;
+      if (!groupId) {
+        return res.status(400).json({ success: false, error: 'Group ID is required.' });
+      }
+      if (!supabaseAdmin) {
+        return res.status(503).json({ success: false, error: 'Joining circles is temporarily unavailable.' });
       }
 
-      if (supabaseAdmin) {
-        const { data: group, error: fetchErr } = await supabaseAdmin
-          .from('study_groups')
-          .select('*')
-          .eq('id', groupId)
-          .maybeSingle();
+      const { data: group, error: fetchErr } = await supabaseAdmin
+        .from('study_groups')
+        .select('*')
+        .eq('id', String(groupId))
+        .maybeSingle();
 
-        if (fetchErr || !group) {
-          return res.status(404).json({ success: false, error: 'Circle not found.' });
-        }
+      if (fetchErr || !group) {
+        return res.status(404).json({ success: false, error: 'Circle not found.' });
+      }
 
-        if (group.type === 'private' && code) {
-          if ((group.invite_code || '').toUpperCase() !== String(code).trim().toUpperCase()) {
+      const members = (group.members || []) as any[];
+      const isMember = rowHasMember(group, userId);
+      const isPrivate = group.type === 'private' || group.visibility === 'private';
+
+      if (!isMember) {
+        if (isPrivate) {
+          const supplied = String(code || '').trim().toUpperCase();
+          if (!supplied || (group.invite_code || '').toUpperCase() !== supplied) {
             return res.status(400).json({ success: false, error: 'Invalid invite code.' });
           }
           if (group.invite_code_active === false) {
             return res.status(400).json({ success: false, error: 'This invitation code has been revoked.' });
           }
         }
-
-        const members = (group.members || []) as any[];
-        const isMember = members.some(m => (typeof m === 'string' ? m === userId : m.userId === userId));
-
-        if (!isMember) {
-          members.push({
-            userId,
-            name: userName || 'Student',
-            role: 'member',
-            joinedAt: new Date().toISOString()
-          });
-
-          await supabaseAdmin
-            .from('study_groups')
-            .update({
-              members,
-              member_count: members.length,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', groupId);
-
-          await supabaseAdmin.from('circle_members').upsert({
-            circle_id: groupId,
-            user_id: userId,
-            user_name: userName || 'Student',
-            role: 'member',
-            joined_at: new Date().toISOString()
-          }, { onConflict: 'circle_id,user_id' });
+        if (members.length >= 100) {
+          return res.status(400).json({ success: false, error: 'Circle membership limit reached (maximum 100 members).' });
         }
 
-        return res.json({
-          success: true,
-          group: {
-            id: group.id,
-            name: group.name,
-            description: group.description || '',
-            course: group.course,
-            type: group.type,
-            visibility: group.visibility || 'private',
-            inviteCode: group.invite_code,
-            inviteCodeActive: group.invite_code_active !== false,
-            department: group.department || '',
-            level: group.level || '',
-            university: group.university || '',
-            academicSession: group.academic_session || '',
-            groupImage: group.group_image || '',
-            ownerId: group.owner_id,
-            members,
-            memberCount: members.length,
-            messages: group.messages || [],
-            sharedMaterials: [],
-            discussions: group.discussions || [],
-            activityFeed: group.activity_feed || [],
-            createdAt: group.created_at,
-            updatedAt: group.updated_at
-          }
-        });
+        const displayName = String(userName || '').trim().slice(0, 80) || 'Student';
+        members.push({ userId, name: displayName, role: 'member', joinedAt: new Date().toISOString() });
+
+        await supabaseAdmin
+          .from('study_groups')
+          .update({ members, member_count: members.length, updated_at: new Date().toISOString() })
+          .eq('id', group.id);
+
+        await supabaseAdmin.from('circle_members').upsert({
+          circle_id: group.id,
+          user_id: userId,
+          user_name: displayName,
+          role: 'member',
+          joined_at: new Date().toISOString()
+        }, { onConflict: 'circle_id,user_id' });
       }
 
-      res.json({ success: true, message: 'Joined circle.' });
+      return res.json({
+        success: true,
+        group: circleView({ ...group, members, member_count: members.length }, { full: true })
+      });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to join circle.' });
+      console.error('[circles/join]', err?.message || err);
+      res.status(500).json({ success: false, error: 'Failed to join circle.' });
     }
   });
 
