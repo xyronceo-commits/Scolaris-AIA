@@ -1985,11 +1985,14 @@ export const DBService = {
       let supQuery = supabase
         .from('study_groups')
         .select('*')
+        .eq('type', 'general')
         .order('updated_at', { ascending: false })
         .limit(30);
       if (q) {
-        const safe = q.replace(/[%_]/g, '');
-        supQuery = supQuery.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+        const safe = q.replace(/[,()"'%_]/g, '').trim();
+        if (safe) {
+          supQuery = supQuery.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%`);
+        }
       }
       const { data, error } = await supQuery;
       if (!error && data) {
