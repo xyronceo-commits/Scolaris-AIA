@@ -5,6 +5,7 @@ import CGPACalculator from './CGPACalculator';
 import TimetableView from './TimetableView';
 import ScheduleView from './ScheduleView';
 import TaskModal from './TaskModal';
+import SemesterSchedulePlanner from './SemesterSchedulePlanner';
 import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
 import { 
@@ -20,10 +21,12 @@ import {
   Calculator,
   CalendarDays,
   Flag,
-  ChevronRight
+  ChevronRight,
+  TrendingUp,
+  Target
 } from 'lucide-react';
 
-export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetable' | 'cgpa';
+export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetable' | 'cgpa' | 'semester-target';
 
 interface StudyPlannerViewProps {
   initialTab?: string;
@@ -59,7 +62,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   // Primary tabs: Today (default), Week, Exams, Courses
   const [activeTab, setActiveTab] = useState<PlannerViewMode>(() => {
     if (openAddCourseSignal > 0) return 'courses';
-    if (['courses', 'timetable', 'cgpa', 'week', 'exams'].includes(initialTab)) {
+    if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'semester-target'].includes(initialTab)) {
       return initialTab as PlannerViewMode;
     }
     return 'today';
@@ -67,7 +70,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   const [courseFormSignal, setCourseFormSignal] = useState<number>(openAddCourseSignal);
 
   useEffect(() => {
-    if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'today'].includes(initialTab)) {
+    if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'today', 'semester-target'].includes(initialTab)) {
       setActiveTab(initialTab as PlannerViewMode);
     }
   }, [initialTab]);
@@ -272,6 +275,18 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
               </span>
             )}
           </button>
+
+          <button
+            onClick={() => setActiveTab('semester-target')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors min-h-[44px] flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'semester-target'
+                ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold border border-blue-200 dark:border-blue-900'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <TrendingUp size={15} />
+            <span>Target Plan</span>
+          </button>
         </div>
 
         {/* Secondary Views Control */}
@@ -285,6 +300,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             aria-label="Planner Tools"
           >
             <option value="" disabled>Other Tools...</option>
+            <option value="semester-target">Semester Plan & Target</option>
             <option value="courses">Course Manager</option>
             <option value="timetable">Weekly Timetable</option>
             <option value="cgpa">CGPA Calculator</option>
@@ -461,6 +477,18 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
           setSchedule={setSchedule}
           addNotification={addNotification}
           onOpenHub={onOpenHub}
+        />
+      )}
+
+      {activeTab === 'semester-target' && (
+        <SemesterSchedulePlanner
+          profile={profile}
+          courses={courses}
+          setCourses={setCourses}
+          schedule={schedule}
+          setSchedule={setSchedule}
+          onUpdateProfile={onUpdateProfile}
+          addNotification={addNotification}
         />
       )}
 
