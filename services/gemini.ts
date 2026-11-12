@@ -209,11 +209,12 @@ export const GeminiService = {
     }, 'Podcast service unavailable.');
 
     const script = data?.script || '';
-    let wavUrl: string | null = null;
+    const persistentUrl = data?.audioUrl || null;
+    let wavUrl: string | null = persistentUrl;
     let audioFailed = Boolean(data?.audioFailed);
     let audioError = data?.audioError || null;
 
-    if (data?.audioBase64) {
+    if (!wavUrl && data?.audioBase64) {
       try {
         const bytes = decode(data.audioBase64);
         const validation = validateAudioBytes(bytes);
@@ -233,7 +234,7 @@ export const GeminiService = {
         audioFailed = true;
         audioError = err?.message || 'Audio decoding failed';
       }
-    } else {
+    } else if (!data?.audioBase64 && !wavUrl) {
       audioFailed = true;
     }
 
@@ -244,6 +245,8 @@ export const GeminiService = {
     return {
       script,
       wavUrl,
+      audioUrl: persistentUrl || wavUrl,
+      storageKey: data?.storageKey || null,
       audioFailed,
       audioError,
       creditsCharged: data?.creditsCharged ?? (wavUrl ? 6 : 0)

@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { isAiSender } from './lib/brand';
 import { GoogleGenAI } from '@google/genai';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { 
   processDocumentBuffer, 
@@ -26,9 +26,48 @@ import {
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
 
 export function cleanEnvKey(name: string): string {
-  const val = process.env[name];
+  if (!name || typeof process === 'undefined' || !process.env) return '';
+  // 1. Direct lookup
+  let val = process.env[name];
+  // 2. Case-insensitive and trimmed key lookup fallback (vital for Linux/Vercel hostings)
+  if (!val) {
+    const target = name.trim().toUpperCase();
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.trim().toUpperCase() === target && typeof v === 'string') {
+        val = v;
+        break;
+      }
+    }
+  }
   if (!val || typeof val !== 'string') return '';
-  return val.trim().replace(/^["']|["']$/g, '').trim();
+  return val.replace(/^["']+|["']+$/g, '').replace(/[\r\n]/g, '').trim();
+}
+
+export function getPaystackSecretKey(): string {
+  return (
+    cleanEnvKey('PAYSTACK_SECRET_KEY') ||
+    cleanEnvKey('PAYSTACK_SECRET') ||
+    cleanEnvKey('PAYSTACK_KEY') ||
+    cleanEnvKey('SCOLARIS_PAYSTACK_SECRET_KEY')
+  );
+}
+
+export function getPaystackPlusPlanCode(): string {
+  return (
+    cleanEnvKey('PAYSTACK_PLUS_PLAN_CODE') ||
+    cleanEnvKey('PAYSTACK_PLAN_PLUS') ||
+    cleanEnvKey('PAYSTACK_PLUS_CODE') ||
+    'PLN_2s5jpok47fzrpp3'
+  );
+}
+
+export function getPaystackStudioPlanCode(): string {
+  return (
+    cleanEnvKey('PAYSTACK_STUDIO_PLAN_CODE') ||
+    cleanEnvKey('PAYSTACK_PLAN_STUDIO') ||
+    cleanEnvKey('PAYSTACK_STUDIO_CODE') ||
+    'PLN_z34ejcjcs5od3mf'
+  );
 }
 
 // Supabase configuration
@@ -53,6 +92,31 @@ if (!supabaseAuthClient) {
 }
 if (!supabaseAdmin) {
   console.warn('SUPABASE_SERVICE_ROLE_KEY is not set: admin dashboard data and audit logging are disabled.');
+}
+if (!getPaystackSecretKey()) {
+  console.warn('Paystack secret key is not configured: set PAYSTACK_SECRET_KEY in hosting environment variables to enable payments and verification.');
+}
+
+export function getSupabaseS3AccessKeyId(): string {
+  return cleanEnvKey('SUPABASE_S3_ACCESS_KEY_ID') || cleanEnvKey('S3_ACCESS_KEY_ID') || cleanEnvKey('AWS_ACCESS_KEY_ID');
+}
+
+export function getSupabaseS3SecretAccessKey(): string {
+  return cleanEnvKey('SUPABASE_S3_SECRET_ACCESS_KEY') || cleanEnvKey('S3_SECRET_ACCESS_KEY') || cleanEnvKey('AWS_SECRET_ACCESS_KEY');
+}
+
+export function getSupabaseS3Region(): string {
+  return cleanEnvKey('SUPABASE_S3_REGION') || cleanEnvKey('AWS_REGION') || 'eu-west-2';
+}
+
+export function isS3Configured(): boolean {
+  return Boolean(getSupabaseS3AccessKeyId() && getSupabaseS3SecretAccessKey() && getSupabaseS3Endpoint());
+}
+
+if (!isS3Configured()) {
+  console.warn('Supabase S3 storage keys are not configured: set SUPABASE_S3_ACCESS_KEY_ID and SUPABASE_S3_SECRET_ACCESS_KEY to enable high-speed storage, direct uploads, and AI audio persistence.');
+} else {
+  console.log('✓ Supabase S3 storage is configured and active.');
 }
 
 // Storage S3 endpoint for the shared library bucket (override with SUPABASE_S3_ENDPOINT if needed)
@@ -247,7 +311,49 @@ export async function createExpressApp() {
   app.set('trust proxy', 1);
   const PORT = 3000;
 
-  app.use(cors());
+  // Security: Disable X-Powered-By fingerprinting
+  app.disable('x-powered-by');
+
+  // Security: Standard OWASP protection headers
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-XSS-Protection', '0');
+    next();
+  });
+
+  // Security: Restrict CORS to authorized application origins and local dev
+  const allowedOrigins = [
+    'https://scolaris-aia.vercel.app',
+    'https://korsiq.com',
+    'https://www.korsiq.com',
+    cleanEnvKey('APP_URL'),
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ''
+  ].filter(Boolean) as string[];
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, server-to-server, Paystack webhooks)
+      if (!origin) return callback(null, true);
+      // Allow localhost in development
+      if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      // Allow Vercel preview and production deployments
+      try {
+        const host = new URL(origin).hostname;
+        if (host.endsWith('.vercel.app') || allowedOrigins.some(o => o.toLowerCase() === origin.toLowerCase())) {
+          return callback(null, true);
+        }
+      } catch {}
+      // Fallback: allow request but do not reflect unauthorized origin
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-paystack-signature', 'x-requested-with']
+  }));
 
   // URL normalizer: ensure incoming paths match Express /api routes on all hosting providers
   app.use((req, _res, next) => {
@@ -544,14 +650,14 @@ export async function createExpressApp() {
   let s3Client: S3Client | null = null;
   const getS3 = () => {
     if (!s3Client) {
-      const accessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
-      const secretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
+      const accessKeyId = getSupabaseS3AccessKeyId();
+      const secretAccessKey = getSupabaseS3SecretAccessKey();
       if (!accessKeyId || !secretAccessKey) {
         throw new Error('Supabase S3 access keys SUPABASE_S3_ACCESS_KEY_ID and SUPABASE_S3_SECRET_ACCESS_KEY are not configured.');
       }
       s3Client = new S3Client({
         endpoint: getSupabaseS3Endpoint(),
-        region: process.env.SUPABASE_S3_REGION || 'eu-west-2',
+        region: getSupabaseS3Region(),
         forcePathStyle: true,
         credentials: {
           accessKeyId,
@@ -569,10 +675,47 @@ export async function createExpressApp() {
     }
     next();
   };
+  function inferBucketFromKey(key: string, explicitBucket?: string): string {
+    if (explicitBucket && typeof explicitBucket === 'string' && explicitBucket.trim()) {
+      return explicitBucket.trim();
+    }
+    const clean = String(key || '').trim();
+    if (clean.startsWith('users/')) return 'user-files';
+    if (clean.startsWith('groups/')) return 'group-materials';
+    if (clean.startsWith('library/')) return 'scolaris-library';
+    return cleanEnvKey('SUPABASE_S3_BUCKET_NAME') || 'user-files';
+  }
+
+  async function downloadBufferViaS3(bucketName: string, key: string): Promise<Buffer | null> {
+    if (!isS3Configured()) return null;
+    try {
+      const s3 = getS3();
+      const cmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
+      const res = await s3.send(cmd);
+      if (res.Body) {
+        const bytes = await res.Body.transformToByteArray();
+        return Buffer.from(bytes);
+      }
+    } catch {
+      // not found in this bucket or S3 error
+    }
+    return null;
+  }
 
   // API Routes
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'healthy' });
+    const paystackKey = getPaystackSecretKey();
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      services: {
+        supabase: Boolean(supabaseAuthClient),
+        supabaseAdmin: Boolean(supabaseAdmin),
+        gemini: Boolean(pickGeminiKey()),
+        paystack: Boolean(paystackKey),
+        s3: isS3Configured()
+      }
+    });
   });
 
   // SEO Static Deliverables
@@ -593,10 +736,14 @@ export async function createExpressApp() {
   // Get S3 configuration details
   app.get('/api/s3/config', requireAuth, (req, res) => {
     res.json({
-      configured: !!(process.env.SUPABASE_S3_ACCESS_KEY_ID && process.env.SUPABASE_S3_SECRET_ACCESS_KEY),
+      configured: isS3Configured(),
       endpoint: getSupabaseS3Endpoint(),
-      region: process.env.SUPABASE_S3_REGION || 'eu-west-2',
-      bucket: process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library'
+      region: getSupabaseS3Region(),
+      buckets: {
+        userFiles: 'user-files',
+        groupMaterials: 'group-materials',
+        library: 'scolaris-library'
+      }
     });
   });
 
@@ -610,14 +757,14 @@ export async function createExpressApp() {
       name: 'KorsIQ Plus',
       amountNaira: 7500,
       amountKobo: 750000,
-      planCode: cleanEnvKey('PAYSTACK_PLUS_PLAN_CODE') || 'PLN_2s5jpok47fzrpp3'
+      planCode: getPaystackPlusPlanCode()
     },
     studio: {
       tier: 'studio' as const,
       name: 'KorsIQ Studio',
       amountNaira: 15000,
       amountKobo: 1500000,
-      planCode: cleanEnvKey('PAYSTACK_STUDIO_PLAN_CODE') || 'PLN_z34ejcjcs5od3mf'
+      planCode: getPaystackStudioPlanCode()
     }
   };
 
@@ -696,12 +843,12 @@ export async function createExpressApp() {
         });
       }
 
-      const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+      const paystackKey = getPaystackSecretKey();
       if (!paystackKey) {
         console.error('[Subscription Initialize] PAYSTACK_SECRET_KEY is not configured on the server.');
         return res.status(503).json({
           success: false,
-          error: 'Payment gateway is not configured on the server (missing PAYSTACK_SECRET_KEY).'
+          error: 'Payment gateway is not configured on the server (missing PAYSTACK_SECRET_KEY in server environment).'
         });
       }
 
@@ -793,7 +940,7 @@ export async function createExpressApp() {
   app.post('/api/subscription/verify', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { reference } = req.body;
-      let cleanRef = (typeof reference === 'string' ? reference.trim() : '');
+      let cleanRef = (typeof reference === 'string' ? reference.trim() : '').replace(/[^a-zA-Z0-9_-]/g, '');
       const uid = req.user!.uid;
       const userEmail = (req.user?.email || req.body?.email || '').toLowerCase().trim();
       const client = supabaseAdmin || supabaseAuthClient;
@@ -857,11 +1004,11 @@ export async function createExpressApp() {
         }
       }
 
-      const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+      const paystackKey = getPaystackSecretKey();
       if (!paystackKey) {
         return res.status(503).json({
           success: false,
-          error: 'Payment verification is unavailable: PAYSTACK_SECRET_KEY is not configured on the server.'
+          error: 'Payment verification is unavailable: PAYSTACK_SECRET_KEY is not configured on the server. If recently added in Vercel environment variables, please redeploy the project.'
         });
       }
 
@@ -1156,7 +1303,7 @@ export async function createExpressApp() {
 
   // Paystack Webhook Handler (Supports both canonical /api/subscription/webhook and /api/paystack/webhook)
   app.post(['/api/subscription/webhook', '/api/paystack/webhook'], async (req: AuthenticatedRequest, res) => {
-    const paystackKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+    const paystackKey = getPaystackSecretKey();
     if (!paystackKey) {
       return res.status(400).json({ error: 'Paystack secret is not configured' });
     }
@@ -1421,31 +1568,56 @@ export async function createExpressApp() {
   });
 
   // Standard S3 Upload Proxy Route
-  app.post('/api/s3/upload', requireAuth, requireS3Configured, apiRateLimiter, async (req, res) => {
+  app.post('/api/s3/upload', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { fileName, fileType, contentBase64 } = req.body;
+      const uid = req.user?.uid;
+      const { fileName, fileType, contentBase64, courseId, groupId, bucket: reqBucket } = req.body;
       if (!fileName || !contentBase64) {
         return res.status(400).json({ error: 'fileName and contentBase64 parameters are required' });
       }
 
       const buffer = Buffer.from(contentBase64, 'base64');
-      const bucket = process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library';
-      
+      const safeCourseId = typeof courseId === 'string' ? courseId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const safeGroupId = typeof groupId === 'string' ? groupId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const cleanName = path.basename(String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_'));
       const randomId = Math.random().toString(36).substring(2, 8);
-      const fileKey = `uploads/${Date.now()}-${randomId}-${fileName}`;
+      const fileId = `file_${Date.now()}_${randomId}`;
+
+      let bucket = reqBucket;
+      let fileKey = '';
+
+      if (safeGroupId) {
+        bucket = bucket || 'group-materials';
+        fileKey = `groups/${safeGroupId}/${fileId}_${cleanName}`;
+      } else if (safeCourseId && uid) {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/courses/${safeCourseId}/${fileId}_${cleanName}`;
+      } else if (uid) {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
+      } else {
+        bucket = bucket || cleanEnvKey('SUPABASE_S3_BUCKET_NAME') || 'scolaris-library';
+        fileKey = `uploads/${Date.now()}-${randomId}-${cleanName}`;
+      }
+
+      const authz = await authorizeStorageObject(uid, fileKey, bucket, 'write');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      bucket = authz.bucket;
 
       const s3 = getS3();
+      const contentType = fileType || 'application/octet-stream';
       const command = new PutObjectCommand({
         Bucket: bucket,
         Key: fileKey,
         Body: buffer,
-        ContentType: fileType || 'application/octet-stream',
+        ContentType: contentType,
       });
 
       await s3.send(command);
 
       res.json({
         success: true,
+        fileId,
         fileName,
         key: fileKey,
         bucket,
@@ -1457,26 +1629,120 @@ export async function createExpressApp() {
     }
   });
 
-  // S3 Presign Download Proxy Route
-  app.post('/api/s3/presign', requireAuth, requireS3Configured, apiRateLimiter, async (req, res) => {
+  // Direct S3 Upload Presign Route (allows client to upload directly to S3, bypassing Vercel 4.5MB limit)
+  app.post('/api/s3/presign-upload', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { key } = req.body;
-      if (!key) {
-        return res.status(400).json({ error: 'key is required' });
+      const uid = req.user?.uid;
+      if (!uid) return res.status(401).json({ error: 'Authentication required' });
+
+      const { fileName, fileType, courseId, groupId, targetBucket } = req.body;
+      if (!fileName || typeof fileName !== 'string') {
+        return res.status(400).json({ error: 'fileName is required' });
       }
 
-      const bucket = process.env.SUPABASE_S3_BUCKET_NAME || 'scolaris-library';
+      const safeCourseId = typeof courseId === 'string' ? courseId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const safeGroupId = typeof groupId === 'string' ? groupId.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+      const cleanName = path.basename(fileName.replace(/[^a-zA-Z0-9._-]/g, '_'));
+      const randomId = Math.random().toString(36).substring(2, 8);
+      const fileId = `file_${Date.now()}_${randomId}`;
+
+      let bucket = targetBucket;
+      let fileKey = '';
+
+      if (safeGroupId) {
+        bucket = bucket || 'group-materials';
+        fileKey = `groups/${safeGroupId}/${fileId}_${cleanName}`;
+      } else if (safeCourseId) {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/courses/${safeCourseId}/${fileId}_${cleanName}`;
+      } else {
+        bucket = bucket || 'user-files';
+        fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
+      }
+
+      const authz = await authorizeStorageObject(uid, fileKey, bucket, 'write');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      bucket = authz.bucket;
+
       const s3 = getS3();
+      const contentType = typeof fileType === 'string' && fileType.trim() ? fileType.trim() : 'application/octet-stream';
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: fileKey,
+        ContentType: contentType
+      });
+
+      const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
+
+      res.json({
+        success: true,
+        fileId,
+        key: fileKey,
+        bucket,
+        uploadUrl,
+        publicUrl: `${getSupabasePublicObjectBase()}/${bucket}/${fileKey}`
+      });
+    } catch (error: any) {
+      console.error('S3 Presign Upload Error:', error);
+      res.status(500).json({ error: error?.message || 'Failed to generate presigned upload URL' });
+    }
+  });
+
+  // S3 Presign Download Proxy Route (supports dynamic bucket detection and attachment headers)
+  app.post('/api/s3/presign', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { key, bucket: reqBucket, downloadName } = req.body;
+      const cleanKey = typeof key === 'string' ? key.trim() : '';
+      if (!cleanKey || cleanKey.includes('..') || cleanKey.includes('\\') || cleanKey.startsWith('/')) {
+        return res.status(400).json({ error: 'Invalid or unsafe storage path.' });
+      }
+
+      const authz = await authorizeStorageObject(req.user?.uid, cleanKey, reqBucket, 'read');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      const bucket = authz.bucket;
+      const s3 = getS3();
+
+      const filename = typeof downloadName === 'string' && downloadName.trim()
+        ? path.basename(downloadName.trim())
+        : cleanKey.split('/').pop() || 'download';
+
       const command = new GetObjectCommand({
         Bucket: bucket,
-        Key: key,
+        Key: cleanKey,
+        ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`
       });
 
       const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-      res.json({ presignedUrl });
+      res.json({ presignedUrl, bucket, key: cleanKey });
     } catch (error: any) {
       console.error('S3 Presign Error:', error);
       res.status(500).json({ error: error?.message || 'Failed to generate presigned download URL' });
+    }
+  });
+
+  // S3 Secure Delete Route
+  app.post('/api/s3/delete', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    try {
+      const uid = req.user?.uid;
+      const { key, bucket: reqBucket } = req.body;
+      const cleanKey = typeof key === 'string' ? key.trim() : '';
+      if (!cleanKey || cleanKey.includes('..') || cleanKey.includes('\\') || cleanKey.startsWith('/')) {
+        return res.status(400).json({ error: 'Invalid or unsafe storage path.' });
+      }
+
+      const authz = await authorizeStorageObject(uid, cleanKey, reqBucket, 'delete');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      const bucket = authz.bucket;
+      const s3 = getS3();
+      await s3.send(new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: cleanKey
+      }));
+
+      res.json({ success: true, key: cleanKey, bucket });
+    } catch (error: any) {
+      console.error('S3 Delete Error:', error);
+      res.status(500).json({ error: error?.message || 'Failed to delete object from storage' });
     }
   });
 
@@ -3467,7 +3733,6 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
   app.patch('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
   app.post('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
 
-  // Helper: Download a file buffer directly from Supabase Storage (bypasses Vercel 4.5MB body limit)
   // True if the user owns, belongs to, or may read (public/general) the circle. Uses the service role,
   // so it must be called before any circle data is returned.
   async function userCanReadCircle(circleId: string, uid: string): Promise<boolean> {
@@ -3489,14 +3754,72 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     return !!cm;
   }
 
+  // True if the user is the circle owner or a co-owner (the only roles allowed to add or remove materials).
+  async function userCanManageCircle(circleId: string, uid: string): Promise<boolean> {
+    if (!supabaseAdmin || !circleId || !uid) return false;
+    const { data: g } = await supabaseAdmin.from('study_groups').select('owner_id').eq('id', circleId).maybeSingle();
+    if (g?.owner_id === uid) return true;
+    const { data: cm } = await supabaseAdmin
+      .from('circle_members')
+      .select('role')
+      .eq('circle_id', circleId)
+      .eq('user_id', uid)
+      .maybeSingle();
+    return cm?.role === 'owner' || cm?.role === 'co_owner';
+  }
+
+  // The S3 presign/upload/delete routes use storage keys that bypass database row-level security, so every
+  // one of them must pass through this check. The bucket is never taken on trust from the client.
+  type StorageAction = 'read' | 'write' | 'delete';
+  async function authorizeStorageObject(
+    uid: string | undefined,
+    key: string,
+    requestedBucket: unknown,
+    action: StorageAction
+  ): Promise<{ ok: boolean; bucket: string; status: number; error: string }> {
+    if (!uid) return { ok: false, bucket: '', status: 401, error: 'Authentication required.' };
+    const clean = String(key || '').trim();
+    if (!clean || clean.includes('..') || clean.includes('\\') || clean.startsWith('/')) {
+      return { ok: false, bucket: '', status: 400, error: 'Invalid or unsafe storage path.' };
+    }
+    const parts = clean.split('/');
+    let allowed: string[];
+    if (parts[0] === 'users') {
+      if (parts[1] !== uid) return { ok: false, bucket: '', status: 403, error: 'Access denied to this storage object.' };
+      allowed = ['user-files', 'scolaris-library'];
+    } else if (parts[0] === 'groups') {
+      const circleId = parts[1];
+      const permitted = circleId
+        ? action === 'read' ? await userCanReadCircle(circleId, uid) : await userCanManageCircle(circleId, uid)
+        : false;
+      if (!permitted) {
+        return {
+          ok: false,
+          bucket: '',
+          status: 403,
+          error: action === 'read'
+            ? 'Access denied to this storage object.'
+            : 'Only the circle owner or co-owner can add or remove materials.'
+        };
+      }
+      allowed = ['group-materials', 'scolaris-library'];
+    } else if (parts[0] === 'library') {
+      if (action !== 'read') return { ok: false, bucket: '', status: 403, error: 'Library files can only be changed by an administrator.' };
+      allowed = ['scolaris-library'];
+    } else {
+      return { ok: false, bucket: '', status: 403, error: 'Access denied to this storage object.' };
+    }
+    const asked = typeof requestedBucket === 'string' ? requestedBucket.trim() : '';
+    if (asked && !allowed.includes(asked)) return { ok: false, bucket: '', status: 403, error: 'Access denied to this storage bucket.' };
+    return { ok: true, bucket: asked || allowed[0], status: 200, error: '' };
+  }
+
+  // Helper: Download a file buffer directly from S3 or Supabase Storage (bypasses Vercel 4.5MB body limit)
   async function downloadStorageBufferForUser(
     userId: string,
     storagePath: string,
     preferredBucket?: string
   ): Promise<{ buffer: Buffer | null; error?: string }> {
-    if (!supabaseAdmin) {
-      return { buffer: null, error: 'Storage service is not configured on the server.' };
-    }
     const cleanPath = String(storagePath || '').trim();
     if (!cleanPath || cleanPath.includes('..')) {
       return { buffer: null, error: 'Invalid storage path.' };
@@ -3522,20 +3845,35 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
       return { buffer: null, error: 'Access denied to this storage object.' };
     }
 
-    let lastErr = 'Could not download file from storage.';
-    for (const bucketName of candidateBuckets) {
-      try {
-        const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
-        if (!error && blob) {
-          const ab = await blob.arrayBuffer();
-          return { buffer: Buffer.from(ab) };
+    // 1. High-speed S3 direct streaming download
+    if (isS3Configured()) {
+      for (const bucketName of candidateBuckets) {
+        const s3Buf = await downloadBufferViaS3(bucketName, cleanPath);
+        if (s3Buf && s3Buf.length > 0) {
+          return { buffer: s3Buf };
         }
-        if (error?.message) lastErr = error.message;
-      } catch (err: any) {
-        if (err?.message) lastErr = err.message;
       }
     }
-    return { buffer: null, error: lastErr };
+
+    // 2. Supabase Admin REST download fallback
+    if (supabaseAdmin) {
+      let lastErr = 'Could not download file from storage.';
+      for (const bucketName of candidateBuckets) {
+        try {
+          const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
+          if (!error && blob) {
+            const ab = await blob.arrayBuffer();
+            return { buffer: Buffer.from(ab) };
+          }
+          if (error?.message) lastErr = error.message;
+        } catch (err: any) {
+          if (err?.message) lastErr = err.message;
+        }
+      }
+      return { buffer: null, error: lastErr };
+    }
+
+    return { buffer: null, error: 'Neither S3 nor Supabase storage is configured.' };
   }
 
   // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
@@ -4470,10 +4808,36 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       // Step 4: BOTH script and valid playable audio succeeded -> now consume credits
       const spend = await consumeAiCredits(userId, 'podcast', cost, req.body?.requestId);
       const audioBase64 = wavBuffer.toString('base64');
+
+      let persistentAudioUrl: string | null = null;
+      let podcastStorageKey: string | null = null;
+      if (isS3Configured() && wavBuffer) {
+        try {
+          podcastStorageKey = `users/${userId}/podcasts/podcast_${Date.now()}_${crypto.randomBytes(3).toString('hex')}.wav`;
+          const s3 = getS3();
+          await s3.send(new PutObjectCommand({
+            Bucket: 'user-files',
+            Key: podcastStorageKey,
+            Body: wavBuffer,
+            ContentType: 'audio/wav'
+          }));
+          const getCmd = new GetObjectCommand({
+            Bucket: 'user-files',
+            Key: podcastStorageKey
+          });
+          // 7-day presigned streaming playback URL
+          persistentAudioUrl = await getSignedUrl(s3, getCmd, { expiresIn: 7 * 24 * 3600 });
+        } catch (s3AudioErr: any) {
+          console.warn('[Podcast S3 Storage] Could not persist audio track to S3:', s3AudioErr?.message || s3AudioErr);
+        }
+      }
+
       res.json({
         success: true,
         script,
         audioBase64,
+        audioUrl: persistentAudioUrl,
+        storageKey: podcastStorageKey,
         durationSec: validation.durationSec,
         creditsCharged: spend.success ? cost : 0,
         creditsRemaining: spend.balance
@@ -4667,8 +5031,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
-  // 2. Verify 6-digit OTP
-  app.post('/api/admin/auth/verify-otp', async (req, res) => {
+  // 2. Verify 6-digit OTP (Rate limited to thwart brute-forcing)
+  app.post('/api/admin/auth/verify-otp', apiRateLimiter, async (req, res) => {
     const ip = req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
     const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
@@ -4836,7 +5200,10 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         .limit(50);
 
       if (search) {
-        query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+        const safeSearch = search.replace(/[,()"'%_]/g, '').trim();
+        if (safeSearch) {
+          query = query.or(`email.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%`);
+        }
       }
 
       const { data, error } = await query;
@@ -4911,9 +5278,9 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       return res.status(400).json({ success: false, error: 'Payment reference is required.' });
     }
 
-    const secretKey = cleanEnvKey('PAYSTACK_SECRET_KEY');
+    const secretKey = getPaystackSecretKey();
     if (!secretKey) {
-      return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server.' });
+      return res.status(503).json({ success: false, error: 'PAYSTACK_SECRET_KEY is not configured on the server. If recently added in Vercel environment variables, please redeploy the project.' });
     }
 
     try {
@@ -5104,10 +5471,14 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
     try {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(queryVal);
+      const safeVal = queryVal.replace(/[,()"'%_]/g, '').trim();
+      if (!isUuid && !safeVal) {
+        return res.status(400).json({ success: false, error: 'Invalid user search query.' });
+      }
       const { data: userRow, error: userErr } = await supabaseAdmin
         .from('profiles')
         .select('*')
-        .or(isUuid ? `id.eq.${queryVal}` : `email.ilike.${queryVal}`)
+        .or(isUuid ? `id.eq.${queryVal}` : `email.ilike.${safeVal}`)
         .maybeSingle();
 
       if (userErr || !userRow) {
@@ -5151,10 +5522,14 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
 
     try {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userQuery);
+      const safeVal = userQuery.replace(/[,()"'%_]/g, '').trim();
+      if (!isUuid && !safeVal) {
+        return res.status(400).json({ success: false, error: 'Invalid user format.' });
+      }
       const { data: userRow } = await supabaseAdmin
         .from('profiles')
         .select('id, email, name')
-        .or(isUuid ? `id.eq.${userQuery}` : `email.ilike.${userQuery}`)
+        .or(isUuid ? `id.eq.${userQuery}` : `email.ilike.${safeVal}`)
         .maybeSingle();
 
       if (!userRow) {
@@ -5255,8 +5630,8 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     return `KQ-${p1}-${p2}`;
   }
 
-  // Create Study Circle (Backed by service role to guarantee creation)
-  app.post('/api/circles/create', requireAuth, circleWriteLimiter, async (req: AuthenticatedRequest, res) => {
+  // Create Study Circle (Backed by service role to guarantee creation, authenticated & rate limited)
+  app.post('/api/circles/create', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const {
         name,
@@ -5269,24 +5644,26 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         academicSession,
         groupImage,
         inviteCode: clientCode,
-        ownerName: bodyOwnerName
+        ownerName
       } = req.body;
-
-      // Identity always comes from the verified token, never from the request body.
-      const ownerId = req.user!.uid;
-      const ownerName = String(bodyOwnerName || '').trim().slice(0, 80) || 'Circle Creator';
 
       if (!name || !course) {
         return res.status(400).json({ success: false, error: 'Circle name and course code are required.' });
       }
+
+      // Security: enforce ownerId from authenticated session to prevent spoofing
+      const ownerId = req.user!.uid;
+      const userEmail = req.user?.email || '';
+      const fallbackName = userEmail ? userEmail.split('@')[0] : 'Circle Creator';
+      const effectiveOwnerName = (typeof ownerName === 'string' && ownerName.trim()) || fallbackName;
 
       const groupId = `group_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
       const inviteCode = (clientCode && String(clientCode).trim().toUpperCase()) || generateServerCircleInviteCode();
       const createdAt = new Date().toISOString();
 
       const initialMember = {
-        userId: ownerId || 'creator',
-        name: ownerName || 'Circle Creator',
+        userId: ownerId,
+        name: effectiveOwnerName,
         role: 'owner',
         joinedAt: createdAt
       };
@@ -5296,9 +5673,9 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         groupId,
         type: 'announcement',
         title: 'Circle Initialized',
-        description: `Welcome to ${name}! Study circle initialized by ${ownerName || 'Creator'}.`,
-        actorName: ownerName || 'Creator',
-        actorId: ownerId || '',
+        description: `Welcome to ${name}! Study circle initialized by ${effectiveOwnerName}.`,
+        actorName: effectiveOwnerName,
+        actorId: ownerId,
         timestamp: Date.now()
       };
 
@@ -5323,7 +5700,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
         university: String(university || '').trim(),
         academic_session: String(academicSession || '').trim(),
         group_image: String(groupImage || '').trim(),
-        owner_id: ownerId || 'creator',
+        owner_id: ownerId,
         members: [initialMember],
         member_count: 1,
         messages: [welcomeMessage],
@@ -5342,15 +5719,14 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
             .maybeSingle();
 
           if (!dbErr && dbData) {
-            if (ownerId) {
-              await supabaseAdmin.from('circle_members').upsert({
-                circle_id: dbData.id,
-                user_id: ownerId,
-                user_name: ownerName || 'Circle Creator',
-                role: 'owner',
-                joined_at: createdAt
-              }, { onConflict: 'circle_id,user_id' });
-            }
+            await supabaseAdmin.from('circle_members').upsert({
+              circle_id: dbData.id,
+              user_id: ownerId,
+              user_name: effectiveOwnerName,
+              role: 'owner',
+              joined_at: createdAt
+            }, { onConflict: 'circle_id,user_id' });
+
             return res.json({
               success: true,
               group: {
@@ -5582,7 +5958,7 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
             return res.status(400).json({ success: false, error: 'Invalid invite code.' });
           }
           if (group.invite_code_active === false) {
-            return res.status(400).json({ success: false, error: 'This invitation code has been revoked.' });
+            return res.status(403).json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
           }
         }
         if (members.length >= 100) {
@@ -5646,6 +6022,17 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
       }).catch(() => {});
     }
   }
+
+  // OWASP: Global Centralized Error Handler - prevent internal stack trace disclosure (CWE-209)
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[Global Server Error]:', err?.message || err);
+    if (res.headersSent) return;
+    const status = typeof err?.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+    res.status(status).json({
+      success: false,
+      error: status < 500 && err?.message ? err.message : 'An internal server error occurred. Please try again later.'
+    });
+  });
 
   return app;
 }

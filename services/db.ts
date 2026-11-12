@@ -1022,40 +1022,78 @@ export const DBService = {
   ): Promise<{ success: boolean; material?: any; error?: string }> {
     try {
       const materialId = `mat_${Date.now()}_${rand()}`;
-      const storagePath = `groups/${groupId}/materials/${materialId}_${sanitizeFileName(file.name)}`;
+      let storagePath = `groups/${groupId}/materials/${materialId}_${sanitizeFileName(file.name)}`;
 
       let usedBucket = GROUP_MATERIALS_BUCKET;
-      let { error: uploadError } = await supabase.storage
-        .from(GROUP_MATERIALS_BUCKET)
-        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+      let uploadedSuccessfully = false;
 
-      // Only fall back when the bucket itself is missing. Any other failure (permissions, size, type) must
-      // surface its real message instead of being hidden by a second, unrelated error.
-      if (uploadError && /bucket not found|does not exist/i.test(uploadError.message || '')) {
-        console.warn(`Bucket '${GROUP_MATERIALS_BUCKET}' missing. Retrying with '${FALLBACK_BUCKET}'...`);
-        const fbRes = await supabase.storage
-          .from(FALLBACK_BUCKET)
+      // 1. Direct S3 presigned upload first (high speed, avoids browser/Vercel body limits)
+      try {
+        const token = await getAccessToken();
+        const presignRes = await fetch('/api/s3/presign-upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || 'application/octet-stream',
+            groupId,
+            targetBucket: GROUP_MATERIALS_BUCKET
+          })
+        });
+        if (presignRes.ok) {
+          const presignData = await presignRes.json();
+          if (presignData.uploadUrl && presignData.key) {
+            const s3PutRes = await fetch(presignData.uploadUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': file.type || 'application/octet-stream' },
+              body: file
+            });
+            if (s3PutRes.ok) {
+              uploadedSuccessfully = true;
+              storagePath = presignData.key;
+              usedBucket = presignData.bucket || GROUP_MATERIALS_BUCKET;
+            }
+          }
+        }
+      } catch (s3Err) {
+        console.warn('[Circle Storage] Direct S3 upload fallback:', s3Err);
+      }
+
+      // 2. Supabase Storage SDK fallback
+      if (!uploadedSuccessfully) {
+        let { error: uploadError } = await supabase.storage
+          .from(GROUP_MATERIALS_BUCKET)
           .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-        if (!fbRes.error) {
-          uploadError = null;
-          usedBucket = FALLBACK_BUCKET;
-        } else {
-          uploadError = fbRes.error;
+
+        // Only fall back when the bucket itself is missing. Any other failure (permissions, size, type) must
+        // surface its real message instead of being hidden by a second, unrelated error.
+        if (uploadError && /bucket not found|does not exist/i.test(uploadError.message || '')) {
+          console.warn(`Bucket '${GROUP_MATERIALS_BUCKET}' missing. Retrying with '${FALLBACK_BUCKET}'...`);
+          const fbRes = await supabase.storage
+            .from(FALLBACK_BUCKET)
+            .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+          if (!fbRes.error) {
+            uploadError = null;
+            usedBucket = FALLBACK_BUCKET;
+          } else {
+            uploadError = fbRes.error;
+          }
+        }
+
+        if (uploadError) {
+          const msg = uploadError.message || 'Upload failed.';
+          if (/row-level security|violates|not authorized|unauthorized/i.test(msg)) {
+            throw new Error('Only the circle owner or co-owner can upload materials here.');
+          }
+          if (/exceed|too large|payload/i.test(msg)) {
+            throw new Error('This file is too large to upload. Try a smaller file.');
+          }
+          throw uploadError;
         }
       }
-
-      if (uploadError) {
-        const msg = uploadError.message || 'Upload failed.';
-        if (/row-level security|violates|not authorized|unauthorized/i.test(msg)) {
-          throw new Error('Only the circle owner or co-owner can upload materials here.');
-        }
-        if (/exceed|too large|payload/i.test(msg)) {
-          throw new Error('This file is too large to upload. Try a smaller file.');
-        }
-        throw uploadError;
-      }
-
-      if (uploadError) throw uploadError;
 
       // Extract plain text server-side so the group AI can use the material
       let extractedText = '';
@@ -1966,11 +2004,14 @@ export const DBService = {
       let supQuery = supabase
         .from('study_groups')
         .select('*')
+        .eq('type', 'general')
         .order('updated_at', { ascending: false })
         .limit(30);
       if (q) {
-        const safe = q.replace(/[%_]/g, '');
-        supQuery = supQuery.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%,invite_code.ilike.%${safe}%`);
+        const safe = q.replace(/[,()"'%_]/g, '').trim();
+        if (safe) {
+          supQuery = supQuery.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%`);
+        }
       }
       const { data, error } = await supQuery;
       if (!error && data) {
@@ -2139,6 +2180,17 @@ export const DBService = {
       if (storagePath) {
         await supabase.storage.from(GROUP_MATERIALS_BUCKET).remove([storagePath]).catch(() => {});
         await supabase.storage.from(FALLBACK_BUCKET).remove([storagePath]).catch(() => {});
+        try {
+          const token = await getAccessToken();
+          await fetch('/api/s3/delete', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ key: storagePath, bucket: GROUP_MATERIALS_BUCKET })
+          });
+        } catch {}
       }
       const { error } = await supabase.from('group_materials').delete().eq('id', materialId);
       if (error) throw error;
@@ -2258,29 +2310,69 @@ export const DBService = {
 
     const fileId = `file_${Date.now()}_${rand()}`;
     // Isolated per-user path: users/{userId}/courses/{courseId}/{fileId}_{fileName}
-    const storagePath = `users/${userId}/courses/${courseId}/${fileId}_${sanitizeFileName(file.name)}`;
-
+    let storagePath = `users/${userId}/courses/${courseId}/${fileId}_${sanitizeFileName(file.name)}`;
     let usedBucket = USER_FILES_BUCKET;
-    let { error: uploadError } = await supabase.storage
-      .from(USER_FILES_BUCKET)
-      .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+    let uploadedSuccessfully = false;
 
-    if (uploadError) {
-      console.warn(`Upload to '${USER_FILES_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
-      const fbRes = await supabase.storage
-        .from(FALLBACK_BUCKET)
-        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-      if (!fbRes.error) {
-        uploadError = null;
-        usedBucket = FALLBACK_BUCKET;
-      } else {
-        uploadError = fbRes.error;
+    // 1. Direct S3 presigned upload first (high throughput, no body size limits)
+    try {
+      const token = await getAccessToken();
+      const presignRes = await fetch('/api/s3/presign-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          courseId,
+          targetBucket: USER_FILES_BUCKET
+        })
+      });
+
+      if (presignRes.ok) {
+        const presignData = await presignRes.json();
+        if (presignData.uploadUrl && presignData.key) {
+          const s3PutRes = await fetch(presignData.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file
+          });
+          if (s3PutRes.ok) {
+            uploadedSuccessfully = true;
+            storagePath = presignData.key;
+            usedBucket = presignData.bucket || USER_FILES_BUCKET;
+          }
+        }
       }
+    } catch (s3Err) {
+      console.warn('[Storage] S3 direct upload fallback:', s3Err);
     }
 
-    if (uploadError) {
-      console.error('Storage upload error across buckets:', uploadError);
-      throw new Error(uploadError.message || 'File upload failed.');
+    // 2. Supabase Storage SDK upload fallback
+    if (!uploadedSuccessfully) {
+      let { error: uploadError } = await supabase.storage
+        .from(USER_FILES_BUCKET)
+        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+
+      if (uploadError) {
+        console.warn(`Upload to '${USER_FILES_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
+        const fbRes = await supabase.storage
+          .from(FALLBACK_BUCKET)
+          .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+        if (!fbRes.error) {
+          uploadError = null;
+          usedBucket = FALLBACK_BUCKET;
+        } else {
+          uploadError = fbRes.error;
+        }
+      }
+
+      if (uploadError) {
+        console.error('Storage upload error across buckets:', uploadError);
+        throw new Error(uploadError.message || 'File upload failed.');
+      }
     }
 
     const baseRowPayload: any = {
@@ -2415,6 +2507,19 @@ export const DBService = {
       if (storagePath && storagePath.startsWith('users/')) {
         const { error: removeError } = await supabase.storage.from(USER_FILES_BUCKET).remove([storagePath]);
         if (removeError) console.warn('Storage file deletion warning:', removeError);
+
+        // Also clean up object from S3 storage
+        try {
+          const token = await getAccessToken();
+          await fetch('/api/s3/delete', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ key: storagePath, bucket: USER_FILES_BUCKET })
+          });
+        } catch {}
       }
 
       const { error } = await supabase.from('user_files').delete().eq('id', fileId);
