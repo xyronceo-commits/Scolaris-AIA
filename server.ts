@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { isAiSender } from './lib/brand';
@@ -170,39 +172,105 @@ function pickGeminiKey(): string | null {
   return null;
 }
 
-/** Reads a scanned PDF or image document with Gemini's native multimodal vision across fallback models. Returns '' when it can't. */
-async function ocrMediaWithGemini(buffer: Buffer, mimeType: string, apiKey: string): Promise<string> {
-  if (buffer.length > OCR_MAX_PDF_BYTES) {
-    console.warn(`[OCR] Skipped: file is ${(buffer.length / 1048576).toFixed(1)} MB (limit ${OCR_MAX_PDF_BYTES / 1048576} MB).`);
+/** Reads a scanned PDF or image document with Gemini's native multimodal vision across fallback models. Supports files up to 50 MB with Files API fallback. */
+async function ocrMediaWithGemini(
+  buffer: Buffer,
+  mimeType: string,
+  apiKey: string,
+  pageStart?: number,
+  pageEnd?: number
+): Promise<string> {
+  if (buffer.length > MAX_UPLOAD_BYTES) {
+    console.warn(`[OCR] Skipped: file is ${(buffer.length / 1048576).toFixed(1)} MB (limit ${MAX_UPLOAD_BYTES / 1048576} MB).`);
     return '';
   }
   const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
   const candidateModels = Array.from(new Set([OCR_MODEL, ...GEMINI_FALLBACK_MODELS]));
-  const base64Data = buffer.toString('base64');
 
-  for (const model of candidateModels) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          { inlineData: { data: base64Data, mimeType } },
-          'Transcribe all text in this academic document, notes, slides, or transcript exactly as written, in reading order, page by page. ' +
-            'Include course codes, course titles, headings, body text, credit units, scores, grades, bullet points, and handwritten text. Do not summarize, translate, or add commentary. ' +
-            'Where there is a diagram or image with no text, write [diagram]. Output plain text only.'
-        ],
-        config: { temperature: 0 }
-      });
-      const text = normalizeExtractedText(response.text || '');
-      if (text) return text;
-    } catch (err: any) {
-      console.warn(`[OCR] Gemini OCR model ${model} failed (${err?.status || 'ERR'}):`, err?.message || err);
+  const pageRangePrompt = pageStart && pageEnd
+    ? ` Focus specifically on transcribing pages ${pageStart} through ${pageEnd}.`
+    : '';
+
+  const promptText =
+    'Transcribe all text in this academic document, notes, slides, or transcript exactly as written, in reading order, page by page.' +
+    pageRangePrompt +
+    ' Include course codes, course titles, headings, body text, credit units, scores, grades, bullet points, and handwritten text. Do not summarize, translate, or add commentary. ' +
+    'Where there is a diagram or image with no text, write [diagram]. If a page is entirely illegible or blank, write [illegible page]. Output plain text only.';
+
+  let uploadedFileRef: any = null;
+  let tempFilePath: string | null = null;
+
+  try {
+    let contentPart: any;
+
+    if (buffer.length > 15 * 1024 * 1024) {
+      // Large file (15MB - 50MB): use Gemini Files API to avoid inline payload limits
+      try {
+        const tmpDir = os.tmpdir();
+        tempFilePath = path.join(tmpDir, `korsiq_ocr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.pdf`);
+        fs.writeFileSync(tempFilePath, buffer);
+        uploadedFileRef = await ai.files.upload({
+          file: tempFilePath,
+          config: { mimeType }
+        });
+        contentPart = {
+          fileData: {
+            fileUri: uploadedFileRef.uri,
+            mimeType
+          }
+        };
+      } catch (uploadErr) {
+        console.warn('[OCR] Files API upload failed, falling back to inline payload:', uploadErr);
+        contentPart = {
+          inlineData: {
+            data: buffer.toString('base64'),
+            mimeType
+          }
+        };
+      }
+    } else {
+      contentPart = {
+        inlineData: {
+          data: buffer.toString('base64'),
+          mimeType
+        }
+      };
+    }
+
+    for (const model of candidateModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [contentPart, promptText],
+          config: { temperature: 0 }
+        });
+        const text = normalizeExtractedText(response.text || '');
+        if (text) return text;
+      } catch (err: any) {
+        console.warn(`[OCR] Gemini OCR model ${model} failed (${err?.status || 'ERR'}):`, err?.message || err);
+      }
+    }
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch {}
+    }
+    if (uploadedFileRef?.name) {
+      try {
+        await ai.files.delete({ name: uploadedFileRef.name });
+      } catch {}
     }
   }
+
   return '';
 }
 
-async function ocrPdfWithGemini(buffer: Buffer, apiKey: string): Promise<string> {
-  return ocrMediaWithGemini(buffer, 'application/pdf', apiKey);
+async function ocrPdfWithGemini(
+  buffer: Buffer,
+  apiKey: string,
+  pageStart?: number,
+  pageEnd?: number
+): Promise<string> {
+  return ocrMediaWithGemini(buffer, 'application/pdf', apiKey, pageStart, pageEnd);
 }
 
 /** Normal extraction first; if a file is an image or a scanned PDF, use Gemini vision OCR. */
@@ -267,7 +335,7 @@ async function extractDocumentWithOcrFallback(
     return { ...result, usedOcr: false };
   }
 
-  // If standard extraction failed or yielded negligible text on a PDF, attempt Gemini Vision OCR
+  // If standard extraction failed or yielded negligible text on a PDF, attempt Gemini Vision OCR with sliced page batching
   if (isPdf || result.isScannedPdf) {
     const key = pickGeminiKey();
     if (!key) {
@@ -278,23 +346,36 @@ async function extractDocumentWithOcrFallback(
       };
     }
 
-    const text = await ocrPdfWithGemini(buffer, key);
+    const totalPages = result.pageCount || 1;
+    const start = Math.max(1, options?.pageStart || 1);
+    const end = options?.pageEnd ? Math.min(totalPages, options.pageEnd) : Math.min(totalPages, start + 19);
+
+    const text = await ocrPdfWithGemini(buffer, key, start, end);
+    const nextPage = end < totalPages ? end + 1 : null;
+    const done = end >= totalPages;
+
     if (text && text.trim().length >= 5) {
       return {
         success: true,
         extractedText: text,
         fileTypeDetected: 'pdf',
-        pageCount: result.pageCount || 1,
-        nextPage: null,
-        done: true,
+        pageCount: totalPages,
+        nextPage,
+        done,
         usedOcr: true
       };
     }
 
+    // Honest reporting when OCR yields no text: never invent text
+    const emptyNotice = `[Pages ${start} to ${end}: scanned content could not be read]`;
     return {
-      ...result,
-      error: "This PDF contains scanned pages or slides and we couldn't read clear text from it. Please upload a clearer copy or enter grades manually.",
-      usedOcr: false
+      success: true,
+      extractedText: emptyNotice,
+      fileTypeDetected: 'pdf',
+      pageCount: totalPages,
+      nextPage,
+      done,
+      usedOcr: true
     };
   }
 
