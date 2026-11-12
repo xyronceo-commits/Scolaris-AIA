@@ -1,5 +1,7 @@
 import { supabase, getAccessToken, getCurrentUserId } from '../lib/supabase';
 import { MAX_UPLOAD_BYTES, isAllowedFileType, formatBytes, RESUMABLE_THRESHOLD_BYTES } from '../lib/limits';
+import { uploadResumableFile, ResumableUploadController } from '../lib/resumableUpload';
+import { BETA_PLAN_LIMITS } from '../constants';
 import {
   UserProfile,
   Course,
@@ -1020,7 +1022,9 @@ export const DBService = {
     groupId: string,
     file: File,
     uploaderId: string,
-    uploaderName: string
+    uploaderName: string,
+    onProgress?: (percent: number, bytesUploaded: number, bytesTotal: number) => void,
+    controllerRef?: { current: ResumableUploadController | null }
   ): Promise<{ success: boolean; material?: any; error?: string }> {
     try {
       if (!isAllowedFileType(file.name, file.type)) {
@@ -1064,6 +1068,7 @@ export const DBService = {
               uploadedSuccessfully = true;
               storagePath = presignData.key;
               usedBucket = presignData.bucket || GROUP_MATERIALS_BUCKET;
+              if (onProgress) onProgress(100, file.size, file.size);
             }
           }
         }
@@ -1071,29 +1076,36 @@ export const DBService = {
         console.warn('[Circle Storage] Direct S3 upload fallback:', s3Err);
       }
 
-      // 2. Supabase Storage SDK fallback
+      // 2. Supabase Storage: TUS Resumable above 6 MB, standard upload up to 6 MB
       if (!uploadedSuccessfully) {
-        let { error: uploadError } = await supabase.storage
-          .from(GROUP_MATERIALS_BUCKET)
-          .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-
-        if (uploadError) {
-          console.warn(`Upload to '${GROUP_MATERIALS_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
-          const fbRes = await supabase.storage
-            .from(FALLBACK_BUCKET)
-            .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-          if (!fbRes.error) {
-            uploadError = null;
-            usedBucket = FALLBACK_BUCKET;
-          } else {
-            uploadError = fbRes.error;
+        if (file.size > RESUMABLE_THRESHOLD_BYTES) {
+          try {
+            await uploadResumableFile(GROUP_MATERIALS_BUCKET, storagePath, file, onProgress, controllerRef);
+            uploadedSuccessfully = true;
+          } catch (tusErr: any) {
+            console.error('[Circle Storage] Resumable TUS upload error:', tusErr);
+            return { success: false, error: tusErr.message || 'Resumable upload failed.' };
           }
-        }
+        } else {
+          const { error: uploadError } = await supabase.storage
+            .from(GROUP_MATERIALS_BUCKET)
+            .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
 
-        if (uploadError) throw uploadError;
+          if (uploadError) {
+            const msg = uploadError.message || '';
+            const friendly = msg.includes('expired') || msg.includes('JWT')
+              ? 'Your session has expired. Please sign in again.'
+              : msg.includes('too large')
+              ? 'File exceeds the 50 MB limit.'
+              : `Upload failed: ${uploadError.message}`;
+            return { success: false, error: friendly };
+          }
+          uploadedSuccessfully = true;
+          if (onProgress) onProgress(100, file.size, file.size);
+        }
       }
 
-      // Extract plain text server-side so the group AI can use the material
+      // Extract plain text server-side from storagePath (never large base64)
       let extractedText = '';
       let processingStatus: 'ready' | 'processing' | 'failed' = 'processing';
       let extractionError: string | null = null;
@@ -1108,7 +1120,8 @@ export const DBService = {
           body: JSON.stringify({
             fileName: file.name,
             fileType: file.type,
-            contentBase64: await fileToBase64(file),
+            storagePath,
+            bucket: usedBucket
           }),
         });
         if (resp.ok) {
@@ -2287,13 +2300,57 @@ export const DBService = {
     }
   },
 
+  async checkUserStorageQuota(userId: string, additionalBytes: number): Promise<{ allowed: boolean; usedBytes: number; limitBytes: number; error?: string }> {
+    try {
+      const profile = await this.getUserProfile(userId);
+      const rawPlan = (profile?.subscriptionTier || profile?.tier || 'free').toLowerCase();
+      const planKey = (rawPlan === 'studio' || rawPlan === 'sage')
+        ? 'studio'
+        : (rawPlan === 'plus' || rawPlan === 'scholar')
+        ? 'plus'
+        : 'free';
+      const planLimits = BETA_PLAN_LIMITS[planKey] || BETA_PLAN_LIMITS.free;
+      const limitBytes = planLimits.storageLimitBytes;
+
+      const files = await this.getUserFiles(userId);
+      const usedBytes = files.reduce((sum, f) => {
+        if (f.fileSize) {
+          const match = f.fileSize.match(/([\d.]+)\s*(B|KB|MB|GB)/i);
+          if (match) {
+            const val = parseFloat(match[1]);
+            const unit = match[2].toUpperCase();
+            if (unit === 'GB') return sum + val * 1024 * 1024 * 1024;
+            if (unit === 'MB') return sum + val * 1024 * 1024;
+            if (unit === 'KB') return sum + val * 1024;
+            return sum + val;
+          }
+        }
+        return sum;
+      }, 0);
+
+      if (usedBytes + additionalBytes > limitBytes) {
+        return {
+          allowed: false,
+          usedBytes,
+          limitBytes,
+          error: `Storage quota reached (${formatBytes(usedBytes)} of ${planLimits.storageLimitDisplay} used). Delete existing files or upgrade your plan to upload more.`
+        };
+      }
+      return { allowed: true, usedBytes, limitBytes };
+    } catch {
+      return { allowed: true, usedBytes: 0, limitBytes: 500 * 1024 * 1024 };
+    }
+  },
+
   async uploadFileToStorage(
     userId: string,
     courseId: string,
     file: File,
     courseCode?: string,
     courseTitle?: string,
-    initialStatus: 'ready' | 'processing' | 'failed' = 'ready'
+    initialStatus: 'ready' | 'processing' | 'failed' = 'ready',
+    onProgress?: (percent: number, bytesUploaded: number, bytesTotal: number) => void,
+    controllerRef?: { current: ResumableUploadController | null }
   ): Promise<UserFile> {
     if (!userId) throw new Error('User must be authenticated to upload files');
     if (!isAllowedFileType(file.name, file.type)) {
@@ -2301,6 +2358,11 @@ export const DBService = {
     }
     if (file.size > MAX_UPLOAD_BYTES) {
       throw new Error(`File "${file.name}" exceeds the 50 MB limit (${formatBytes(file.size)}).`);
+    }
+
+    const quota = await this.checkUserStorageQuota(userId, file.size);
+    if (!quota.allowed) {
+      throw new Error(quota.error || 'Storage quota exceeded.');
     }
 
     const fileId = `file_${Date.now()}_${rand()}`;
@@ -2338,6 +2400,7 @@ export const DBService = {
             uploadedSuccessfully = true;
             storagePath = presignData.key;
             usedBucket = presignData.bucket || USER_FILES_BUCKET;
+            if (onProgress) onProgress(100, file.size, file.size);
           }
         }
       }
@@ -2345,28 +2408,33 @@ export const DBService = {
       console.warn('[Storage] S3 direct upload fallback:', s3Err);
     }
 
-    // 2. Supabase Storage SDK upload fallback
+    // 2. Supabase Storage: TUS Resumable above 6 MB, standard upload up to 6 MB
     if (!uploadedSuccessfully) {
-      let { error: uploadError } = await supabase.storage
-        .from(USER_FILES_BUCKET)
-        .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-
-      if (uploadError) {
-        console.warn(`Upload to '${USER_FILES_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
-        const fbRes = await supabase.storage
-          .from(FALLBACK_BUCKET)
-          .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-        if (!fbRes.error) {
-          uploadError = null;
-          usedBucket = FALLBACK_BUCKET;
-        } else {
-          uploadError = fbRes.error;
+      if (file.size > RESUMABLE_THRESHOLD_BYTES) {
+        try {
+          await uploadResumableFile(USER_FILES_BUCKET, storagePath, file, onProgress, controllerRef);
+          uploadedSuccessfully = true;
+        } catch (tusErr: any) {
+          console.error('[Storage] Resumable TUS upload error:', tusErr);
+          throw tusErr;
         }
-      }
+      } else {
+        const { error: uploadError } = await supabase.storage
+          .from(USER_FILES_BUCKET)
+          .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
 
-      if (uploadError) {
-        console.error('Storage upload error across buckets:', uploadError);
-        throw new Error(uploadError.message || 'File upload failed.');
+        if (uploadError) {
+          const msg = uploadError.message || '';
+          if (msg.includes('401') || msg.includes('JWT') || msg.includes('token') || msg.includes('expired')) {
+            throw new Error('Your session has expired. Please sign in again to upload files.');
+          } else if (msg.includes('413') || msg.includes('too large') || msg.includes('exceeded')) {
+            throw new Error('File exceeds the 50 MB storage upload limit.');
+          } else {
+            throw new Error(`Upload failed: ${uploadError.message}`);
+          }
+        }
+        uploadedSuccessfully = true;
+        if (onProgress) onProgress(100, file.size, file.size);
       }
     }
 

@@ -7,6 +7,8 @@ import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
 import { MAX_UPLOAD_BYTES, isAllowedFileType, formatBytes, BASE64_FALLBACK_MAX_BYTES } from '../lib/limits';
+import { ResumableUploadController } from '../lib/resumableUpload';
+import UploadProgressBar from './UploadProgressBar';
 import ReactMarkdown from 'react-markdown';
 import { RecentFiles } from './RecentFiles';
 import { StudyHubAIChat } from './StudyHubAIChat';
@@ -136,6 +138,26 @@ const StudyHub: React.FC<StudyHubProps> = ({
   const [uploadSheetTab, setUploadSheetTab] = useState<'options' | 'library' | 'link'>('options');
   const [linkUrlInput, setLinkUrlInput] = useState('');
   const [linkErrorMsg, setLinkErrorMsg] = useState<string | null>(null);
+
+  // Resumable upload progress & cancel/retry controller
+  const uploadControllerRef = useRef<ResumableUploadController | null>(null);
+  const [hubUploadProgress, setHubUploadProgress] = useState<{
+    fileName: string;
+    fileSize: number;
+    percent: number;
+    bytesUploaded: number;
+    bytesTotal: number;
+    status: 'idle' | 'uploading' | 'processing' | 'error' | 'success';
+    errorMessage?: string | null;
+    fileObj?: File | null;
+  }>({
+    fileName: '',
+    fileSize: 0,
+    percent: 0,
+    bytesUploaded: 0,
+    bytesTotal: 0,
+    status: 'idle',
+  });
   const deviceFileInputRef = useRef<HTMLInputElement>(null);
 
   const openUploadSheet = () => {
@@ -504,6 +526,15 @@ const StudyHub: React.FC<StudyHubProps> = ({
     setIsExtracting(true);
     setIsSessionFileActive(true);
     setFailedExtractionFile(null);
+    setHubUploadProgress({
+      fileName: file.name,
+      fileSize: file.size,
+      percent: 0,
+      bytesUploaded: 0,
+      bytesTotal: file.size,
+      status: 'uploading',
+      fileObj: file
+    });
     addNotification('content', 'Uploading File', `Uploading ${file.name} to cloud storage and extracting text...`, 'hub');
 
     const userId = getCurrentUserId();
@@ -521,13 +552,31 @@ const StudyHub: React.FC<StudyHubProps> = ({
             file,
             activeCourse?.code,
             activeCourse?.title,
-            'processing'
+            'processing',
+            (percent, bytesUploaded, bytesTotal) => {
+              setHubUploadProgress(prev => ({
+                ...prev,
+                status: percent >= 100 ? 'processing' : 'uploading',
+                percent,
+                bytesUploaded,
+                bytesTotal
+              }));
+            },
+            uploadControllerRef
           );
           setRefreshFilesTrigger(prev => prev + 1);
         } catch (stErr: any) {
           console.warn('Direct storage upload warning:', stErr);
+          setHubUploadProgress(prev => ({
+            ...prev,
+            status: 'error',
+            errorMessage: stErr.message || 'Storage upload failed.'
+          }));
+          throw stErr;
         }
       }
+
+      setHubUploadProgress(prev => ({ ...prev, status: 'processing', percent: 100 }));
 
       // Step 2: Extract text using storagePath on the server (or plain text / base64 fallback for small files)
       const isPlainTextFile = file.type.startsWith('text/') || /\.(txt|md|csv|text)$/i.test(file.name);
@@ -574,6 +623,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         setHubs(prev => ({ ...prev, [activeCourseId]: updatedHub }));
         await DBService.saveHub(updatedHub);
         setRefreshFilesTrigger(prev => prev + 1);
+        setHubUploadProgress(prev => ({ ...prev, status: 'success' }));
         addNotification('content', 'Material Ready', `${name} uploaded and ready in Study Hub.`, 'hub');
         setActiveTool('summary');
       } else {
@@ -584,15 +634,28 @@ const StudyHub: React.FC<StudyHubProps> = ({
             error: 'Uploaded, could not read text from this document.'
           });
         }
+        setHubUploadProgress(prev => ({ ...prev, status: 'error', errorMessage: 'Uploaded, could not read text.' }));
         throw new Error('Uploaded, could not read text from this document.');
       }
     } catch (err: any) {
       console.warn("File extraction warning:", err?.message || err);
+      const isCancelled = err.message?.includes('cancelled');
+      setHubUploadProgress(prev => ({
+        ...prev,
+        status: isCancelled ? 'idle' : 'error',
+        errorMessage: err?.message || 'Upload failed.'
+      }));
       addNotification('content', 'Extraction Notice', err?.message || 'Uploaded, could not read text.', 'hub');
     } finally {
       setIsExtracting(false);
       if (e.target) e.target.value = '';
     }
+  };
+
+  const handleCancelHubUpload = () => {
+    uploadControllerRef.current?.abort();
+    setHubUploadProgress(prev => ({ ...prev, status: 'idle' }));
+    setIsExtracting(false);
   };
 
   const handleScanDocument = async (file: File) => {
@@ -1006,7 +1069,19 @@ const StudyHub: React.FC<StudyHubProps> = ({
               </h3>
               {fileContent && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
             </div>
-            {isExtracting ? (
+            {hubUploadProgress.status !== 'idle' ? (
+              <UploadProgressBar
+                fileName={hubUploadProgress.fileName}
+                fileSize={hubUploadProgress.fileSize}
+                percent={hubUploadProgress.percent}
+                bytesUploaded={hubUploadProgress.bytesUploaded}
+                bytesTotal={hubUploadProgress.bytesTotal}
+                status={hubUploadProgress.status}
+                errorMessage={hubUploadProgress.errorMessage}
+                onCancel={handleCancelHubUpload}
+                onRetry={hubUploadProgress.fileObj ? () => handleFileUpload({ target: { files: [hubUploadProgress.fileObj!] } } as any) : undefined}
+              />
+            ) : isExtracting ? (
               <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/20 flex flex-col items-center justify-center min-h-[140px] animate-pulse relative z-10">
                 <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-3" />
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-widest leading-none">

@@ -4,6 +4,8 @@ import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
 import { BETA_PLAN_LIMITS } from '../constants';
 import { MAX_UPLOAD_BYTES, isAllowedFileType, formatBytes } from '../lib/limits';
+import { ResumableUploadController } from '../lib/resumableUpload';
+import UploadProgressBar from './UploadProgressBar';
 import { 
   Search, 
   Upload, 
@@ -43,6 +45,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [retryingFileId, setRetryingFileId] = useState<string | null>(null);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadControllerRef = useRef<ResumableUploadController | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    fileName: string;
+    fileSize: number;
+    percent: number;
+    bytesUploaded: number;
+    bytesTotal: number;
+    status: 'idle' | 'uploading' | 'processing' | 'error' | 'success';
+    errorMessage?: string | null;
+    fileObj?: File | null;
+  }>({
+    fileName: '',
+    fileSize: 0,
+    percent: 0,
+    bytesUploaded: 0,
+    bytesTotal: 0,
+    status: 'idle'
+  });
 
   const fetchFiles = async () => {
     if (!userId) {
@@ -101,6 +121,76 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const isOverQuota = totalUsedBytes >= planLimits.storageLimitBytes;
 
+  const handlePerformUpload = async (file: File) => {
+    setIsUploading(true);
+    setUploadProgress({
+      fileName: file.name,
+      fileSize: file.size,
+      percent: 0,
+      bytesUploaded: 0,
+      bytesTotal: file.size,
+      status: 'uploading',
+      fileObj: file
+    });
+
+    const targetCourse = courses[0];
+    const courseId = targetCourse?.id || 'general';
+    const courseCode = targetCourse?.code || 'GEN';
+    const courseTitle = targetCourse?.title || 'General Studies';
+
+    try {
+      const uploaded = await DBService.uploadFileToStorage(
+        userId,
+        courseId,
+        file,
+        courseCode,
+        courseTitle,
+        'processing',
+        (percent, bytesUploaded, bytesTotal) => {
+          setUploadProgress(prev => ({
+            ...prev,
+            status: percent >= 100 ? 'processing' : 'uploading',
+            percent,
+            bytesUploaded,
+            bytesTotal
+          }));
+        },
+        uploadControllerRef
+      );
+
+      if (!uploaded) {
+        throw new Error('Details not saved: file transferred but record creation failed. Please retry.');
+      }
+
+      setUploadProgress(prev => ({ ...prev, status: 'processing', percent: 100 }));
+      fetchFiles();
+
+      const extractRes = await DBService.retryUserFileExtraction(uploaded);
+      if (extractRes.success) {
+        setUploadProgress(prev => ({ ...prev, status: 'success' }));
+        setUploadSuccessMsg(`"${file.name}" uploaded and text extracted.`);
+      } else {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'error',
+          errorMessage: `Uploaded, but could not read text: ${extractRes.error || 'Retry available.'}`
+        }));
+      }
+      fetchFiles();
+    } catch (err: any) {
+      console.error('Upload failed:', err);
+      const isCancelled = err.message?.includes('cancelled');
+      setUploadProgress(prev => ({
+        ...prev,
+        status: isCancelled ? 'idle' : 'error',
+        errorMessage: err.message || 'Upload failed.'
+      }));
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -136,49 +226,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       return;
     }
 
-    setIsUploading(true);
-    const targetCourse = courses[0];
-    const courseId = targetCourse?.id || 'general';
-    const courseCode = targetCourse?.code || 'GEN';
-    const courseTitle = targetCourse?.title || 'General Studies';
+    await handlePerformUpload(file);
+  };
 
-    try {
-      const uploaded = await DBService.uploadFileToStorage(
-        userId,
-        courseId,
-        file,
-        courseCode,
-        courseTitle,
-        'processing'
-      );
+  const handleCancelUpload = () => {
+    uploadControllerRef.current?.abort();
+    setUploadProgress(prev => ({ ...prev, status: 'idle' }));
+    setIsUploading(false);
+  };
 
-      if (!uploaded) {
-        setUploadError({
-          type: 'db',
-          message: 'Details not saved: file transferred but record creation failed. Please retry.'
-        });
-      } else {
-        fetchFiles();
-        const extractRes = await DBService.retryUserFileExtraction(uploaded);
-        if (extractRes.success) {
-          setUploadSuccessMsg(`"${file.name}" uploaded and text extracted.`);
-        } else {
-          setUploadError({
-            type: 'storage',
-            message: `Uploaded "${file.name}", could not read text: ${extractRes.error || 'Use Retry on the file row.'}`
-          });
-        }
-        fetchFiles();
-      }
-    } catch (err: any) {
-      console.error('Upload failed:', err);
-      setUploadError({
-        type: 'storage',
-        message: err.message || 'Upload failed: network or storage connection interrupted.'
-      });
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleRetryUpload = () => {
+    if (uploadProgress.fileObj) {
+      handlePerformUpload(uploadProgress.fileObj);
     }
   };
 
@@ -265,7 +324,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         </button>
       </div>
 
-      {/* Upload Messages */}
+      {/* Upload Progress Bar (with Cancel & Retry) */}
+      {uploadProgress.status !== 'idle' && (
+        <UploadProgressBar
+          fileName={uploadProgress.fileName}
+          fileSize={uploadProgress.fileSize}
+          percent={uploadProgress.percent}
+          bytesUploaded={uploadProgress.bytesUploaded}
+          bytesTotal={uploadProgress.bytesTotal}
+          status={uploadProgress.status}
+          errorMessage={uploadProgress.errorMessage}
+          onCancel={handleCancelUpload}
+          onRetry={handleRetryUpload}
+        />
+      )}
       {uploadError.message && (
         <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
