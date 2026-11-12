@@ -402,6 +402,9 @@ export const DBService = {
         units: c.credits || 3,
         difficulty: (c.difficulty || 'Medium') as Difficulty,
         description: c.description || '',
+        topics: Array.isArray(c.topics) ? c.topics : [],
+        caScore: typeof c.ca_score === 'number' ? c.ca_score : undefined,
+        examWeight: typeof c.exam_weight === 'number' ? c.exam_weight : 70,
       }));
       writeCache('courses', userId, courses);
       return courses;
@@ -430,6 +433,9 @@ export const DBService = {
           difficulty: course.difficulty,
           credits: course.units,
           description: course.description || '',
+          topics: course.topics || [],
+          ca_score: course.caScore ?? null,
+          exam_weight: course.examWeight ?? 70,
         },
         { onConflict: 'id' }
       );
@@ -462,6 +468,9 @@ export const DBService = {
         difficulty: c.difficulty,
         credits: c.units,
         description: c.description || '',
+        topics: c.topics || [],
+        ca_score: c.caScore ?? null,
+        exam_weight: c.examWeight ?? 70,
       }));
       const { error } = await supabase.from('courses').upsert(rows, { onConflict: 'id' });
       if (error) throw error;

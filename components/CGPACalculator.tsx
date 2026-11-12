@@ -13,7 +13,6 @@ import {
 } from '../types';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
-import SemesterSchedulePlanner from './SemesterSchedulePlanner';
 
 interface CGPACalculatorProps {
   profile?: UserProfile | null;
@@ -815,32 +814,6 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
       {activeTab === 'overview' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
-          {/* Semester Outline -> Reading Schedule -> CGPA Target Plan Banner */}
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-900 rounded-2xl p-4 sm:p-5 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-600 text-white">
-                    Deterministic Engine
-                  </span>
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    Semester Outline, Adaptive Reading Schedule & CGPA Targets
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 max-w-xl">
-                  Extract syllabus topics, schedule read-ahead & review blocks, and calculate per-course exam score targets live.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('analysis')}
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0 min-h-[44px]"
-              >
-                <span>Launch Target Engine</span>
-                <ArrowRight size={14} />
-              </button>
-            </div>
-          </div>
-          
           {/* Key Metric Cards per Spec: Current, Target, Projected */}
           {(() => {
             const completedUnits = semesters.reduce((sum, s) => sum + (s.totalCredits || 0), 0);
@@ -1188,15 +1161,6 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
       {/* ---------------- 3. AI REASONING & PERFORMANCE ANALYSIS TAB ---------------- */}
       {activeTab === 'analysis' && (
         <div className="space-y-6 animate-in fade-in duration-200">
-          <SemesterSchedulePlanner
-            profile={profile || ({} as any)}
-            courses={courses || []}
-            setCourses={(() => {}) as any}
-            schedule={schedule || []}
-            setSchedule={setSchedule || (() => {})}
-            onUpdateProfile={onUpdateProfile}
-            addNotification={addNotification}
-          />
           
           {aiAnalysis ? (
             <div className="space-y-5">

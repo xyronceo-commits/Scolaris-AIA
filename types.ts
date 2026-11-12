@@ -66,6 +66,10 @@ export interface Course {
   description?: string;
   progress?: number; // 0 - 100%
   studyHours?: number; // total logged study hours
+  topics?: string[];
+  caScore?: number;
+  examWeight?: number;
+  examDate?: string;
 }
 
 export interface NotificationSettings {

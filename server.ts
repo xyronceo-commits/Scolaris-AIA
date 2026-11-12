@@ -2884,157 +2884,124 @@ Create a weekly study schedule (Monday-Sunday) for a student at ${university}.
     }
   });
 
-  // Parse Course Outline / Syllabus into Structured Topics & Assessments (Metered: 3 credits)
-  app.post('/api/ai/outline/parse', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
-    const uid = req.user!.uid;
-    const { text, fileBase64, fileName, fileType, requestId, courseCode, units } = req.body;
-    const reqId = typeof requestId === 'string' && requestId.trim()
-      ? requestId.trim()
-      : `outline_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-
-    let rawText = typeof text === 'string' ? text.trim() : '';
-
-    // If file is provided, extract its text using our multi-model / OCR pipeline
-    if (!rawText && fileBase64 && fileName) {
-      try {
-        const buffer = Buffer.from(fileBase64, 'base64');
-        const extRes = await extractDocumentWithOcrFallback(buffer, fileName, fileType || '');
-        if (extRes.success && extRes.extractedText) {
-          rawText = extRes.extractedText;
-        } else {
-          return res.status(400).json({
-            success: false,
-            error: extRes.error || "We couldn't extract text from this document. Please upload a clear PDF, DOCX, or photo."
-          });
-        }
-      } catch (err: any) {
-        return res.status(400).json({
-          success: false,
-          error: `Error processing file: ${err?.message || 'Unsupported or corrupted document'}`
-        });
-      }
-    }
+  // Parse Course Outline into Courses, Units, and Topics (No credits - standard study planner feature)
+  app.post('/api/ai/course-outline', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    const { text } = req.body;
+    const rawText = typeof text === 'string' ? text.trim() : '';
 
     if (!rawText || rawText.length < 15) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide course outline text or upload a syllabus document (PDF, Word, or photo).'
-      });
-    }
-
-    // 1. Deduct 3 AI credits atomically with idempotent requestId
-    const creditCharge = await consumeAiCredits(uid, 'outline_analysis', 3, reqId);
-    if (!creditCharge.success) {
-      return res.status(402).json({
-        success: false,
-        code: 'INSUFFICIENT_CREDITS',
-        error: `You need 3 AI credits to analyze a syllabus. You have ${creditCharge.balance} remaining.`,
-        balance: creditCharge.balance,
-        required: 3
+        error: 'Please provide course outline text or extracted document content.'
       });
     }
 
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        throw new Error('AI analysis service is currently unavailable.');
+        return res.status(503).json({
+          success: false,
+          error: 'AI service is currently unavailable. Please enter your courses manually.'
+        });
       }
 
-      const systemInstruction = `You are KorsIQ Academic Syllabus & Course Outline Analyst.
-Analyze the provided university course outline / syllabus and extract structured topics, schedule, and grading scheme.
+      const systemInstruction = `You are KorsIQ Academic Course Outline Analyzer.
+Extract university courses, credit units, and weekly topics from the syllabus text.
 
-CRITICAL RULES:
-1. NEVER INVENT OR FABRICATE DATA. If a field is not stated or unclear in the text, mark "isFlagged": true and provide "flagReason" (e.g. "Missing in syllabus - please verify").
-2. Extract the course code, course title, and credit units. If credit units are not explicitly stated, set "units": 3, "isUnitsFlagged": true, "flagReason": "Credit units not found in outline".
-3. Extract all weekly topics. Each topic must have:
-   - "weekNumber": integer (1 to 15).
-   - "title": concise topic title.
-   - "description": summary of topic content.
-   - "learningObjectives": array of strings (learning goals).
-   - "isFlagged": boolean (true if week number or title was ambiguous).
-   - "flagReason": string or null.
-4. Extract grading components and assessments:
-   - "assessments": array of { "title": string, "type": "test"|"quiz"|"assignment"|"midterm"|"exam"|"practical"|"project", "weightPercent": number, "dueDate": string (YYYY-MM-DD) or null, "isFlagged": boolean, "flagReason": string or null }.
-   - If total CA + exam percentage does not sum to 100%, flag it. Default to 30% CA and 70% exam if unspecified, but mark as flagged!
+RULES:
+1. NEVER INVENT DATA. If units are not mentioned, leave units as null.
+2. Return JSON ONLY with key "courses".
+3. Each course object must have:
+   - "code": string (e.g. "CSC 201")
+   - "title": string (e.g. "Data Structures & Algorithms")
+   - "units": integer from 1 to 6 or null if unstated
+   - "topics": array of strings (the topic titles / modules, maximum 15 items)
+   - "examDate": string (YYYY-MM-DD) if explicitly stated in text, otherwise null
 
-Return valid JSON with:
+Example:
 {
-  "courseCode": string,
-  "courseTitle": string,
-  "units": number,
-  "isUnitsFlagged": boolean,
-  "topics": [
+  "courses": [
     {
-      "weekNumber": number,
-      "title": string,
-      "description": string,
-      "learningObjectives": string[],
-      "isFlagged": boolean,
-      "flagReason": string | null
+      "code": "CSC 201",
+      "title": "Computer Programming II",
+      "units": 3,
+      "topics": ["Object Oriented Concepts", "Classes & Inheritance", "Recursion", "Linked Lists"],
+      "examDate": null
     }
-  ],
-  "assessments": [
-    {
-      "title": string,
-      "type": "test",
-      "weightPercent": number,
-      "dueDate": string | null,
-      "isFlagged": boolean,
-      "flagReason": string | null
-    }
-  ],
-  "caWeightPercent": number,
-  "examWeightPercent": number,
-  "isGradingFlagged": boolean,
-  "flagReason": string | null
+  ]
 }`;
 
       const aiContent = await runAICall({
         systemInstruction,
-        messages: [{ role: 'user', content: `Analyze this course syllabus:\n\n${rawText.slice(0, 30000)}` }],
+        messages: [{ role: 'user', content: `Extract courses from this syllabus:\n\n${rawText.slice(0, 30000)}` }],
         jsonMode: true
       });
 
-      const parsed = JSON.parse(aiContent || '{}');
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(aiContent || '{}');
+      } catch {
+        return res.status(422).json({
+          success: false,
+          error: "We couldn't structure the text from this outline. Try pasting the syllabus text directly."
+        });
+      }
 
-      // Fallback topic if outline had sparse text
-      if (!parsed.topics || !Array.isArray(parsed.topics) || parsed.topics.length === 0) {
-        parsed.topics = [
-          {
-            weekNumber: 1,
-            title: parsed.courseTitle || 'Course Overview & Fundamentals',
-            description: 'Introduction to course concepts',
-            learningObjectives: ['Understand core principles'],
-            isFlagged: true,
-            flagReason: 'Extracted with low confidence from unstructured text'
-          }
-        ];
+      const rawCourses = Array.isArray(parsed.courses) ? parsed.courses : [];
+      const validatedCourses: Array<{
+        code: string;
+        title: string;
+        units: number | null;
+        topics: string[];
+        examDate?: string | null;
+      }> = [];
+
+      for (const item of rawCourses) {
+        if (!item || typeof item !== 'object') continue;
+        const code = String(item.code || '').trim();
+        const title = String(item.title || '').trim();
+        if (!code && !title) continue; // drop empty rows
+
+        let units: number | null = null;
+        if (typeof item.units === 'number' && Number.isInteger(item.units) && item.units >= 1 && item.units <= 6) {
+          units = item.units;
+        }
+
+        const rawTopics = Array.isArray(item.topics) ? item.topics : [];
+        const topics = rawTopics
+          .map((t: any) => String(t || '').trim())
+          .filter((t: string) => t.length > 0)
+          .slice(0, 20); // cap topics per course
+
+        const examDate = typeof item.examDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.examDate.trim())
+          ? item.examDate.trim()
+          : null;
+
+        validatedCourses.push({
+          code: code || 'COURSE',
+          title: title || code || 'Untitled Course',
+          units,
+          topics,
+          examDate
+        });
+      }
+
+      if (validatedCourses.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No usable courses or syllabus modules found in the provided document. Please check the file and try again.'
+        });
       }
 
       res.json({
         success: true,
-        parsed: {
-          courseCode: parsed.courseCode || courseCode || 'COURSE',
-          courseTitle: parsed.courseTitle || 'Course Syllabus',
-          units: typeof parsed.units === 'number' && parsed.units > 0 ? parsed.units : (units || 3),
-          isUnitsFlagged: Boolean(parsed.isUnitsFlagged),
-          topics: parsed.topics,
-          assessments: parsed.assessments || [],
-          caWeightPercent: parsed.caWeightPercent || 30,
-          examWeightPercent: parsed.examWeightPercent || 70,
-          isGradingFlagged: Boolean(parsed.isGradingFlagged),
-          flagReason: parsed.flagReason || null,
-          extractedTextLength: rawText.length
-        },
-        creditsRemaining: creditCharge.balance
+        courses: validatedCourses
       });
-    } catch (aiErr: any) {
-      console.error('[AI Outline Parse] Error:', aiErr?.message || aiErr);
-      // REFUND CREDITS ON FAILURE
-      await refundAiCredits(uid, 'outline_analysis', 3, reqId);
-      return res.status(500).json({
+    } catch (err: any) {
+      console.error('[POST /api/ai/course-outline] Error:', err);
+      res.status(500).json({
         success: false,
-        error: `Could not parse syllabus: ${aiErr?.message || 'AI processing error'}. Deducted credits have been refunded.`
+        error: `Could not parse syllabus: ${err?.message || 'Server error'}`
       });
     }
   });
