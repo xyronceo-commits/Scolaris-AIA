@@ -14,6 +14,7 @@ import {
   normalizeExtractedText, 
   validateExtractedText, 
   selectRelevantChunks,
+  chunkDocumentText,
   DocumentExtractOptions
 } from './lib/documentProcessor';
 import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
@@ -3777,6 +3778,11 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
       }
 
       const studentContext = await getStudentContextForUser(userId);
+      const relevantMaterial = selectRelevantChunks(
+        String(studyMaterial || ''),
+        mode === 'quiz' ? 'quiz test exam assessment definitions core concepts' : 'flashcards key terms definitions concepts formulas',
+        16000
+      );
 
       let systemPrompt = "";
       let userPrompt = "";
@@ -3800,7 +3806,7 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         }
 
         Study Text:
-        "${studyMaterial}"`;
+        "${relevantMaterial}"`;
 
       } else if (mode === "flashcards") {
         systemPrompt = `${studentContext}\n\nYou are an elite memorization assistant. Your job is to output structurally perfect JSON arrays representing flashcards for active recall study. Do not include any introductory text or conversational prose outside of the raw JSON structure.`;
@@ -3819,7 +3825,7 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         }
 
         Study Text:
-        "${studyMaterial}"`;
+        "${relevantMaterial}"`;
       } else {
         return res.status(400).json({ error: "Invalid mode. Use 'quiz' or 'flashcards'." });
       }
@@ -4173,6 +4179,32 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         await markUserFileStatus('ready');
       } else {
         await markUserFileStatus('processing');
+      }
+
+      // Save extracted text chunks into document_chunks table
+      if (fileId && supabaseAdmin && result.extractedText) {
+        try {
+          const rawChunks = chunkDocumentText(result.extractedText, 4000, 300);
+          const startNum = pStart || 1;
+          const endNum = result.nextPage ? result.nextPage - 1 : (result.pageCount || startNum);
+          const circleId = storagePath.startsWith('groups/') ? storagePath.split('/')[1] : null;
+
+          const chunkRows = rawChunks.map((c, idx) => ({
+            file_id: String(fileId),
+            user_id: userId || null,
+            group_id: circleId,
+            chunk_index: ((startNum - 1) * 10) + idx,
+            page_start: startNum,
+            page_end: endNum,
+            text: c.text
+          }));
+
+          if (chunkRows.length > 0) {
+            await supabaseAdmin.from('document_chunks').insert(chunkRows);
+          }
+        } catch (chunkErr) {
+          console.warn('[Extract Chunking] Failed to save document_chunks:', chunkErr);
+        }
       }
 
       res.json({
@@ -4877,6 +4909,11 @@ Always refer to this context when answering questions about the material, explai
 
     try {
       const cleanContent = normalizeExtractedText(content);
+      const relevantContent = selectRelevantChunks(
+        cleanContent,
+        materialType === 'summary' ? 'summary overview key takeaways core principles formulas' : 'definitions key concepts formulas test quiz questions',
+        16000
+      );
       const apiKey = getAIKey();
       if (!apiKey) {
         await refundAiCredits(userId, materialType, cost, spend.requestId);
@@ -4901,7 +4938,7 @@ CRITICAL WRITING & MARKDOWN RULES:
 - For all mathematical, scientific, engineering, or statistical formulas, ALWAYS use LaTeX dollar signs ($...$ for inline and $$...$$ for display equations).
 - Format logically with clear Markdown headings (e.g., # Summary, ## Core Takeaways, ## Key Definitions), clean bullet points (- ), and numbered steps (1. ).
 - Focus on practical understanding, real-world examples, and maximum clarity.`;
-        userContent = cleanContent;
+        userContent = relevantContent;
       } else if (materialType === 'flashcards') {
         systemInstruction = `${studentContext}
 
@@ -4920,7 +4957,7 @@ You are an elite memorization assistant. Your job is to output structurally perf
       }
 
       Study Text:
-      "${cleanContent}"`;
+      "${relevantContent}"`;
       } else if (materialType === 'quiz') {
         systemInstruction = `${studentContext}
 
@@ -4941,7 +4978,7 @@ You are an elite academic assessment engine. Your job is to output structurally 
       }
 
       Study Text:
-      "${cleanContent}"`;
+      "${relevantContent}"`;
       } else if (materialType === 'test') {
         systemInstruction = `${studentContext}
 

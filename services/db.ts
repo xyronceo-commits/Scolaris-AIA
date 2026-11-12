@@ -2216,6 +2216,14 @@ export const DBService = {
           });
         } catch {}
       }
+
+      // Delete associated document_chunks for this circle material
+      try {
+        await supabase.from('document_chunks').delete().eq('file_id', materialId);
+      } catch (chunkErr) {
+        console.warn('Failed to delete circle material document_chunks:', chunkErr);
+      }
+
       const { error } = await supabase.from('group_materials').delete().eq('id', materialId);
       if (error) throw error;
       return { success: true };
@@ -2625,6 +2633,13 @@ export const DBService = {
             body: JSON.stringify({ key: storagePath, bucket: USER_FILES_BUCKET })
           });
         } catch {}
+      }
+
+      // Delete associated document_chunks for this user file
+      try {
+        await supabase.from('document_chunks').delete().eq('file_id', fileId);
+      } catch (chunkErr) {
+        console.warn('Failed to delete user file document_chunks:', chunkErr);
       }
 
       const { error } = await supabase.from('user_files').delete().eq('id', fileId);
