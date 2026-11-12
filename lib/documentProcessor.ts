@@ -218,6 +218,18 @@ export async function processDocumentBuffer(
   fileType: string,
   options?: DocumentExtractOptions
 ): Promise<ExtractionResult> {
+  if (!buffer || buffer.length === 0) {
+    return {
+      success: false,
+      extractedText: '',
+      error: 'This file appears to be empty.',
+      fileTypeDetected: 'unknown',
+      pageCount: 0,
+      nextPage: null,
+      done: true
+    };
+  }
+
   const lowerName = (fileName || '').toLowerCase();
   const lowerType = (fileType || '').toLowerCase();
 
@@ -316,7 +328,19 @@ export async function processDocumentBuffer(
             }
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        const errMsg = String(err?.message || err || '').toLowerCase();
+        if (errMsg.includes('password') || errMsg.includes('encrypted') || errMsg.includes('passwordexception')) {
+          return {
+            success: false,
+            extractedText: '',
+            error: 'This PDF is password-protected and cannot be read. Please upload an unprotected copy.',
+            fileTypeDetected: 'pdf',
+            isScannedPdf: false,
+            nextPage: null,
+            done: true
+          };
+        }
         console.warn('PDFParse attempt failed, trying fallback:', err);
       }
 
@@ -419,6 +443,18 @@ export async function processDocumentBuffer(
       done = true;
     }
   } catch (err: any) {
+    const errMsg = String(err?.message || err || '').toLowerCase();
+    if (errMsg.includes('password') || errMsg.includes('encrypted') || errMsg.includes('passwordexception')) {
+      return {
+        success: false,
+        extractedText: '',
+        error: 'This PDF is password-protected and cannot be read. Please upload an unprotected copy.',
+        fileTypeDetected: detectedType,
+        isScannedPdf: false,
+        nextPage: null,
+        done: true
+      };
+    }
     console.error(`Document extraction error for ${fileName} (${detectedType}):`, err);
     return {
       success: false,

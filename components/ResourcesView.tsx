@@ -82,6 +82,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   useEffect(() => {
     fetchFiles();
+    return () => {
+      uploadControllerRef.current?.abort();
+    };
   }, [userId]);
 
   // Beta plan quota calculations with full plus, studio, scholar, sage support
@@ -198,7 +201,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     setUploadError({ type: null, message: null });
     setUploadSuccessMsg(null);
 
-    // 1. Check file rejection (e.g. file size > 50MB or unsupported type)
+    // 1. Check file rejection (e.g. empty, file size > 50MB, or unsupported type)
+    if (file.size === 0) {
+      setUploadError({
+        type: 'rejected',
+        message: 'This file appears to be empty.'
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     if (!isAllowedFileType(file.name, file.type)) {
       setUploadError({
         type: 'rejected',

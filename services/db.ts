@@ -1027,6 +1027,9 @@ export const DBService = {
     controllerRef?: { current: ResumableUploadController | null }
   ): Promise<{ success: boolean; material?: any; error?: string }> {
     try {
+      if (!file || file.size === 0) {
+        return { success: false, error: 'This file appears to be empty.' };
+      }
       if (!isAllowedFileType(file.name, file.type)) {
         return { success: false, error: `File "${file.name}" is unsupported. Supported formats: PDF, Word, PowerPoint, text, images.` };
       }
@@ -2383,6 +2386,9 @@ export const DBService = {
     controllerRef?: { current: ResumableUploadController | null }
   ): Promise<UserFile> {
     if (!userId) throw new Error('User must be authenticated to upload files');
+    if (!file || file.size === 0) {
+      throw new Error('This file appears to be empty.');
+    }
     if (!isAllowedFileType(file.name, file.type)) {
       throw new Error(`File "${file.name}" is unsupported. Supported formats: PDF, Word, PowerPoint, text, images.`);
     }

@@ -58,3 +58,11 @@ test('Document Processor: chunkDocumentText and selectRelevantChunks', () => {
   assert.ok(relevantText.length > 0);
   assert.match(relevantText, /binary search trees/i);
 });
+
+test('Document Processor: empty buffer returns friendly error', async () => {
+  const emptyBuf = Buffer.alloc(0);
+  const result = await processDocumentBuffer(emptyBuf, 'empty.pdf', 'application/pdf');
+  assert.equal(result.success, false);
+  assert.equal(result.error, 'This file appears to be empty.');
+});
+

@@ -322,6 +322,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
   };
 
   useEffect(() => {
+    return () => {
+      uploadControllerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     if (activeCourseId) {
       try {
         localStorage.setItem('scolaris_last_accessed_course_id', activeCourseId);
@@ -506,6 +512,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size === 0) {
+      addNotification('error', 'Empty File', `"${file.name}" appears to be empty.`);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
     if (!isAllowedFileType(file.name, file.type)) {
       addNotification('error', 'Unsupported File', `"${file.name}" is not supported. Supported: PDF, Word, PowerPoint, text, images.`);
       if (e.target) e.target.value = '';
@@ -655,6 +667,11 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const handleScanDocument = async (file: File) => {
     if (!file) return;
+
+    if (file.size === 0) {
+      addNotification('error', 'Empty File', `"${file.name}" appears to be empty.`);
+      return;
+    }
 
     if (!isAllowedFileType(file.name, file.type)) {
       addNotification('error', 'Unsupported File', `"${file.name}" is not supported.`);
