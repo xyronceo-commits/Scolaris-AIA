@@ -2917,6 +2917,161 @@ Create a weekly study schedule (Monday-Sunday) for a student at ${university}.
     }
   });
 
+  // Parse Course Outline / Syllabus into Structured Topics & Assessments (Metered: 3 credits)
+  app.post('/api/ai/outline/parse', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    const uid = req.user!.uid;
+    const { text, fileBase64, fileName, fileType, requestId, courseCode, units } = req.body;
+    const reqId = typeof requestId === 'string' && requestId.trim()
+      ? requestId.trim()
+      : `outline_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+
+    let rawText = typeof text === 'string' ? text.trim() : '';
+
+    // If file is provided, extract its text using our multi-model / OCR pipeline
+    if (!rawText && fileBase64 && fileName) {
+      try {
+        const buffer = Buffer.from(fileBase64, 'base64');
+        const extRes = await extractDocumentWithOcrFallback(buffer, fileName, fileType || '');
+        if (extRes.success && extRes.extractedText) {
+          rawText = extRes.extractedText;
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: extRes.error || "We couldn't extract text from this document. Please upload a clear PDF, DOCX, or photo."
+          });
+        }
+      } catch (err: any) {
+        return res.status(400).json({
+          success: false,
+          error: `Error processing file: ${err?.message || 'Unsupported or corrupted document'}`
+        });
+      }
+    }
+
+    if (!rawText || rawText.length < 15) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide course outline text or upload a syllabus document (PDF, Word, or photo).'
+      });
+    }
+
+    // 1. Deduct 3 AI credits atomically with idempotent requestId
+    const creditCharge = await consumeAiCredits(uid, 'outline_analysis', 3, reqId);
+    if (!creditCharge.success) {
+      return res.status(402).json({
+        success: false,
+        code: 'INSUFFICIENT_CREDITS',
+        error: `You need 3 AI credits to analyze a syllabus. You have ${creditCharge.balance} remaining.`,
+        balance: creditCharge.balance,
+        required: 3
+      });
+    }
+
+    try {
+      const apiKey = getAIKey();
+      if (!apiKey) {
+        throw new Error('AI analysis service is currently unavailable.');
+      }
+
+      const systemInstruction = `You are KorsIQ Academic Syllabus & Course Outline Analyst.
+Analyze the provided university course outline / syllabus and extract structured topics, schedule, and grading scheme.
+
+CRITICAL RULES:
+1. NEVER INVENT OR FABRICATE DATA. If a field is not stated or unclear in the text, mark "isFlagged": true and provide "flagReason" (e.g. "Missing in syllabus - please verify").
+2. Extract the course code, course title, and credit units. If credit units are not explicitly stated, set "units": 3, "isUnitsFlagged": true, "flagReason": "Credit units not found in outline".
+3. Extract all weekly topics. Each topic must have:
+   - "weekNumber": integer (1 to 15).
+   - "title": concise topic title.
+   - "description": summary of topic content.
+   - "learningObjectives": array of strings (learning goals).
+   - "isFlagged": boolean (true if week number or title was ambiguous).
+   - "flagReason": string or null.
+4. Extract grading components and assessments:
+   - "assessments": array of { "title": string, "type": "test"|"quiz"|"assignment"|"midterm"|"exam"|"practical"|"project", "weightPercent": number, "dueDate": string (YYYY-MM-DD) or null, "isFlagged": boolean, "flagReason": string or null }.
+   - If total CA + exam percentage does not sum to 100%, flag it. Default to 30% CA and 70% exam if unspecified, but mark as flagged!
+
+Return valid JSON with:
+{
+  "courseCode": string,
+  "courseTitle": string,
+  "units": number,
+  "isUnitsFlagged": boolean,
+  "topics": [
+    {
+      "weekNumber": number,
+      "title": string,
+      "description": string,
+      "learningObjectives": string[],
+      "isFlagged": boolean,
+      "flagReason": string | null
+    }
+  ],
+  "assessments": [
+    {
+      "title": string,
+      "type": "test",
+      "weightPercent": number,
+      "dueDate": string | null,
+      "isFlagged": boolean,
+      "flagReason": string | null
+    }
+  ],
+  "caWeightPercent": number,
+  "examWeightPercent": number,
+  "isGradingFlagged": boolean,
+  "flagReason": string | null
+}`;
+
+      const aiContent = await runAICall({
+        systemInstruction,
+        messages: [{ role: 'user', content: `Analyze this course syllabus:\n\n${rawText.slice(0, 30000)}` }],
+        jsonMode: true
+      });
+
+      const parsed = JSON.parse(aiContent || '{}');
+
+      // Fallback topic if outline had sparse text
+      if (!parsed.topics || !Array.isArray(parsed.topics) || parsed.topics.length === 0) {
+        parsed.topics = [
+          {
+            weekNumber: 1,
+            title: parsed.courseTitle || 'Course Overview & Fundamentals',
+            description: 'Introduction to course concepts',
+            learningObjectives: ['Understand core principles'],
+            isFlagged: true,
+            flagReason: 'Extracted with low confidence from unstructured text'
+          }
+        ];
+      }
+
+      res.json({
+        success: true,
+        parsed: {
+          courseCode: parsed.courseCode || courseCode || 'COURSE',
+          courseTitle: parsed.courseTitle || 'Course Syllabus',
+          units: typeof parsed.units === 'number' && parsed.units > 0 ? parsed.units : (units || 3),
+          isUnitsFlagged: Boolean(parsed.isUnitsFlagged),
+          topics: parsed.topics,
+          assessments: parsed.assessments || [],
+          caWeightPercent: parsed.caWeightPercent || 30,
+          examWeightPercent: parsed.examWeightPercent || 70,
+          isGradingFlagged: Boolean(parsed.isGradingFlagged),
+          flagReason: parsed.flagReason || null,
+          extractedTextLength: rawText.length
+        },
+        creditsRemaining: creditCharge.balance
+      });
+    } catch (aiErr: any) {
+      console.error('[AI Outline Parse] Error:', aiErr?.message || aiErr);
+      // REFUND CREDITS ON FAILURE
+      await refundAiCredits(uid, 'outline_analysis', 3, reqId);
+      return res.status(500).json({
+        success: false,
+        error: `Could not parse syllabus: ${aiErr?.message || 'AI processing error'}. Deducted credits have been refunded.`
+      });
+    }
+  });
+
   // AI CGPA Analysis & Academic Reasoning
   app.post('/api/ai/cgpa-analysis', requireAuth, apiRateLimiter, async (req, res) => {
     const { currentCgpa, targetCgpa, gradingScale, currentLevel, remainingSemesters, completedSemesters, courses, difficultCourses, studyPreferences } = req.body;
