@@ -1,4 +1,5 @@
 import { supabase, getAccessToken, getCurrentUserId } from '../lib/supabase';
+import { MAX_UPLOAD_BYTES, isAllowedFileType, formatBytes, RESUMABLE_THRESHOLD_BYTES } from '../lib/limits';
 import {
   UserProfile,
   Course,
@@ -1022,6 +1023,13 @@ export const DBService = {
     uploaderName: string
   ): Promise<{ success: boolean; material?: any; error?: string }> {
     try {
+      if (!isAllowedFileType(file.name, file.type)) {
+        return { success: false, error: `File "${file.name}" is unsupported. Supported formats: PDF, Word, PowerPoint, text, images.` };
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        return { success: false, error: `File "${file.name}" exceeds the 50 MB limit (${formatBytes(file.size)}).` };
+      }
+
       const materialId = `mat_${Date.now()}_${rand()}`;
       let storagePath = `groups/${groupId}/materials/${materialId}_${sanitizeFileName(file.name)}`;
 
@@ -2288,6 +2296,12 @@ export const DBService = {
     initialStatus: 'ready' | 'processing' | 'failed' = 'ready'
   ): Promise<UserFile> {
     if (!userId) throw new Error('User must be authenticated to upload files');
+    if (!isAllowedFileType(file.name, file.type)) {
+      throw new Error(`File "${file.name}" is unsupported. Supported formats: PDF, Word, PowerPoint, text, images.`);
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`File "${file.name}" exceeds the 50 MB limit (${formatBytes(file.size)}).`);
+    }
 
     const fileId = `file_${Date.now()}_${rand()}`;
     // Isolated per-user path: users/{userId}/courses/{courseId}/{fileId}_{fileName}

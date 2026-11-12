@@ -3,6 +3,7 @@ import { UserFile, Course, UserProfile, StudyGroup } from '../types';
 import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
 import { BETA_PLAN_LIMITS } from '../constants';
+import { MAX_UPLOAD_BYTES, isAllowedFileType, formatBytes } from '../lib/limits';
 import { 
   Search, 
   Upload, 
@@ -107,22 +108,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     setUploadError({ type: null, message: null });
     setUploadSuccessMsg(null);
 
-    // 1. Check file rejection (e.g. file size > 30MB or unsupported type)
-    const allowedExtensions = ['pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg'];
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    if (!allowedExtensions.includes(ext)) {
+    // 1. Check file rejection (e.g. file size > 50MB or unsupported type)
+    if (!isAllowedFileType(file.name, file.type)) {
       setUploadError({
         type: 'rejected',
-        message: 'File rejected: only PDF, DOCX, TXT, and common images are supported.'
+        message: 'File rejected: only PDF, Word, PowerPoint, text, and common images are supported.'
       });
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
-    if (file.size > 30 * 1024 * 1024) {
+    if (file.size > MAX_UPLOAD_BYTES) {
       setUploadError({
         type: 'rejected',
-        message: 'File rejected: file size exceeds the 30 MB single-document limit.'
+        message: `File rejected: file size (${formatBytes(file.size)}) exceeds the 50 MB single-document limit.`
       });
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;

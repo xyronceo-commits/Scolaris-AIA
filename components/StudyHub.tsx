@@ -6,6 +6,7 @@ import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, 
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
+import { MAX_UPLOAD_BYTES, isAllowedFileType, formatBytes, BASE64_FALLBACK_MAX_BYTES } from '../lib/limits';
 import ReactMarkdown from 'react-markdown';
 import { RecentFiles } from './RecentFiles';
 import { StudyHubAIChat } from './StudyHubAIChat';
@@ -488,6 +489,18 @@ const StudyHub: React.FC<StudyHubProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!isAllowedFileType(file.name, file.type)) {
+      addNotification('error', 'Unsupported File', `"${file.name}" is not supported. Supported: PDF, Word, PowerPoint, text, images.`);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      addNotification('error', 'File Too Large', `"${file.name}" exceeds the 50 MB upload limit (${formatBytes(file.size)}).`);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
     setIsExtracting(true);
     setIsSessionFileActive(true);
     setFailedExtractionFile(null);
@@ -526,7 +539,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
           await DBService.updateUserFileStatus(uploadedFile.id, userId, 'ready');
         }
       } else {
-        const canSendBase64Fallback = !uploadedFile?.storagePath && file.size <= 3 * 1024 * 1024;
+        const canSendBase64Fallback = !uploadedFile?.storagePath && file.size <= BASE64_FALLBACK_MAX_BYTES;
         const base64Fallback = canSendBase64Fallback ? await fileToBase64(file) : undefined;
         const res = await GeminiService.extractFileText(file.name, file.type, base64Fallback, {
           storagePath: uploadedFile?.storagePath,
@@ -584,6 +597,17 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const handleScanDocument = async (file: File) => {
     if (!file) return;
+
+    if (!isAllowedFileType(file.name, file.type)) {
+      addNotification('error', 'Unsupported File', `"${file.name}" is not supported.`);
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      addNotification('error', 'File Too Large', `"${file.name}" exceeds the 50 MB limit (${formatBytes(file.size)}).`);
+      return;
+    }
+
     setIsScanningDoc(true);
     setScannedDocResult(null);
     addNotification('content', 'Vision Scanner Active', `Scanning handwritten notes & course material for ${file.name}...`, 'hub');
@@ -612,7 +636,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         setScannedDocPreview(`data:${file.type || 'image/jpeg'};base64,${previewB64}`);
       }
 
-      const base64Fallback = !uploadedScanFile?.storagePath && file.size <= 3 * 1024 * 1024
+      const base64Fallback = !uploadedScanFile?.storagePath && file.size <= BASE64_FALLBACK_MAX_BYTES
         ? await fileToBase64(file)
         : undefined;
 

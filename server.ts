@@ -21,6 +21,7 @@ import {
   getMonthlyCreditAllowance,
   getNormalizedCreditTier
 } from './lib/aiCredits';
+import { MAX_UPLOAD_BYTES } from './lib/limits';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -157,7 +158,7 @@ const GEMINI_FALLBACK_MODELS = [
   'gemini-3.8-flash'
 ].filter(Boolean) as string[];
 const OCR_MODEL = GEMINI_PRIMARY_MODEL;
-const OCR_MAX_PDF_BYTES = 15 * 1024 * 1024; // keep inline request comfortably under Gemini's size limit
+const OCR_MAX_PDF_BYTES = MAX_UPLOAD_BYTES; // Raised to 50 MB (single source of truth in lib/limits.ts)
 
 function pickGeminiKey(): string | null {
   const gemini = cleanEnvKey('GEMINI_API_KEY');
@@ -3946,6 +3947,15 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
 
       if (!buffer) {
         return res.status(400).json({ success: false, error: 'Either storagePath or contentBase64 is required.' });
+      }
+
+      if (buffer.length > MAX_UPLOAD_BYTES) {
+        await markUserFileStatus('failed');
+        return res.status(400).json({
+          success: false,
+          error: 'File exceeds the 50 MB maximum size limit.',
+          fileName
+        });
       }
 
       const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '');
