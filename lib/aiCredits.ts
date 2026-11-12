@@ -18,8 +18,6 @@ export const AI_CREDIT_COSTS = {
   quiz: 2,
   test: 2,
   podcast: 6,
-  // Semester & Course Outline Analysis
-  outline_analysis: 3,
   // Academic Studio tools
   studio_plan: 2,
   studio_section: 3,
