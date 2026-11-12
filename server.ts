@@ -11,7 +11,8 @@ import {
   processDocumentBuffer, 
   normalizeExtractedText, 
   validateExtractedText, 
-  selectRelevantChunks 
+  selectRelevantChunks,
+  DocumentExtractOptions
 } from './lib/documentProcessor';
 import { NIGERIAN_UNIVERSITIES } from './utils/nigerianUniversities';
 import { buildStudentContext } from './lib/studentContext';
@@ -208,7 +209,8 @@ async function ocrPdfWithGemini(buffer: Buffer, apiKey: string): Promise<string>
 async function extractDocumentWithOcrFallback(
   buffer: Buffer,
   fileName: string,
-  fileType: string
+  fileType: string,
+  options?: DocumentExtractOptions
 ) {
   const lowerName = (fileName || '').toLowerCase();
   const lowerType = (fileType || '').toLowerCase();
@@ -243,6 +245,8 @@ async function extractDocumentWithOcrFallback(
         extractedText: text,
         fileTypeDetected: 'image',
         pageCount: 1,
+        nextPage: null,
+        done: true,
         usedOcr: true
       };
     }
@@ -258,8 +262,8 @@ async function extractDocumentWithOcrFallback(
   }
 
   const isPdf = lowerName.endsWith('.pdf') || lowerType.includes('pdf');
-  const result = await processDocumentBuffer(buffer, fileName, fileType);
-  if (result.success && result.extractedText && result.extractedText.trim().length >= 30) {
+  const result = await processDocumentBuffer(buffer, fileName, fileType, options);
+  if (result.success && result.extractedText && result.extractedText.trim().length >= 10) {
     return { ...result, usedOcr: false };
   }
 
@@ -281,6 +285,8 @@ async function extractDocumentWithOcrFallback(
         extractedText: text,
         fileTypeDetected: 'pdf',
         pageCount: result.pageCount || 1,
+        nextPage: null,
+        done: true,
         usedOcr: true
       };
     }
@@ -546,6 +552,27 @@ export async function createExpressApp() {
 
     timestamps.push(now);
     userApiRequests.set(key, timestamps);
+    next();
+  };
+
+  const extractRateRequests = new Map<string, number[]>();
+  const extractRateLimiter = (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+    const key = req.user?.uid || req.ip || req.socket.remoteAddress || 'unknown';
+    const windowMs = 60 * 1000;
+    const maxRequests = 60; // Dedicated 60 requests/min so multi-batch extraction does not hit general limit
+    const now = Date.now();
+
+    const timestamps = (extractRateRequests.get(key) || []).filter(ts => now - ts < windowMs);
+    if (timestamps.length >= maxRequests) {
+      extractRateRequests.set(key, timestamps);
+      return res.status(429).json({
+        success: false,
+        error: 'Too many file extraction requests. Please wait a minute and retry.'
+      });
+    }
+
+    timestamps.push(now);
+    extractRateRequests.set(key, timestamps);
     next();
   };
 
@@ -3991,9 +4018,9 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
   }
 
   // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
-  app.post('/api/files/extract', requireAuth, apiRateLimiter, async (req, res) => {
+  app.post('/api/files/extract', requireAuth, extractRateLimiter, async (req, res) => {
     const userId = (req as any).user?.id || (req as any).user?.uid;
-    const { fileName, fileType, contentBase64, storagePath, bucket, fileId } = req.body;
+    const { fileName, fileType, contentBase64, storagePath, bucket, fileId, pageStart, pageEnd } = req.body;
 
     // Strict Rule: Delete base64 code path. Reject direct base64 payloads.
     if (contentBase64 || !storagePath || typeof storagePath !== 'string' || !storagePath.trim()) {
@@ -4004,7 +4031,7 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
       });
     }
 
-    const markUserFileStatus = async (status: 'ready' | 'failed') => {
+    const markUserFileStatus = async (status: 'ready' | 'processing' | 'failed') => {
       if (fileId && userId && supabaseAdmin) {
         try {
           await supabaseAdmin
@@ -4017,6 +4044,8 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     };
 
     try {
+      await markUserFileStatus('processing');
+
       const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
       if (!dl.buffer) {
         console.error('[Extract Error] Failed to download from storage:', storagePath, dl.error);
@@ -4039,7 +4068,14 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         });
       }
 
-      const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '');
+      const pStart = typeof pageStart === 'number' ? pageStart : (pageStart ? parseInt(String(pageStart), 10) : undefined);
+      const pEnd = typeof pageEnd === 'number' ? pageEnd : (pageEnd ? parseInt(String(pageEnd), 10) : undefined);
+
+      const result = await extractDocumentWithOcrFallback(buffer, fileName || 'document', fileType || '', {
+        pageStart: pStart,
+        pageEnd: pEnd,
+        timeBudgetMs: 38000 // Safely under 40s budget
+      });
 
       if (!result.success) {
         console.error('[Extract Error] Extraction/OCR failed for', fileName, ':', result.error);
@@ -4052,13 +4088,21 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
         });
       }
 
-      await markUserFileStatus('ready');
+      if (result.done) {
+        await markUserFileStatus('ready');
+      } else {
+        await markUserFileStatus('processing');
+      }
+
       res.json({
         success: true,
-        fileName,
-        fileTypeDetected: result.fileTypeDetected,
+        text: result.extractedText,
         extractedText: result.extractedText,
         pageCount: result.pageCount,
+        nextPage: result.nextPage ?? null,
+        done: Boolean(result.done),
+        fileName,
+        fileTypeDetected: result.fileTypeDetected,
         usedOcr: result.usedOcr
       });
     } catch (error: any) {

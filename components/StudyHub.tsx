@@ -112,6 +112,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
     error: string;
   } | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [extractProgressText, setExtractProgressText] = useState<string>('');
   const [fileContent, setFileContent] = useState('');
   const [quizScore, setQuizScore] = useState<number | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -252,6 +253,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       setShowUploadSheet(true);
     } finally {
       setIsExtracting(false);
+      setExtractProgressText('');
     }
   };
 
@@ -287,6 +289,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         ? await GeminiService.extractFileText(file.fileName, file.fileType, undefined, {
             storagePath: file.storagePath,
             fileId: file.id,
+            onProgress: (p) => setExtractProgressText(p.message)
           })
         : { success: false, error: 'Missing storage path. Please re-upload this file.' };
 
@@ -314,6 +317,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       });
     } finally {
       setIsExtracting(false);
+      setExtractProgressText('');
     }
   };
 
@@ -582,6 +586,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         const res = await GeminiService.extractFileText(file.name, file.type, undefined, {
           storagePath: uploadedFile?.storagePath,
           fileId: uploadedFile?.id,
+          onProgress: (p) => setExtractProgressText(p.message)
         });
 
         if (res.success && res.extractedText) {
@@ -637,6 +642,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
       addNotification('content', 'Extraction Notice', err?.message || 'Uploaded, could not read text.', 'hub');
     } finally {
       setIsExtracting(false);
+      setExtractProgressText('');
       if (e.target) e.target.value = '';
     }
   };
@@ -1076,7 +1082,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-widest leading-none">
                   KorsIQ is Analyzing...
                 </p>
-                <span className="text-[8px] text-slate-400 mt-1.5 uppercase tracking-wide">Extracting file knowledge</span>
+                <span className="text-[10px] text-slate-500 mt-2 font-medium">{extractProgressText || 'Extracting document text...'}</span>
               </div>
             ) : (
               <>

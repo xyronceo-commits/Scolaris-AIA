@@ -3,6 +3,12 @@ import mammoth from 'mammoth';
 import JSZip from 'jszip';
 import { GoogleGenAI } from '@google/genai';
 
+export interface DocumentExtractOptions {
+  pageStart?: number;
+  pageEnd?: number;
+  timeBudgetMs?: number;
+}
+
 export interface ExtractionResult {
   success: boolean;
   extractedText: string;
@@ -10,6 +16,8 @@ export interface ExtractionResult {
   isScannedPdf?: boolean;
   fileTypeDetected: string;
   pageCount?: number;
+  nextPage?: number | null;
+  done?: boolean;
 }
 
 /** Decodes XML entities commonly present in Office Open XML files (DOCX/PPTX) */
@@ -207,7 +215,8 @@ export function validateExtractedText(text: string, fileTypeHint?: string): Vali
 export async function processDocumentBuffer(
   buffer: Buffer,
   fileName: string,
-  fileType: string
+  fileType: string,
+  options?: DocumentExtractOptions
 ): Promise<ExtractionResult> {
   const lowerName = (fileName || '').toLowerCase();
   const lowerType = (fileType || '').toLowerCase();
@@ -237,6 +246,8 @@ export async function processDocumentBuffer(
 
   let rawExtracted = '';
   let pageCount: number | undefined = undefined;
+  let nextPage: number | null = null;
+  let done: boolean = true;
 
   try {
     if (detectedType === 'pdf') {
@@ -253,21 +264,54 @@ export async function processDocumentBuffer(
         if (typeof ParserClass === 'function') {
           try {
             const parser = new ParserClass({ data: new Uint8Array(buffer) });
-            if (parser && typeof parser.getText === 'function') {
-              const textResult = await parser.getText();
-              rawExtracted = textResult.text || '';
-              pageCount = textResult.pages?.length || textResult.total;
-              parsedOk = true;
-              if (typeof parser.destroy === 'function') {
-                await parser.destroy();
+            const doc = await parser.load();
+            const total = doc.numPages || 1;
+            pageCount = total;
+
+            const start = Math.max(1, options?.pageStart || 1);
+            const batchLimit = options?.pageEnd ? Math.min(total, options.pageEnd) : Math.min(total, start + 19);
+            const timeBudget = options?.timeBudgetMs || 38000;
+            const startMs = Date.now();
+
+            const pages: string[] = [];
+            let lastProcessed = start - 1;
+
+            for (let i = start; i <= batchLimit; i++) {
+              if (Date.now() - startMs >= timeBudget && pages.length > 0) {
+                break;
               }
+              const page = await doc.getPage(i);
+              const text = await parser.getPageText(page, {}, total);
+              if (text && text.trim()) {
+                pages.push(text);
+              }
+              lastProcessed = i;
+              if (typeof page.cleanup === 'function') {
+                page.cleanup();
+              }
+            }
+
+            rawExtracted = pages.join('\n\n');
+            if (lastProcessed >= total) {
+              nextPage = null;
+              done = true;
+            } else {
+              nextPage = lastProcessed + 1;
+              done = false;
+            }
+            parsedOk = true;
+
+            if (typeof parser.destroy === 'function') {
+              await parser.destroy();
             }
           } catch (classErr) {
             // If instantiation fails, try function call (v1 style)
             const fnResult = await ParserClass(buffer);
             if (fnResult && typeof fnResult.text === 'string') {
               rawExtracted = fnResult.text;
-              pageCount = fnResult.numpages;
+              pageCount = fnResult.numpages || 1;
+              nextPage = null;
+              done = true;
               parsedOk = true;
             }
           }
@@ -282,6 +326,9 @@ export async function processDocumentBuffer(
     } else if (detectedType === 'docx') {
       const result = await mammoth.extractRawText({ buffer });
       rawExtracted = result.value || '';
+      pageCount = 1;
+      nextPage = null;
+      done = true;
     } else if (detectedType === 'pptx') {
       const zip = await JSZip.loadAsync(buffer);
       const slideFiles = Object.keys(zip.files).filter(k => /^ppt\/slides\/slide\d+\.xml$/i.test(k));
@@ -293,9 +340,22 @@ export async function processDocumentBuffer(
         return numA - numB;
       });
 
+      const total = slideFiles.length;
+      pageCount = total;
+      const start = Math.max(1, options?.pageStart || 1);
+      const batchLimit = options?.pageEnd ? Math.min(total, options.pageEnd) : Math.min(total, start + 19);
+      const timeBudget = options?.timeBudgetMs || 38000;
+      const startMs = Date.now();
+
       const slideTexts: string[] = [];
-      for (let i = 0; i < slideFiles.length; i++) {
+      let lastProcessed = start - 1;
+
+      for (let i = start - 1; i < batchLimit; i++) {
+        if (Date.now() - startMs >= timeBudget && slideTexts.length > 0) {
+          break;
+        }
         const slideFileName = slideFiles[i];
+        if (!slideFileName) break;
         const xmlContent = await zip.files[slideFileName].async('string');
         
         // Extract per paragraph (<a:p>) to preserve line breaks and slide structure
@@ -334,15 +394,29 @@ export async function processDocumentBuffer(
           }
           slideTexts.push(entry);
         }
+        lastProcessed = i + 1;
       }
+
       rawExtracted = slideTexts.join('\n\n');
-      pageCount = slideFiles.length;
+      if (lastProcessed >= total) {
+        nextPage = null;
+        done = true;
+      } else {
+        nextPage = lastProcessed + 1;
+        done = false;
+      }
     } else if (detectedType === 'rtf') {
       const rawRtf = decodeTextBuffer(buffer);
       rawExtracted = extractRtfText(rawRtf);
+      pageCount = 1;
+      nextPage = null;
+      done = true;
     } else {
       // Plain text, Markdown, CSV, TSV, JSON
       rawExtracted = decodeTextBuffer(buffer);
+      pageCount = 1;
+      nextPage = null;
+      done = true;
     }
   } catch (err: any) {
     console.error(`Document extraction error for ${fileName} (${detectedType}):`, err);
@@ -351,20 +425,37 @@ export async function processDocumentBuffer(
       extractedText: '',
       error: `Failed to extract text from ${fileName}. ${err?.message || ''}`,
       fileTypeDetected: detectedType,
-      isScannedPdf: detectedType === 'pdf'
+      isScannedPdf: detectedType === 'pdf',
+      nextPage: null,
+      done: true
     };
   }
 
   const normalized = normalizeExtractedText(rawExtracted);
-  const validation = validateExtractedText(normalized, detectedType);
 
+  // If this is an intermediate batch or non-first page, return immediately
+  if ((options?.pageStart && options.pageStart > 1) || done === false) {
+    return {
+      success: true,
+      extractedText: normalized,
+      fileTypeDetected: detectedType,
+      pageCount,
+      nextPage,
+      done
+    };
+  }
+
+  const validation = validateExtractedText(normalized, detectedType);
   if (!validation.isValid) {
     return {
       success: false,
       extractedText: '',
       error: validation.reason || "We couldn't read this document correctly. Please try uploading another copy.",
       isScannedPdf: validation.isScannedPdf,
-      fileTypeDetected: detectedType
+      fileTypeDetected: detectedType,
+      pageCount,
+      nextPage: null,
+      done: true
     };
   }
 
@@ -372,7 +463,9 @@ export async function processDocumentBuffer(
     success: true,
     extractedText: normalized,
     fileTypeDetected: detectedType,
-    pageCount
+    pageCount,
+    nextPage,
+    done
   };
 }
 

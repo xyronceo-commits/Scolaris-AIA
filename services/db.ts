@@ -1114,28 +1114,50 @@ export const DBService = {
         const token = await getAccessToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const resp = await fetch('/api/files/extract', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            fileName: file.name,
-            fileType: file.type,
-            storagePath,
-            bucket: usedBucket
-          }),
-        });
-        if (resp.ok) {
+
+        let currentP = 1;
+        let isBatchDone = false;
+        const textParts: string[] = [];
+
+        while (!isBatchDone) {
+          const resp = await fetch('/api/files/extract', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              fileName: file.name,
+              fileType: file.type,
+              storagePath,
+              bucket: usedBucket,
+              pageStart: currentP
+            }),
+          });
+
+          if (!resp.ok) {
+            processingStatus = 'failed';
+            extractionError = 'Text extraction server request failed.';
+            break;
+          }
+
           const resData = await resp.json();
-          if (resData.success && resData.extractedText) {
-            extractedText = resData.extractedText;
-            processingStatus = 'ready';
-          } else {
+          if (!resData.success) {
             processingStatus = 'failed';
             extractionError = resData.error || 'Text extraction was unable to parse this document structure.';
+            break;
           }
-        } else {
-          processingStatus = 'failed';
-          extractionError = 'Text extraction server request failed.';
+
+          const txt = resData.text || resData.extractedText || '';
+          if (txt) textParts.push(txt);
+
+          if (resData.done === true || !resData.nextPage) {
+            isBatchDone = true;
+            processingStatus = 'ready';
+            break;
+          }
+          currentP = Number(resData.nextPage);
+        }
+
+        if (processingStatus === 'ready' && textParts.length > 0) {
+          extractedText = textParts.join('\n\n');
         }
       } catch (extErr: any) {
         processingStatus = 'failed';
@@ -2499,34 +2521,54 @@ export const DBService = {
     if (uid && file.id) {
       await DBService.updateUserFileStatus(file.id, uid, 'processing');
     }
+
+    let currentPage = 1;
+    let isDone = false;
+    const textChunks: string[] = [];
+    let totalPages = 1;
+
     try {
       const token = await getAccessToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const resp = await fetch('/api/files/extract', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          fileName: file.fileName,
-          fileType: file.fileType,
-          storagePath: file.storagePath,
-          bucket: file.storagePath?.startsWith('groups/') ? GROUP_MATERIALS_BUCKET : USER_FILES_BUCKET,
-          fileId: file.id,
-        }),
-      });
+      while (!isDone) {
+        const resp = await fetch('/api/files/extract', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            fileName: file.fileName,
+            fileType: file.fileType,
+            storagePath: file.storagePath,
+            bucket: file.storagePath?.startsWith('groups/') ? GROUP_MATERIALS_BUCKET : USER_FILES_BUCKET,
+            fileId: file.id,
+            pageStart: currentPage
+          }),
+        });
 
-      const resJson = await resp.json().catch(() => ({}));
-      if (!resp.ok || !resJson.success || !resJson.extractedText) {
-        if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
-        return {
-          success: false,
-          error: resJson.error || 'Uploaded, could not read text. Please try again.',
-        };
+        const resJson = await resp.json().catch(() => ({}));
+        if (!resp.ok || !resJson.success) {
+          if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
+          return {
+            success: false,
+            error: resJson.error || 'Uploaded, could not read text. Please try again.',
+          };
+        }
+
+        const chunkText = resJson.text || resJson.extractedText || '';
+        if (chunkText) textChunks.push(chunkText);
+        if (typeof resJson.pageCount === 'number' && resJson.pageCount > 0) totalPages = resJson.pageCount;
+
+        if (resJson.done === true || !resJson.nextPage || resJson.nextPage > totalPages) {
+          isDone = true;
+          break;
+        }
+        currentPage = Number(resJson.nextPage);
       }
 
+      const combined = textChunks.join('\n\n');
       if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'ready');
-      return { success: true, extractedText: resJson.extractedText };
+      return { success: true, extractedText: combined };
     } catch (err: any) {
       if (uid && file.id) await DBService.updateUserFileStatus(file.id, uid, 'failed');
       return { success: false, error: err?.message || 'Uploaded, could not read text.' };

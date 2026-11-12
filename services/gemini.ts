@@ -312,40 +312,110 @@ export const GeminiService = {
     fileName: string,
     fileType: string,
     contentBase64?: string,
-    options?: { storagePath?: string; bucket?: string; fileId?: string }
-  ): Promise<{ success: boolean; extractedText?: string; error?: string; isScannedPdf?: boolean; fileName?: string; fileTypeDetected?: string; pageCount?: number }> {
+    options?: {
+      storagePath?: string;
+      bucket?: string;
+      fileId?: string;
+      onProgress?: (progress: { message: string; currentPage: number; totalPages: number }) => void;
+    }
+  ): Promise<{
+    success: boolean;
+    text?: string;
+    extractedText?: string;
+    error?: string;
+    isScannedPdf?: boolean;
+    fileName?: string;
+    fileTypeDetected?: string;
+    pageCount?: number;
+    done?: boolean;
+    usedOcr?: boolean;
+  }> {
     try {
-      const response = await fetch('/api/files/extract', {
-        method: 'POST',
-        headers: await getHeaders(),
-        body: JSON.stringify({
-          fileName,
-          fileType,
-          contentBase64: contentBase64 || undefined,
-          storagePath: options?.storagePath || undefined,
-          bucket: options?.bucket || undefined,
-          fileId: options?.fileId || undefined,
-        })
-      });
-      if (response.status === 413) {
-        return {
-          success: false,
-          error: 'Please upload a file under 3 MB. Larger files exceed the direct upload limit.',
-          fileName
-        };
+      let currentPage = 1;
+      let isDone = false;
+      const textChunks: string[] = [];
+      let totalPages = 1;
+      let lastResult: any = null;
+
+      while (!isDone) {
+        const response = await fetch('/api/files/extract', {
+          method: 'POST',
+          headers: await getHeaders(),
+          body: JSON.stringify({
+            fileName,
+            fileType,
+            contentBase64: contentBase64 || undefined,
+            storagePath: options?.storagePath || undefined,
+            bucket: options?.bucket || undefined,
+            fileId: options?.fileId || undefined,
+            pageStart: currentPage
+          })
+        });
+
+        if (response.status === 413) {
+          return {
+            success: false,
+            error: 'File exceeds the 50 MB maximum size limit.',
+            fileName
+          };
+        }
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.success) {
+          return {
+            success: false,
+            error: data.error || 'Server file extraction request failed.',
+            fileName
+          };
+        }
+
+        lastResult = data;
+        const chunkText = data.text || data.extractedText || '';
+        if (chunkText) {
+          textChunks.push(chunkText);
+        }
+
+        if (typeof data.pageCount === 'number' && data.pageCount > 0) {
+          totalPages = data.pageCount;
+        }
+
+        if (data.done === true || !data.nextPage || data.nextPage > totalPages) {
+          isDone = true;
+          if (options?.onProgress) {
+            options.onProgress({
+              message: `Completed reading ${totalPages} pages`,
+              currentPage: totalPages,
+              totalPages
+            });
+          }
+          break;
+        }
+
+        const nextP = Number(data.nextPage);
+        const readEnd = Math.min(nextP - 1, totalPages);
+        if (options?.onProgress) {
+          options.onProgress({
+            message: `Reading pages 1 to ${readEnd} of ${totalPages}...`,
+            currentPage: readEnd,
+            totalPages
+          });
+        }
+
+        currentPage = nextP;
       }
-      const data = await response.json().catch(() => ({}));
-      if (data && typeof data.success === 'boolean') {
-        return data;
-      }
-      if (!response.ok) {
-        return {
-          success: false,
-          error: data.error || 'Server file extraction request failed.',
-          fileName
-        };
-      }
-      return data;
+
+      const combinedText = textChunks.join('\n\n');
+      return {
+        success: true,
+        text: combinedText,
+        extractedText: combinedText,
+        pageCount: totalPages,
+        done: true,
+        fileName: lastResult?.fileName || fileName,
+        fileTypeDetected: lastResult?.fileTypeDetected,
+        usedOcr: lastResult?.usedOcr
+      };
     } catch (err: any) {
       console.warn("File text extraction request error:", err);
       return {
