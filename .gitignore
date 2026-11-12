@@ -30,3 +30,6 @@ dist-ssr
 
 # generated serverless bundle
 api/_server.cjs
+
+# server bundle for `npm start` (kept out of dist, which Vercel serves publicly)
+server-build/
