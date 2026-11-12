@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { isAiSender } from './lib/brand';
 import { GoogleGenAI } from '@google/genai';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { 
   processDocumentBuffer, 
@@ -22,6 +22,7 @@ import {
   getNormalizedCreditTier
 } from './lib/aiCredits';
 import { MAX_UPLOAD_BYTES } from './lib/limits';
+import { authorizeStorageAccess, validateFileSizeLimit } from './lib/storageSecurity';
 
 // Load .env for local development (hosting platforms inject real environment variables instead)
 try { process.loadEnvFile(); } catch { /* no .env file: rely on the environment */ }
@@ -3861,31 +3862,109 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     userId: string,
     storagePath: string,
     preferredBucket?: string
-  ): Promise<{ buffer: Buffer | null; error?: string }> {
+  ): Promise<{ buffer: Buffer | null; error?: string; statusCode?: number }> {
     const cleanPath = String(storagePath || '').trim();
-    if (!cleanPath || cleanPath.includes('..')) {
-      return { buffer: null, error: 'Invalid storage path.' };
-    }
-    // Ownership guard: personal files live under users/<userId>/...
-    if (cleanPath.startsWith('users/') && userId && !cleanPath.startsWith(`users/${userId}/`)) {
-      return { buffer: null, error: 'Access denied to this storage object.' };
+
+    // 1. Storage security and ownership validation
+    const authCheck = await authorizeStorageAccess({
+      userId,
+      storagePath: cleanPath,
+      bucket: preferredBucket,
+      isCircleMember: async (uid, cid) => {
+        if (!supabaseAdmin) return false;
+        try {
+          const { data: member } = await supabaseAdmin
+            .from('circle_members')
+            .select('circle_id')
+            .eq('circle_id', cid)
+            .eq('user_id', uid)
+            .maybeSingle();
+          if (member) return true;
+
+          const { data: grp } = await supabaseAdmin
+            .from('study_groups')
+            .select('id, owner_id')
+            .eq('id', cid)
+            .maybeSingle();
+          if (grp && ((grp as any).owner_id === uid || (grp as any).creator_id === uid)) {
+            return true;
+          }
+        } catch (e) {
+          console.warn('[Storage Auth] Circle membership check failed:', e);
+        }
+        return false;
+      }
+    });
+
+    if (!authCheck.allowed) {
+      return {
+        buffer: null,
+        error: authCheck.error || 'Forbidden: access denied to storage object.',
+        statusCode: authCheck.statusCode || 403
+      };
     }
 
     const candidateBuckets = Array.from(
-      new Set([preferredBucket || inferBucketFromKey(cleanPath), 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
+      new Set(
+        [
+          preferredBucket || inferBucketFromKey(cleanPath),
+          'user-files',
+          'group-materials',
+          'scolaris-library'
+        ].filter(Boolean)
+      )
     );
 
-    // 1. High-speed S3 direct streaming download
+    // 2. Metadata check: Verify file size does not exceed 50 MB before downloading
+    for (const bucketName of candidateBuckets) {
+      if (isS3Configured()) {
+        try {
+          const s3 = getS3();
+          const head = await s3.send(new HeadObjectCommand({ Bucket: bucketName, Key: cleanPath }));
+          if (typeof head.ContentLength === 'number') {
+            const sizeCheck = validateFileSizeLimit(head.ContentLength);
+            if (!sizeCheck.allowed) {
+              return { buffer: null, error: 'File exceeds 50 MB limit.', statusCode: 413 };
+            }
+          }
+        } catch {}
+      }
+
+      if (supabaseAdmin) {
+        try {
+          const lastSlash = cleanPath.lastIndexOf('/');
+          const dir = lastSlash > 0 ? cleanPath.substring(0, lastSlash) : '';
+          const fname = lastSlash > 0 ? cleanPath.substring(lastSlash + 1) : cleanPath;
+          const { data: listData } = await supabaseAdmin.storage.from(bucketName).list(dir, {
+            search: fname,
+            limit: 10
+          });
+          const match = listData?.find((item) => item.name === fname);
+          if (match?.metadata?.size && typeof match.metadata.size === 'number') {
+            const sizeCheck = validateFileSizeLimit(match.metadata.size);
+            if (!sizeCheck.allowed) {
+              return { buffer: null, error: 'File exceeds 50 MB limit.', statusCode: 413 };
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 3. High-speed S3 direct streaming download
     if (isS3Configured()) {
       for (const bucketName of candidateBuckets) {
         const s3Buf = await downloadBufferViaS3(bucketName, cleanPath);
         if (s3Buf && s3Buf.length > 0) {
-          return { buffer: s3Buf };
+          const sizeCheck = validateFileSizeLimit(s3Buf.length);
+          if (!sizeCheck.allowed) {
+            return { buffer: null, error: 'File exceeds 50 MB limit.', statusCode: 413 };
+          }
+          return { buffer: s3Buf, statusCode: 200 };
         }
       }
     }
 
-    // 2. Supabase Admin REST download fallback
+    // 4. Supabase Admin REST download fallback
     if (supabaseAdmin) {
       let lastErr = 'Could not download file from storage.';
       for (const bucketName of candidateBuckets) {
@@ -3893,23 +3972,37 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
           const { data: blob, error } = await supabaseAdmin.storage.from(bucketName).download(cleanPath);
           if (!error && blob) {
             const ab = await blob.arrayBuffer();
-            return { buffer: Buffer.from(ab) };
+            const buf = Buffer.from(ab);
+            const sizeCheck = validateFileSizeLimit(buf.length);
+            if (!sizeCheck.allowed) {
+              return { buffer: null, error: 'File exceeds 50 MB limit.', statusCode: 413 };
+            }
+            return { buffer: buf, statusCode: 200 };
           }
           if (error?.message) lastErr = error.message;
         } catch (err: any) {
           if (err?.message) lastErr = err.message;
         }
       }
-      return { buffer: null, error: lastErr };
+      return { buffer: null, error: lastErr, statusCode: 404 };
     }
 
-    return { buffer: null, error: 'Neither S3 nor Supabase storage is configured.' };
+    return { buffer: null, error: 'Neither S3 nor Supabase storage is configured.', statusCode: 500 };
   }
 
   // Unique service for parsing and extracting clean textual material from PDFs, DOCX, PPTX, and text documents
   app.post('/api/files/extract', requireAuth, apiRateLimiter, async (req, res) => {
     const userId = (req as any).user?.id || (req as any).user?.uid;
     const { fileName, fileType, contentBase64, storagePath, bucket, fileId } = req.body;
+
+    // Strict Rule: Delete base64 code path. Reject direct base64 payloads.
+    if (contentBase64 || !storagePath || typeof storagePath !== 'string' || !storagePath.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Direct file upload to server is disabled; upload to storage first.',
+        fileName
+      });
+    }
 
     const markUserFileStatus = async (status: 'ready' | 'failed') => {
       if (fileId && userId && supabaseAdmin) {
@@ -3924,34 +4017,22 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     };
 
     try {
-      let buffer: Buffer | null = null;
-
-      if (storagePath && typeof storagePath === 'string' && storagePath.trim()) {
-        const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
-        if (dl.buffer) {
-          buffer = dl.buffer;
-        } else if (!contentBase64) {
-          console.error('[Extract Error] Failed to download from storage:', storagePath, dl.error);
-          await markUserFileStatus('failed');
-          return res.status(200).json({
-            success: false,
-            error: dl.error || 'Uploaded, could not read text from cloud storage. Please retry.',
-            fileName
-          });
-        }
+      const dl = await downloadStorageBufferForUser(userId, storagePath, bucket);
+      if (!dl.buffer) {
+        console.error('[Extract Error] Failed to download from storage:', storagePath, dl.error);
+        await markUserFileStatus('failed');
+        return res.status(dl.statusCode || 400).json({
+          success: false,
+          error: dl.error || 'Uploaded, could not read text from cloud storage. Please retry.',
+          fileName
+        });
       }
 
-      if (!buffer && contentBase64 && typeof contentBase64 === 'string') {
-        buffer = Buffer.from(contentBase64, 'base64');
-      }
-
-      if (!buffer) {
-        return res.status(400).json({ success: false, error: 'Either storagePath or contentBase64 is required.' });
-      }
+      const buffer = dl.buffer;
 
       if (buffer.length > MAX_UPLOAD_BYTES) {
         await markUserFileStatus('failed');
-        return res.status(400).json({
+        return res.status(413).json({
           success: false,
           error: 'File exceeds the 50 MB maximum size limit.',
           fileName

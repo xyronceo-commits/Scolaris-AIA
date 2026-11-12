@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
+import { supabase } from '../lib/supabase';
 import SemesterSchedulePlanner from './SemesterSchedulePlanner';
 
 interface CGPACalculatorProps {
@@ -443,7 +444,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
     return { base64, mimeType: file.type || (isImage ? 'image/jpeg' : 'application/pdf') };
   };
 
-  // Transcript File Upload & Text Extraction
+  // Transcript File Upload & Text Extraction (Uploads to storage first, then extracts on server)
   const handleTranscriptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -451,8 +452,23 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
     setTranscriptUploadError(null);
     setIsUploadingTranscript(true);
     try {
-      const { base64, mimeType } = await prepareFileBase64(file);
-      const extractRes = await GeminiService.extractFileText(file.name, mimeType, base64);
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+      if (!userId) {
+        setTranscriptUploadError('Please log in to upload transcript files.');
+        setIsUploadingTranscript(false);
+        return;
+      }
+
+      const uploaded = await DBService.uploadFileToStorage(userId, 'transcript', file);
+      if (!uploaded?.storagePath) {
+        throw new Error('Failed to upload transcript to storage.');
+      }
+
+      const extractRes = await GeminiService.extractFileText(file.name, file.type, undefined, {
+        storagePath: uploaded.storagePath,
+        bucket: 'user-files'
+      });
 
       if (!extractRes.success || !extractRes.extractedText) {
         setTranscriptUploadError(
@@ -476,7 +492,7 @@ export const CGPACalculator: React.FC<CGPACalculatorProps> = ({
     } catch (err: any) {
       console.error('handleTranscriptUpload error:', err);
       setTranscriptUploadError(
-        err?.message || "Couldn't read that transcript file. Please upload a PDF or clear photo under 3 MB, or enter grades manually."
+        err?.message || "Couldn't read that transcript file. Please upload a PDF or clear photo under 50 MB, or enter grades manually."
       );
     } finally {
       setIsUploadingTranscript(false);

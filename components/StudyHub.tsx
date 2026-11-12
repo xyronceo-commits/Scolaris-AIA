@@ -282,22 +282,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
     setIsExtracting(true);
     try {
-      // Extract directly from Supabase Storage path on the server first (bypasses Vercel 4.5MB limit)
+      // Extract directly from Supabase Storage path on the server (bypasses Vercel 4.5MB limit)
       let res = file.storagePath
         ? await GeminiService.extractFileText(file.fileName, file.fileType, undefined, {
             storagePath: file.storagePath,
             fileId: file.id,
           })
-        : { success: false, error: 'Missing storage path' };
-
-      if ((!res.success || !res.extractedText) && file.downloadUrl) {
-        const resp = await fetch(file.downloadUrl);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const base64 = await fileToBase64(blob);
-          res = await GeminiService.extractFileText(file.fileName, file.fileType, base64, { fileId: file.id });
-        }
-      }
+        : { success: false, error: 'Missing storage path. Please re-upload this file.' };
 
       if (res.success && res.extractedText) {
         setFileContent(res.extractedText);
@@ -588,9 +579,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
           await DBService.updateUserFileStatus(uploadedFile.id, userId, 'ready');
         }
       } else {
-        const canSendBase64Fallback = !uploadedFile?.storagePath && file.size <= BASE64_FALLBACK_MAX_BYTES;
-        const base64Fallback = canSendBase64Fallback ? await fileToBase64(file) : undefined;
-        const res = await GeminiService.extractFileText(file.name, file.type, base64Fallback, {
+        const res = await GeminiService.extractFileText(file.name, file.type, undefined, {
           storagePath: uploadedFile?.storagePath,
           fileId: uploadedFile?.id,
         });
