@@ -246,25 +246,24 @@ export const EmailVerification: React.FC<EmailVerificationProps> = ({ email, onV
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 relative font-sans text-[#111827] dark:text-white">
-      {onCancel && (
-        <button
-          type="button"
-          onClick={onCancel}
-          className="fixed top-4 right-4 sm:top-6 sm:right-6 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-sm transition-all flex items-center gap-1.5 text-xs font-semibold z-30 cursor-pointer min-h-[44px]"
-          title="Cancel and return to home page"
-          aria-label="Cancel and return to home page"
-        >
-          <X size={16} />
-          <span>Cancel</span>
-        </button>
-      )}
-
-      {/* KorsIQ Logo top left per Spec */}
-      <div className="w-full max-w-md sm:max-w-none sm:absolute sm:top-6 sm:left-6 mb-4 sm:mb-0 flex items-center justify-between">
-        <KorsIQLogo size={28} />
-      </div>
-
       <div className="max-w-md w-full space-y-4">
+        {/* Top Header Row with Logo and Cancel button in normal flow */}
+        <div className="w-full flex items-center justify-between mb-2">
+          <KorsIQLogo size={28} />
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-sm transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer min-h-[44px]"
+              title="Cancel and return to home page"
+              aria-label="Cancel and return to home page"
+            >
+              <X size={16} />
+              <span>Cancel</span>
+            </button>
+          )}
+        </div>
+
         <div className="bg-white dark:bg-slate-900 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-sm p-6 sm:p-8 text-center space-y-5">
           <div className="space-y-1.5">
             <h1 className="text-xl font-bold text-[#111827] dark:text-white">Verify your email</h1>

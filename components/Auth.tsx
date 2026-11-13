@@ -381,33 +381,34 @@ export const Auth: React.FC<AuthProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center py-8 px-4 sm:px-6 relative overflow-y-auto font-sans text-slate-900">
-      {onCancel && (
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setSuccessMessage(null);
-            setEmail('');
-            setPassword('');
-            setConfirmPassword('');
-            setFullName('');
-            onCancel();
-          }}
-          className="fixed top-4 right-4 sm:top-6 sm:right-6 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-sm transition-all flex items-center gap-1.5 text-xs font-semibold z-30 cursor-pointer min-h-[44px]"
-          title="Cancel and return to home page"
-          aria-label="Cancel and return to home page"
-        >
-          <X size={16} />
-          <span>Cancel</span>
-        </button>
-      )}
-
       <motion.div 
         layout="position"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md w-full relative z-10 my-auto"
       >
+        {onCancel && (
+          <div className="flex justify-end mb-3">
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setSuccessMessage(null);
+                setEmail('');
+                setPassword('');
+                setConfirmPassword('');
+                setFullName('');
+                onCancel();
+              }}
+              className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-sm transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer min-h-[44px]"
+              title="Cancel and return to home page"
+              aria-label="Cancel and return to home page"
+            >
+              <X size={16} />
+              <span>Cancel</span>
+            </button>
+          </div>
+        )}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center p-3 bg-slate-900 text-white rounded-xl shadow-xs mb-3">
             {mode === 'forgot_password' || mode === 'reset_password' ? (
@@ -495,7 +496,7 @@ export const Auth: React.FC<AuthProps> = ({
                 <ArrowLeft size={14} />
                 <span>Back to Sign In</span>
               </button>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md">
+              <span className="text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md">
                 {mode === 'forgot_password' ? 'Step 1 of 2' : 'Step 2 of 2'}
               </span>
             </div>
@@ -548,7 +549,7 @@ export const Auth: React.FC<AuthProps> = ({
                       animate={{ opacity: 1, height: 'auto' }}
                       className="space-y-1"
                     >
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
+                      <label className="text-xs font-medium text-slate-600 ml-0.5">
                         Full Name
                       </label>
                       <div className="relative">
@@ -566,7 +567,7 @@ export const Auth: React.FC<AuthProps> = ({
 
                   {/* Email Address */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
+                    <label className="text-xs font-medium text-slate-600 ml-0.5">
                       Email Address
                     </label>
                     <input 
@@ -582,7 +583,7 @@ export const Auth: React.FC<AuthProps> = ({
                   {/* Password */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between ml-0.5">
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <label className="text-xs font-medium text-slate-600">
                         Password
                       </label>
                       {mode === 'signup' ? (
@@ -632,7 +633,7 @@ export const Auth: React.FC<AuthProps> = ({
                       animate={{ opacity: 1, height: 'auto' }}
                       className="space-y-1"
                     >
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
+                      <label className="text-xs font-medium text-slate-600 ml-0.5">
                         Confirm Password
                       </label>
                       <div className="relative">
@@ -713,7 +714,7 @@ export const Auth: React.FC<AuthProps> = ({
             {mode === 'forgot_password' && (
               <form onSubmit={handleForgotPasswordRequest} className="space-y-4" noValidate>
                 <div className="space-y-1.5 text-left">
-                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
+                  <label className="text-xs font-medium text-slate-600 ml-0.5">
                     Registered Email Address
                   </label>
                   <div className="relative">
@@ -787,7 +788,7 @@ export const Auth: React.FC<AuthProps> = ({
                           setError(null); 
                           setSuccessMessage(null); 
                         }}
-                        className="text-blue-600 hover:text-blue-800 font-semibold text-[10px] uppercase tracking-wider shrink-0 ml-2 cursor-pointer"
+                        className="text-blue-600 hover:text-blue-800 font-semibold text-xs shrink-0 ml-2 cursor-pointer"
                       >
                         Change
                       </button>
@@ -798,7 +799,7 @@ export const Auth: React.FC<AuthProps> = ({
                   {!isDirectRecovery && (
                     <div className="space-y-1">
                       <div className="flex items-center justify-between ml-0.5">
-                        <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                        <label className="text-xs font-medium text-slate-600">
                           6-Digit Recovery Code
                         </label>
                         <button
@@ -837,7 +838,7 @@ export const Auth: React.FC<AuthProps> = ({
                   {/* New Password */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between ml-0.5">
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <label className="text-xs font-medium text-slate-600">
                         New Password
                       </label>
                       <span className="text-[10px] text-slate-400">
@@ -867,7 +868,7 @@ export const Auth: React.FC<AuthProps> = ({
 
                   {/* Confirm New Password */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider ml-0.5">
+                    <label className="text-xs font-medium text-slate-600 ml-0.5">
                       Confirm New Password
                     </label>
                     <div className="relative">
