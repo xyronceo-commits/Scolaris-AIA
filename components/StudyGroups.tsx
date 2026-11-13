@@ -594,16 +594,11 @@ export const StudyGroups: React.FC<StudyGroupsProps> = ({
       {/* Circle Header & Active Circle Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
-              Community Circle
+          {activeGroup?.course && (
+            <span className="text-xs font-mono text-slate-500 font-semibold mb-1 block">
+              {activeGroup.course}
             </span>
-            {activeGroup?.course && (
-              <span className="text-xs font-mono text-slate-500 font-semibold">
-                {activeGroup.course}
-              </span>
-            )}
-          </div>
+          )}
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
             {activeGroup?.name || 'Study Circles'}
           </h1>
