@@ -3,20 +3,18 @@ import { StudySession, Course } from '../types';
 import { DAYS, DIFFICULTY_COLORS } from '../constants';
 import { 
   ArrowRight, 
-  Brain, 
   RotateCcw, 
   PenTool, 
   BookOpen, 
   Clock, 
-  Sparkles,
-  Layers,
-  Award,
-  BookMarked,
-  Calendar,
-  Download,
-  ExternalLink,
-  Copy,
-  Check,
+  Layers, 
+  Award, 
+  BookMarked, 
+  Calendar, 
+  Download, 
+  ExternalLink, 
+  Copy, 
+  Check, 
   X
 } from 'lucide-react';
 
@@ -29,7 +27,7 @@ interface ScheduleViewProps {
 const MODE_METADATA = {
   'Deep Dive': {
     color: 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100/50',
-    icon: Brain,
+    icon: BookOpen,
     desc: 'Uninterrupted deeply-focused creative workflow',
     accentColor: 'text-blue-600',
     badgeColor: 'bg-blue-50 text-blue-700 border-blue-200/80',
@@ -241,15 +239,15 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
       {/* Mode Filters & Breakdown Stats Grid */}
       <div className="space-y-2.5">
         <div className="flex items-center justify-between px-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            Filter View by Learning Mode
+          <span className="text-xs font-semibold text-slate-500">
+            Filter by study mode
           </span>
           {selectedModeFilter && (
             <button 
               onClick={() => setSelectedModeFilter(null)}
-              className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold uppercase tracking-wider cursor-pointer"
+              className="text-xs text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
             >
-              Clear Filter
+              Clear filter
             </button>
           )}
         </div>
@@ -311,9 +309,9 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
           return (
             <div key={dayName} className="space-y-3 animate-in fade-in duration-200">
               <div className="flex items-center gap-3">
-                <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{dayName.toUpperCase()}</h3>
+                <h3 className="text-xs font-semibold text-slate-700">{dayName}</h3>
                 <span className="h-px bg-slate-200 flex-1" />
-                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider font-mono">
+                <span className="text-xs text-slate-400 font-medium font-mono">
                   {daySessions.length} sessions
                 </span>
               </div>
@@ -346,16 +344,16 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
 
                           <div className="space-y-0.5 min-w-0">
                             <div className="flex items-center flex-wrap gap-1.5">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-800 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded shrink-0">
+                              <span className="text-xs font-semibold text-slate-800 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded shrink-0">
                                 {course?.code || 'CS'}
                               </span>
                               
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider border shrink-0 ${modeMeta.badgeColor}`}>
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium border shrink-0 ${modeMeta.badgeColor}`}>
                                 {session.mode}
                               </span>
 
                               {course?.difficulty && (
-                                <span className="text-[9px] font-medium uppercase tracking-wider border border-slate-200 text-slate-500 px-1.5 py-0.5 rounded">
+                                <span className="text-xs font-medium border border-slate-200 text-slate-500 px-1.5 py-0.5 rounded">
                                   {course.difficulty}
                                 </span>
                               )}
@@ -471,8 +469,8 @@ const ScheduleView: React.FC<ScheduleViewProps> = ({ schedule, courses, onOpenHu
 
             {/* Quick Add Individual Google Calendar Links */}
             <div className="space-y-2 pt-1">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Or Add Individual Sessions to Google Calendar
+              <h4 className="text-xs font-semibold text-slate-500">
+                Add sessions to Google Calendar
               </h4>
 
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">

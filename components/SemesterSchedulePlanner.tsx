@@ -37,7 +37,6 @@ import {
   Layers,
   ArrowRight,
   TrendingUp,
-  Sparkles,
   HelpCircle,
   History,
   Check,
@@ -390,16 +389,8 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
-                Academic Architect
-              </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                Deterministic Model · Zero Hallucination
-              </span>
-            </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              Semester Outline, Reading Schedule & CGPA Target Plan
+              Semester Outline, Reading Schedule &amp; CGPA Target Plan
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
               Turn your university syllabi into an adaptive reading schedule and calculate exact per-course exam score targets mathematically.
@@ -410,8 +401,8 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
             onClick={handleGenerateSchedule}
             className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 min-h-[44px]"
           >
-            <Sparkles size={16} />
-            <span>Re-Generate Reading Schedule</span>
+            <RefreshCw size={15} />
+            <span>Regenerate reading schedule</span>
           </button>
         </div>
 
@@ -476,7 +467,7 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* 1. Current CGPA */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
                 Current CGPA
               </label>
               <input
@@ -493,7 +484,7 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
 
             {/* 2. Earned Credit Units */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
                 Credits Earned So Far
               </label>
               <input
@@ -510,7 +501,7 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
 
             {/* 3. Target Cumulative CGPA */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
                 Target Cumulative CGPA
               </label>
               <input
@@ -532,7 +523,7 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
                 : 'bg-red-50/50 dark:bg-red-950/40 border-red-200 dark:border-red-900'
             }`}>
               <div className="flex items-center justify-between">
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider block mb-1">
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
                   Required Semester GPA
                 </label>
                 {!cgpaAnalysis.isReachable && (
@@ -845,7 +836,7 @@ export const SemesterSchedulePlanner: React.FC<SemesterSchedulePlannerProps> = (
 
               {/* Weekly Topics List with Flags */}
               <div className="space-y-2">
-                <h5 className="text-xs font-bold uppercase text-slate-500 tracking-wider">Weekly Topics</h5>
+                <h5 className="text-xs font-bold text-slate-500">Weekly Topics</h5>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {parsedOutlineData.topics?.map((topic: any, idx: number) => (
                     <div
