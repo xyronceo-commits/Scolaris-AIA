@@ -307,6 +307,8 @@ async function parsePdfBuffer(buffer: Buffer): Promise<string> {
 
 export async function createExpressApp() {
   const app = express();
+  // Behind Vercel's proxy: use the real client IP (req.ip) so per-IP limits are not shared by every visitor.
+  app.set('trust proxy', 1);
   const PORT = 3000;
 
   // Security: Disable X-Powered-By fingerprinting
@@ -427,6 +429,29 @@ export async function createExpressApp() {
       return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired access token' });
     }
   };
+
+  // Best-effort fixed-window limiter keyed by user. State is in memory, so on serverless it is per instance
+  // and resets on cold start. It slows brute-forcing but is not a hard global limit.
+  const makeUserLimiter = (max: number, windowMs: number) => {
+    const hits = new Map<string, { count: number; reset: number }>();
+    return (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+      const key = req.user?.uid || req.ip || 'anon';
+      const now = Date.now();
+      const entry = hits.get(key);
+      if (!entry || entry.reset <= now) {
+        hits.set(key, { count: 1, reset: now + windowMs });
+        return next();
+      }
+      if (entry.count >= max) {
+        res.setHeader('Retry-After', String(Math.ceil((entry.reset - now) / 1000)));
+        return res.status(429).json({ success: false, error: 'Too many requests. Please wait a moment and try again.' });
+      }
+      entry.count += 1;
+      next();
+    };
+  };
+  const circleLookupLimiter = makeUserLimiter(15, 60_000);
+  const circleWriteLimiter = makeUserLimiter(20, 60_000);
 
   // Helper to fetch server-authenticated student profile & courses for AI tailoring
   const getStudentContextForUser = async (userId?: string): Promise<string> => {
@@ -643,6 +668,13 @@ export async function createExpressApp() {
     return s3Client;
   };
 
+  // The /api/s3/* routes need Supabase S3 keys. Without them, say so clearly instead of throwing a 500.
+  const requireS3Configured = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!process.env.SUPABASE_S3_ACCESS_KEY_ID || !process.env.SUPABASE_S3_SECRET_ACCESS_KEY) {
+      return res.status(503).json({ success: false, error: 'File storage service is not configured on the server.' });
+    }
+    next();
+  };
   function inferBucketFromKey(key: string, explicitBucket?: string): string {
     if (explicitBucket && typeof explicitBucket === 'string' && explicitBucket.trim()) {
       return explicitBucket.trim();
@@ -702,7 +734,7 @@ export async function createExpressApp() {
   });
 
   // Get S3 configuration details
-  app.get('/api/s3/config', (req, res) => {
+  app.get('/api/s3/config', requireAuth, (req, res) => {
     res.json({
       configured: isS3Configured(),
       endpoint: getSupabaseS3Endpoint(),
@@ -1536,7 +1568,7 @@ export async function createExpressApp() {
   });
 
   // Standard S3 Upload Proxy Route
-  app.post('/api/s3/upload', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+  app.post('/api/s3/upload', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const uid = req.user?.uid;
       const { fileName, fileType, contentBase64, courseId, groupId, bucket: reqBucket } = req.body;
@@ -1568,6 +1600,10 @@ export async function createExpressApp() {
         fileKey = `uploads/${Date.now()}-${randomId}-${cleanName}`;
       }
 
+      const authz = await authorizeStorageObject(uid, fileKey, bucket, 'write');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      bucket = authz.bucket;
+
       const s3 = getS3();
       const contentType = fileType || 'application/octet-stream';
       const command = new PutObjectCommand({
@@ -1594,7 +1630,7 @@ export async function createExpressApp() {
   });
 
   // Direct S3 Upload Presign Route (allows client to upload directly to S3, bypassing Vercel 4.5MB limit)
-  app.post('/api/s3/presign-upload', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+  app.post('/api/s3/presign-upload', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const uid = req.user?.uid;
       if (!uid) return res.status(401).json({ error: 'Authentication required' });
@@ -1624,6 +1660,10 @@ export async function createExpressApp() {
         fileKey = `users/${uid}/uploads/${fileId}_${cleanName}`;
       }
 
+      const authz = await authorizeStorageObject(uid, fileKey, bucket, 'write');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      bucket = authz.bucket;
+
       const s3 = getS3();
       const contentType = typeof fileType === 'string' && fileType.trim() ? fileType.trim() : 'application/octet-stream';
       const command = new PutObjectCommand({
@@ -1649,7 +1689,7 @@ export async function createExpressApp() {
   });
 
   // S3 Presign Download Proxy Route (supports dynamic bucket detection and attachment headers)
-  app.post('/api/s3/presign', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+  app.post('/api/s3/presign', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const { key, bucket: reqBucket, downloadName } = req.body;
       const cleanKey = typeof key === 'string' ? key.trim() : '';
@@ -1657,13 +1697,9 @@ export async function createExpressApp() {
         return res.status(400).json({ error: 'Invalid or unsafe storage path.' });
       }
 
-      const uid = req.user?.uid;
-      // Ownership check for user-isolated paths: users/<userId>/...
-      if (cleanKey.startsWith('users/') && uid && !cleanKey.startsWith(`users/${uid}/`)) {
-        return res.status(403).json({ error: 'Access denied to this storage object.' });
-      }
-
-      const bucket = inferBucketFromKey(cleanKey, reqBucket);
+      const authz = await authorizeStorageObject(req.user?.uid, cleanKey, reqBucket, 'read');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      const bucket = authz.bucket;
       const s3 = getS3();
 
       const filename = typeof downloadName === 'string' && downloadName.trim()
@@ -1685,7 +1721,7 @@ export async function createExpressApp() {
   });
 
   // S3 Secure Delete Route
-  app.post('/api/s3/delete', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+  app.post('/api/s3/delete', requireAuth, requireS3Configured, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const uid = req.user?.uid;
       const { key, bucket: reqBucket } = req.body;
@@ -1694,12 +1730,9 @@ export async function createExpressApp() {
         return res.status(400).json({ error: 'Invalid or unsafe storage path.' });
       }
 
-      // Ownership guard
-      if (cleanKey.startsWith('users/') && uid && !cleanKey.startsWith(`users/${uid}/`)) {
-        return res.status(403).json({ error: 'Access denied: cannot delete another user file.' });
-      }
-
-      const bucket = inferBucketFromKey(cleanKey, reqBucket);
+      const authz = await authorizeStorageObject(uid, cleanKey, reqBucket, 'delete');
+      if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+      const bucket = authz.bucket;
       const s3 = getS3();
       await s3.send(new DeleteObjectCommand({
         Bucket: bucket,
@@ -2884,157 +2917,124 @@ Create a weekly study schedule (Monday-Sunday) for a student at ${university}.
     }
   });
 
-  // Parse Course Outline / Syllabus into Structured Topics & Assessments (Metered: 3 credits)
-  app.post('/api/ai/outline/parse', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
-    const uid = req.user!.uid;
-    const { text, fileBase64, fileName, fileType, requestId, courseCode, units } = req.body;
-    const reqId = typeof requestId === 'string' && requestId.trim()
-      ? requestId.trim()
-      : `outline_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-
-    let rawText = typeof text === 'string' ? text.trim() : '';
-
-    // If file is provided, extract its text using our multi-model / OCR pipeline
-    if (!rawText && fileBase64 && fileName) {
-      try {
-        const buffer = Buffer.from(fileBase64, 'base64');
-        const extRes = await extractDocumentWithOcrFallback(buffer, fileName, fileType || '');
-        if (extRes.success && extRes.extractedText) {
-          rawText = extRes.extractedText;
-        } else {
-          return res.status(400).json({
-            success: false,
-            error: extRes.error || "We couldn't extract text from this document. Please upload a clear PDF, DOCX, or photo."
-          });
-        }
-      } catch (err: any) {
-        return res.status(400).json({
-          success: false,
-          error: `Error processing file: ${err?.message || 'Unsupported or corrupted document'}`
-        });
-      }
-    }
+  // Parse Course Outline into Courses, Units, and Topics (No credits - standard study planner feature)
+  app.post('/api/ai/course-outline', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+    const { text } = req.body;
+    const rawText = typeof text === 'string' ? text.trim() : '';
 
     if (!rawText || rawText.length < 15) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide course outline text or upload a syllabus document (PDF, Word, or photo).'
-      });
-    }
-
-    // 1. Deduct 3 AI credits atomically with idempotent requestId
-    const creditCharge = await consumeAiCredits(uid, 'outline_analysis', 3, reqId);
-    if (!creditCharge.success) {
-      return res.status(402).json({
-        success: false,
-        code: 'INSUFFICIENT_CREDITS',
-        error: `You need 3 AI credits to analyze a syllabus. You have ${creditCharge.balance} remaining.`,
-        balance: creditCharge.balance,
-        required: 3
+        error: 'Please provide course outline text or extracted document content.'
       });
     }
 
     try {
       const apiKey = getAIKey();
       if (!apiKey) {
-        throw new Error('AI analysis service is currently unavailable.');
+        return res.status(503).json({
+          success: false,
+          error: 'AI service is currently unavailable. Please enter your courses manually.'
+        });
       }
 
-      const systemInstruction = `You are KorsIQ Academic Syllabus & Course Outline Analyst.
-Analyze the provided university course outline / syllabus and extract structured topics, schedule, and grading scheme.
+      const systemInstruction = `You are KorsIQ Academic Course Outline Analyzer.
+Extract university courses, credit units, and weekly topics from the syllabus text.
 
-CRITICAL RULES:
-1. NEVER INVENT OR FABRICATE DATA. If a field is not stated or unclear in the text, mark "isFlagged": true and provide "flagReason" (e.g. "Missing in syllabus - please verify").
-2. Extract the course code, course title, and credit units. If credit units are not explicitly stated, set "units": 3, "isUnitsFlagged": true, "flagReason": "Credit units not found in outline".
-3. Extract all weekly topics. Each topic must have:
-   - "weekNumber": integer (1 to 15).
-   - "title": concise topic title.
-   - "description": summary of topic content.
-   - "learningObjectives": array of strings (learning goals).
-   - "isFlagged": boolean (true if week number or title was ambiguous).
-   - "flagReason": string or null.
-4. Extract grading components and assessments:
-   - "assessments": array of { "title": string, "type": "test"|"quiz"|"assignment"|"midterm"|"exam"|"practical"|"project", "weightPercent": number, "dueDate": string (YYYY-MM-DD) or null, "isFlagged": boolean, "flagReason": string or null }.
-   - If total CA + exam percentage does not sum to 100%, flag it. Default to 30% CA and 70% exam if unspecified, but mark as flagged!
+RULES:
+1. NEVER INVENT DATA. If units are not mentioned, leave units as null.
+2. Return JSON ONLY with key "courses".
+3. Each course object must have:
+   - "code": string (e.g. "CSC 201")
+   - "title": string (e.g. "Data Structures & Algorithms")
+   - "units": integer from 1 to 6 or null if unstated
+   - "topics": array of strings (the topic titles / modules, maximum 15 items)
+   - "examDate": string (YYYY-MM-DD) if explicitly stated in text, otherwise null
 
-Return valid JSON with:
+Example:
 {
-  "courseCode": string,
-  "courseTitle": string,
-  "units": number,
-  "isUnitsFlagged": boolean,
-  "topics": [
+  "courses": [
     {
-      "weekNumber": number,
-      "title": string,
-      "description": string,
-      "learningObjectives": string[],
-      "isFlagged": boolean,
-      "flagReason": string | null
+      "code": "CSC 201",
+      "title": "Computer Programming II",
+      "units": 3,
+      "topics": ["Object Oriented Concepts", "Classes & Inheritance", "Recursion", "Linked Lists"],
+      "examDate": null
     }
-  ],
-  "assessments": [
-    {
-      "title": string,
-      "type": "test",
-      "weightPercent": number,
-      "dueDate": string | null,
-      "isFlagged": boolean,
-      "flagReason": string | null
-    }
-  ],
-  "caWeightPercent": number,
-  "examWeightPercent": number,
-  "isGradingFlagged": boolean,
-  "flagReason": string | null
+  ]
 }`;
 
       const aiContent = await runAICall({
         systemInstruction,
-        messages: [{ role: 'user', content: `Analyze this course syllabus:\n\n${rawText.slice(0, 30000)}` }],
+        messages: [{ role: 'user', content: `Extract courses from this syllabus:\n\n${rawText.slice(0, 30000)}` }],
         jsonMode: true
       });
 
-      const parsed = JSON.parse(aiContent || '{}');
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(aiContent || '{}');
+      } catch {
+        return res.status(422).json({
+          success: false,
+          error: "We couldn't structure the text from this outline. Try pasting the syllabus text directly."
+        });
+      }
 
-      // Fallback topic if outline had sparse text
-      if (!parsed.topics || !Array.isArray(parsed.topics) || parsed.topics.length === 0) {
-        parsed.topics = [
-          {
-            weekNumber: 1,
-            title: parsed.courseTitle || 'Course Overview & Fundamentals',
-            description: 'Introduction to course concepts',
-            learningObjectives: ['Understand core principles'],
-            isFlagged: true,
-            flagReason: 'Extracted with low confidence from unstructured text'
-          }
-        ];
+      const rawCourses = Array.isArray(parsed.courses) ? parsed.courses : [];
+      const validatedCourses: Array<{
+        code: string;
+        title: string;
+        units: number | null;
+        topics: string[];
+        examDate?: string | null;
+      }> = [];
+
+      for (const item of rawCourses) {
+        if (!item || typeof item !== 'object') continue;
+        const code = String(item.code || '').trim();
+        const title = String(item.title || '').trim();
+        if (!code && !title) continue; // drop empty rows
+
+        let units: number | null = null;
+        if (typeof item.units === 'number' && Number.isInteger(item.units) && item.units >= 1 && item.units <= 6) {
+          units = item.units;
+        }
+
+        const rawTopics = Array.isArray(item.topics) ? item.topics : [];
+        const topics = rawTopics
+          .map((t: any) => String(t || '').trim())
+          .filter((t: string) => t.length > 0)
+          .slice(0, 20); // cap topics per course
+
+        const examDate = typeof item.examDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.examDate.trim())
+          ? item.examDate.trim()
+          : null;
+
+        validatedCourses.push({
+          code: code || 'COURSE',
+          title: title || code || 'Untitled Course',
+          units,
+          topics,
+          examDate
+        });
+      }
+
+      if (validatedCourses.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No usable courses or syllabus modules found in the provided document. Please check the file and try again.'
+        });
       }
 
       res.json({
         success: true,
-        parsed: {
-          courseCode: parsed.courseCode || courseCode || 'COURSE',
-          courseTitle: parsed.courseTitle || 'Course Syllabus',
-          units: typeof parsed.units === 'number' && parsed.units > 0 ? parsed.units : (units || 3),
-          isUnitsFlagged: Boolean(parsed.isUnitsFlagged),
-          topics: parsed.topics,
-          assessments: parsed.assessments || [],
-          caWeightPercent: parsed.caWeightPercent || 30,
-          examWeightPercent: parsed.examWeightPercent || 70,
-          isGradingFlagged: Boolean(parsed.isGradingFlagged),
-          flagReason: parsed.flagReason || null,
-          extractedTextLength: rawText.length
-        },
-        creditsRemaining: creditCharge.balance
+        courses: validatedCourses
       });
-    } catch (aiErr: any) {
-      console.error('[AI Outline Parse] Error:', aiErr?.message || aiErr);
-      // REFUND CREDITS ON FAILURE
-      await refundAiCredits(uid, 'outline_analysis', 3, reqId);
-      return res.status(500).json({
+    } catch (err: any) {
+      console.error('[POST /api/ai/course-outline] Error:', err);
+      res.status(500).json({
         success: false,
-        error: `Could not parse syllabus: ${aiErr?.message || 'AI processing error'}. Deducted credits have been refunded.`
+        error: `Could not parse syllabus: ${err?.message || 'Server error'}`
       });
     }
   });
@@ -3855,6 +3855,87 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
   app.patch('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
   app.post('/api/profile', requireAuth, apiRateLimiter, handleProfileSave);
 
+  // True if the user owns, belongs to, or may read (public/general) the circle. Uses the service role,
+  // so it must be called before any circle data is returned.
+  async function userCanReadCircle(circleId: string, uid: string): Promise<boolean> {
+    if (!supabaseAdmin || !circleId || !uid) return false;
+    const { data: g } = await supabaseAdmin
+      .from('study_groups')
+      .select('id,type,visibility,owner_id,members')
+      .eq('id', circleId)
+      .maybeSingle();
+    if (!g) return false;
+    if (g.type === 'general' || g.visibility === 'public' || g.owner_id === uid) return true;
+    if (((g.members || []) as any[]).some((m) => (typeof m === 'string' ? m === uid : m?.userId === uid))) return true;
+    const { data: cm } = await supabaseAdmin
+      .from('circle_members')
+      .select('id')
+      .eq('circle_id', circleId)
+      .eq('user_id', uid)
+      .maybeSingle();
+    return !!cm;
+  }
+
+  // True if the user is the circle owner or a co-owner (the only roles allowed to add or remove materials).
+  async function userCanManageCircle(circleId: string, uid: string): Promise<boolean> {
+    if (!supabaseAdmin || !circleId || !uid) return false;
+    const { data: g } = await supabaseAdmin.from('study_groups').select('owner_id').eq('id', circleId).maybeSingle();
+    if (g?.owner_id === uid) return true;
+    const { data: cm } = await supabaseAdmin
+      .from('circle_members')
+      .select('role')
+      .eq('circle_id', circleId)
+      .eq('user_id', uid)
+      .maybeSingle();
+    return cm?.role === 'owner' || cm?.role === 'co_owner';
+  }
+
+  // The S3 presign/upload/delete routes use storage keys that bypass database row-level security, so every
+  // one of them must pass through this check. The bucket is never taken on trust from the client.
+  type StorageAction = 'read' | 'write' | 'delete';
+  async function authorizeStorageObject(
+    uid: string | undefined,
+    key: string,
+    requestedBucket: unknown,
+    action: StorageAction
+  ): Promise<{ ok: boolean; bucket: string; status: number; error: string }> {
+    if (!uid) return { ok: false, bucket: '', status: 401, error: 'Authentication required.' };
+    const clean = String(key || '').trim();
+    if (!clean || clean.includes('..') || clean.includes('\\') || clean.startsWith('/')) {
+      return { ok: false, bucket: '', status: 400, error: 'Invalid or unsafe storage path.' };
+    }
+    const parts = clean.split('/');
+    let allowed: string[];
+    if (parts[0] === 'users') {
+      if (parts[1] !== uid) return { ok: false, bucket: '', status: 403, error: 'Access denied to this storage object.' };
+      allowed = ['user-files', 'scolaris-library'];
+    } else if (parts[0] === 'groups') {
+      const circleId = parts[1];
+      const permitted = circleId
+        ? action === 'read' ? await userCanReadCircle(circleId, uid) : await userCanManageCircle(circleId, uid)
+        : false;
+      if (!permitted) {
+        return {
+          ok: false,
+          bucket: '',
+          status: 403,
+          error: action === 'read'
+            ? 'Access denied to this storage object.'
+            : 'Only the circle owner or co-owner can add or remove materials.'
+        };
+      }
+      allowed = ['group-materials', 'scolaris-library'];
+    } else if (parts[0] === 'library') {
+      if (action !== 'read') return { ok: false, bucket: '', status: 403, error: 'Library files can only be changed by an administrator.' };
+      allowed = ['scolaris-library'];
+    } else {
+      return { ok: false, bucket: '', status: 403, error: 'Access denied to this storage object.' };
+    }
+    const asked = typeof requestedBucket === 'string' ? requestedBucket.trim() : '';
+    if (asked && !allowed.includes(asked)) return { ok: false, bucket: '', status: 403, error: 'Access denied to this storage bucket.' };
+    return { ok: true, bucket: asked || allowed[0], status: 200, error: '' };
+  }
+
   // Helper: Download a file buffer directly from S3 or Supabase Storage (bypasses Vercel 4.5MB body limit)
   async function downloadStorageBufferForUser(
     userId: string,
@@ -3865,14 +3946,26 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
     if (!cleanPath || cleanPath.includes('..')) {
       return { buffer: null, error: 'Invalid storage path.' };
     }
-    // Ownership guard: personal files live under users/<userId>/...
-    if (cleanPath.startsWith('users/') && userId && !cleanPath.startsWith(`users/${userId}/`)) {
+    // Strict allowlist of path shapes the app really uses. Anything else is denied.
+    //   users/<uid>/...            personal files: only the owner may read
+    //   groups/<circleId>/...      circle materials: only circle members may read
+    const KNOWN_BUCKETS = ['user-files', 'group-materials', 'scolaris-library'];
+    const parts = cleanPath.split('/');
+    let candidateBuckets: string[];
+    if (parts[0] === 'users') {
+      if (!userId || parts[1] !== userId) {
+        return { buffer: null, error: 'Access denied to this storage object.' };
+      }
+      const pref = preferredBucket && KNOWN_BUCKETS.includes(preferredBucket) ? preferredBucket : 'user-files';
+      candidateBuckets = Array.from(new Set([pref, 'user-files', 'scolaris-library']));
+    } else if (parts[0] === 'groups') {
+      if (!userId || !parts[1] || !(await userCanReadCircle(parts[1], userId))) {
+        return { buffer: null, error: 'Access denied to this storage object.' };
+      }
+      candidateBuckets = ['group-materials', 'scolaris-library'];
+    } else {
       return { buffer: null, error: 'Access denied to this storage object.' };
     }
-
-    const candidateBuckets = Array.from(
-      new Set([preferredBucket || inferBucketFromKey(cleanPath), 'user-files', 'group-materials', 'scolaris-library'].filter(Boolean))
-    );
 
     // 1. High-speed S3 direct streaming download
     if (isS3Configured()) {
@@ -3953,9 +4046,12 @@ Maintain formal academic diction, clear syntax, and objective reasoning. Return 
       if (!result.success) {
         console.error('[Extract Error] Extraction/OCR failed for', fileName, ':', result.error);
         await markUserFileStatus('failed');
+        const tooLargeForOcr = buffer.length > OCR_MAX_PDF_BYTES;
         return res.status(200).json({
           success: false,
-          error: result.error || "Uploaded, could not read text. Please try again or use Retry.",
+          error: tooLargeForOcr
+            ? `This file is ${(buffer.length / 1048576).toFixed(1)} MB. Scanned files over ${OCR_MAX_PDF_BYTES / 1048576} MB can't be read automatically. Upload a smaller or compressed copy, or paste the text instead.`
+            : (result.error || "Uploaded, could not read text. Please try again or use Retry."),
           isScannedPdf: result.isScannedPdf,
           fileName
         });
@@ -5820,211 +5916,201 @@ Generate a comprehensive exam simulation with 8 questions from the provided text
     }
   });
 
-  // Find Study Circle by Code (Rate limited to thwart brute-forcing)
-  app.get('/api/circles/find', apiRateLimiter, async (req, res) => {
+  // Find Study Circle by Code
+  // ---------------------------------------------------------------------------------------------
+  // Circle lookup / search / join. All require a signed-in user and never trust client-supplied ids.
+  // These routes use the service role, so they must enforce visibility themselves.
+  // ---------------------------------------------------------------------------------------------
+  const rowHasMember = (row: any, uid: string) =>
+    row.owner_id === uid ||
+    ((row.members || []) as any[]).some((m) => (typeof m === 'string' ? m === uid : m?.userId === uid));
+
+  const circleView = (row: any, opts: { full: boolean; inviteCode?: string }) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    course: row.course,
+    type: row.type || 'private',
+    visibility: row.visibility || (row.type === 'general' ? 'public' : 'private'),
+    inviteCode: opts.full ? row.invite_code : (opts.inviteCode || ''),
+    inviteCodeActive: row.invite_code_active !== false,
+    department: row.department || '',
+    level: row.level || '',
+    university: row.university || '',
+    academicSession: row.academic_session || '',
+    groupImage: row.group_image || '',
+    ownerId: row.owner_id,
+    members: opts.full ? row.members || [] : [],
+    memberCount: row.member_count || (row.members ? row.members.length : 1),
+    messages: opts.full ? row.messages || [] : [],
+    sharedMaterials: [],
+    discussions: opts.full ? row.discussions || [] : [],
+    activityFeed: opts.full ? row.activity_feed || [] : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  });
+
+  // Look up a circle by invite code: returns a join preview only (no members, messages or discussions)
+  app.get('/api/circles/find', requireAuth, circleLookupLimiter, async (req: AuthenticatedRequest, res) => {
     try {
       const code = String(req.query.code || '').trim().toUpperCase();
       if (!code) return res.status(400).json({ success: false, error: 'Invite code is required.' });
+      if (!/^[A-Z0-9-]{4,24}$/.test(code)) {
+        return res.status(404).json({ success: false, error: "That code doesn't match any circle. Check the code and try again." });
+      }
+      if (!supabaseAdmin) {
+        return res.status(503).json({ success: false, error: 'Circle lookup is temporarily unavailable.' });
+      }
 
-      if (supabaseAdmin) {
-        const { data, error } = await supabaseAdmin
-          .from('study_groups')
-          .select('*')
-          .ilike('invite_code', code)
-          .maybeSingle();
+      // Exact match only: ilike would treat % and _ as wildcards and let a guess match any circle.
+      const { data, error } = await supabaseAdmin
+        .from('study_groups')
+        .select('*')
+        .eq('invite_code', code)
+        .maybeSingle();
 
-        if (!error && data) {
-          if (data.invite_code_active === false) {
-            return res.json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
-          }
-          return res.json({
-            success: true,
-            group: {
-              id: data.id,
-              name: data.name,
-              description: data.description || '',
-              course: data.course,
-              type: data.type,
-              visibility: data.visibility || 'private',
-              inviteCode: data.invite_code,
-              inviteCodeActive: data.invite_code_active !== false,
-              department: data.department || '',
-              level: data.level || '',
-              university: data.university || '',
-              academicSession: data.academic_session || '',
-              groupImage: data.group_image || '',
-              ownerId: data.owner_id,
-              members: data.members || [],
-              memberCount: data.member_count || (data.members ? data.members.length : 1),
-              messages: data.messages || [],
-              sharedMaterials: [],
-              discussions: data.discussions || [],
-              activityFeed: data.activity_feed || [],
-              createdAt: data.created_at,
-              updatedAt: data.updated_at
-            }
-          });
+      if (!error && data) {
+        if (data.invite_code_active === false) {
+          return res.json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
         }
+        const isMemberAlready = rowHasMember(data, req.user!.uid);
+        return res.json({ success: true, group: circleView(data, { full: isMemberAlready, inviteCode: code }) });
       }
 
       res.status(404).json({ success: false, error: "That code doesn't match any circle. Check the code and try again." });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Error looking up circle.' });
+      console.error('[circles/find]', err?.message || err);
+      res.status(500).json({ success: false, error: 'Error looking up circle.' });
     }
   });
 
-  // Search Study Circles (Public/General Circles Only - protects private circles from discovery)
-  app.get('/api/circles/search', apiRateLimiter, async (req, res) => {
+  // Search circles: public/general circles plus circles the user belongs to. Never other people's private circles.
+  app.get('/api/circles/search', requireAuth, circleLookupLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const q = String(req.query.q || '').trim();
+      const uid = req.user!.uid;
+      const safe = String(req.query.q || '').trim().slice(0, 60).replace(/[%_,()"'\\*]/g, '');
       if (!supabaseAdmin) {
         return res.json({ success: true, groups: [] });
       }
 
-      let query = supabaseAdmin
+      const textFilter = safe
+        ? `name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%`
+        : null;
+
+      // 1. Public / general circles
+      let publicQuery = supabaseAdmin
         .from('study_groups')
         .select('*')
-        .eq('type', 'general')
+        .or('type.eq.general,visibility.eq.public')
         .order('updated_at', { ascending: false })
         .limit(30);
+      if (textFilter) publicQuery = publicQuery.or(textFilter);
 
-      if (q) {
-        const safe = q.replace(/[,()"'%_]/g, '').trim();
-        if (safe) {
-          query = query.or(`name.ilike.%${safe}%,course.ilike.%${safe}%,department.ilike.%${safe}%`);
-        }
+      // 2. Circles the user owns or belongs to
+      const [{ data: memberRows }, { data: ownedRows }] = await Promise.all([
+        supabaseAdmin.from('circle_members').select('circle_id').eq('user_id', uid),
+        supabaseAdmin.from('study_groups').select('id').eq('owner_id', uid)
+      ]);
+      const myIds = Array.from(new Set([
+        ...(memberRows || []).map((r: any) => r.circle_id),
+        ...(ownedRows || []).map((r: any) => r.id)
+      ].filter(Boolean)));
+
+      let mineQuery: any = null;
+      if (myIds.length > 0) {
+        mineQuery = supabaseAdmin
+          .from('study_groups')
+          .select('*')
+          .in('id', myIds)
+          .order('updated_at', { ascending: false })
+          .limit(30);
+        if (textFilter) mineQuery = mineQuery.or(textFilter);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const [publicRes, mineRes] = await Promise.all([publicQuery, mineQuery ? mineQuery : Promise.resolve({ data: [], error: null })]);
+      if (publicRes.error) throw publicRes.error;
 
-      const groups = (data || []).map((row: any) => ({
-        id: row.id,
-        name: row.name,
-        description: row.description || '',
-        course: row.course,
-        type: row.type || 'general',
-        visibility: row.visibility || 'public',
-        inviteCode: row.invite_code,
-        inviteCodeActive: row.invite_code_active !== false,
-        department: row.department || '',
-        level: row.level || '',
-        university: row.university || '',
-        academicSession: row.academic_session || '',
-        groupImage: row.group_image || '',
-        ownerId: row.owner_id,
-        members: row.members || [],
-        memberCount: row.member_count || (row.members ? row.members.length : 1),
-        messages: [],
-        sharedMaterials: [],
-        discussions: [],
-        activityFeed: [],
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+      const merged = new Map<string, any>();
+      for (const row of [...(publicRes.data || []), ...((mineRes as any).data || [])]) merged.set(row.id, row);
+
+      const groups = Array.from(merged.values())
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+        .slice(0, 30)
+        .map((row) => circleView(row, { full: rowHasMember(row, uid) }))
+        // Search results are a directory: never include chat history or discussions.
+        .map((g: any) => ({ ...g, messages: [], discussions: [], activityFeed: [] }));
 
       res.json({ success: true, groups });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Error searching circles.' });
+      console.error('[circles/search]', err?.message || err);
+      res.status(500).json({ success: false, error: 'Error searching circles.' });
     }
   });
 
-  // Join Study Circle (Authenticated, Rate limited, and strictly validated)
-  app.post('/api/circles/join', requireAuth, apiRateLimiter, async (req: AuthenticatedRequest, res) => {
+  // Join a circle. Identity comes from the token. Private circles always require the matching invite code.
+  app.post('/api/circles/join', requireAuth, circleWriteLimiter, async (req: AuthenticatedRequest, res) => {
     try {
-      const { groupId, code, userName } = req.body;
+      const { groupId, code, userName } = req.body || {};
       const userId = req.user!.uid;
-      const effectiveUserName = (typeof userName === 'string' && userName.trim()) || req.user?.email?.split('@')[0] || 'Student';
-
       if (!groupId) {
         return res.status(400).json({ success: false, error: 'Group ID is required.' });
       }
+      if (!supabaseAdmin) {
+        return res.status(503).json({ success: false, error: 'Joining circles is temporarily unavailable.' });
+      }
 
-      if (supabaseAdmin) {
-        const { data: group, error: fetchErr } = await supabaseAdmin
-          .from('study_groups')
-          .select('*')
-          .eq('id', groupId)
-          .maybeSingle();
+      const { data: group, error: fetchErr } = await supabaseAdmin
+        .from('study_groups')
+        .select('*')
+        .eq('id', String(groupId))
+        .maybeSingle();
 
-        if (fetchErr || !group) {
-          return res.status(404).json({ success: false, error: 'Circle not found.' });
-        }
+      if (fetchErr || !group) {
+        return res.status(404).json({ success: false, error: 'Circle not found.' });
+      }
 
-        // Security: Strictly enforce private circle invite code check
-        const isPrivate = group.type === 'private' || group.visibility === 'private';
+      const members = (group.members || []) as any[];
+      const isMember = rowHasMember(group, userId);
+      const isPrivate = group.type === 'private' || group.visibility === 'private';
+
+      if (!isMember) {
         if (isPrivate) {
-          const providedCode = String(code || '').trim().toUpperCase();
-          const expectedCode = String(group.invite_code || '').trim().toUpperCase();
-          if (!providedCode || providedCode !== expectedCode) {
-            return res.status(403).json({ success: false, error: 'A valid invitation code is required to join a private circle.' });
+          const supplied = String(code || '').trim().toUpperCase();
+          if (!supplied || (group.invite_code || '').toUpperCase() !== supplied) {
+            return res.status(400).json({ success: false, error: 'Invalid invite code.' });
           }
           if (group.invite_code_active === false) {
             return res.status(403).json({ success: false, error: 'This invitation code has been revoked by the circle creator.' });
           }
         }
-
-        const members = (group.members || []) as any[];
-        const isMember = members.some(m => (typeof m === 'string' ? m === userId : m.userId === userId));
-
-        if (!isMember) {
-          members.push({
-            userId,
-            name: effectiveUserName,
-            role: 'member',
-            joinedAt: new Date().toISOString()
-          });
-
-          await supabaseAdmin
-            .from('study_groups')
-            .update({
-              members,
-              member_count: members.length,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', groupId);
-
-          await supabaseAdmin.from('circle_members').upsert({
-            circle_id: groupId,
-            user_id: userId,
-            user_name: effectiveUserName,
-            role: 'member',
-            joined_at: new Date().toISOString()
-          }, { onConflict: 'circle_id,user_id' });
+        if (members.length >= 100) {
+          return res.status(400).json({ success: false, error: 'Circle membership limit reached (maximum 100 members).' });
         }
 
-        return res.json({
-          success: true,
-          group: {
-            id: group.id,
-            name: group.name,
-            description: group.description || '',
-            course: group.course,
-            type: group.type,
-            visibility: group.visibility || 'private',
-            inviteCode: group.invite_code,
-            inviteCodeActive: group.invite_code_active !== false,
-            department: group.department || '',
-            level: group.level || '',
-            university: group.university || '',
-            academicSession: group.academic_session || '',
-            groupImage: group.group_image || '',
-            ownerId: group.owner_id,
-            members,
-            memberCount: members.length,
-            messages: group.messages || [],
-            sharedMaterials: [],
-            discussions: group.discussions || [],
-            activityFeed: group.activity_feed || [],
-            createdAt: group.created_at,
-            updatedAt: group.updated_at
-          }
-        });
+        const displayName = String(userName || '').trim().slice(0, 80) || 'Student';
+        members.push({ userId, name: displayName, role: 'member', joinedAt: new Date().toISOString() });
+
+        await supabaseAdmin
+          .from('study_groups')
+          .update({ members, member_count: members.length, updated_at: new Date().toISOString() })
+          .eq('id', group.id);
+
+        await supabaseAdmin.from('circle_members').upsert({
+          circle_id: group.id,
+          user_id: userId,
+          user_name: displayName,
+          role: 'member',
+          joined_at: new Date().toISOString()
+        }, { onConflict: 'circle_id,user_id' });
       }
 
-      res.json({ success: true, message: 'Joined circle.' });
+      return res.json({
+        success: true,
+        group: circleView({ ...group, members, member_count: members.length }, { full: true })
+      });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || 'Failed to join circle.' });
+      console.error('[circles/join]', err?.message || err);
+      res.status(500).json({ success: false, error: 'Failed to join circle.' });
     }
   });
 

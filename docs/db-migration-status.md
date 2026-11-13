@@ -20,3 +20,6 @@ The live database was migrated through the Supabase dashboard/MCP, NOT through `
 
 ## Never run automatically
 - `supabase/manual/clean_demo_rows.sql` deletes data (moved out of migrations so no tool runs it automatically). Review it and run it by hand only if intended.
+
+## Applied 11 Nov 2026
+- 20261111_harden_functions_and_triggers: trigger functions are no longer executable through the API, and `protect_profile_subscription` has a pinned search_path.

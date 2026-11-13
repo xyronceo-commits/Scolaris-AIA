@@ -5,7 +5,7 @@ import CGPACalculator from './CGPACalculator';
 import TimetableView from './TimetableView';
 import ScheduleView from './ScheduleView';
 import TaskModal from './TaskModal';
-import SemesterSchedulePlanner from './SemesterSchedulePlanner';
+import CourseOutlineSection from './CourseOutlineSection';
 import { DBService } from '../services/db';
 import { getCurrentUserId } from '../lib/supabase';
 import { 
@@ -26,7 +26,7 @@ import {
   Target
 } from 'lucide-react';
 
-export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetable' | 'cgpa' | 'semester-target';
+export type PlannerViewMode = 'today' | 'week' | 'exams' | 'courses' | 'timetable' | 'cgpa' | 'outline';
 
 interface StudyPlannerViewProps {
   initialTab?: string;
@@ -59,10 +59,11 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   onToggleTheme,
   hubs
 }) => {
-  // Primary tabs: Today (default), Week, Exams, Courses
+  // Primary tabs: Today (default), Week, Exams, Courses, Outline
   const [activeTab, setActiveTab] = useState<PlannerViewMode>(() => {
     if (openAddCourseSignal > 0) return 'courses';
-    if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'semester-target'].includes(initialTab)) {
+    if (initialTab === 'semester-target' || initialTab === 'course-outline' || initialTab === 'outline') return 'outline';
+    if (['courses', 'timetable', 'cgpa', 'week', 'exams'].includes(initialTab)) {
       return initialTab as PlannerViewMode;
     }
     return 'today';
@@ -70,7 +71,9 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   const [courseFormSignal, setCourseFormSignal] = useState<number>(openAddCourseSignal);
 
   useEffect(() => {
-    if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'today', 'semester-target'].includes(initialTab)) {
+    if (initialTab === 'semester-target' || initialTab === 'course-outline' || initialTab === 'outline') {
+      setActiveTab('outline');
+    } else if (['courses', 'timetable', 'cgpa', 'week', 'exams', 'today'].includes(initialTab)) {
       setActiveTab(initialTab as PlannerViewMode);
     }
   }, [initialTab]);
@@ -277,15 +280,15 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('semester-target')}
+            onClick={() => setActiveTab('outline')}
             className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors min-h-[44px] flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'semester-target'
+              activeTab === 'outline'
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold border border-blue-200 dark:border-blue-900'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <TrendingUp size={15} />
-            <span>Target Plan</span>
+            <span>Course outline</span>
           </button>
         </div>
 
@@ -300,7 +303,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             aria-label="Planner Tools"
           >
             <option value="" disabled>Other Tools...</option>
-            <option value="semester-target">Semester Plan & Target</option>
+            <option value="outline">Course Outline & AI Plan</option>
             <option value="courses">Course Manager</option>
             <option value="timetable">Weekly Timetable</option>
             <option value="cgpa">CGPA Calculator</option>
@@ -480,15 +483,17 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
         />
       )}
 
-      {activeTab === 'semester-target' && (
-        <SemesterSchedulePlanner
-          profile={profile}
+      {activeTab === 'outline' && (
+        <CourseOutlineSection
           courses={courses}
           setCourses={setCourses}
           schedule={schedule}
           setSchedule={setSchedule}
+          profile={profile}
           onUpdateProfile={onUpdateProfile}
           addNotification={addNotification}
+          onOpenHub={onOpenHub}
+          onNavigateToTimetable={() => setActiveTab('timetable')}
         />
       )}
 

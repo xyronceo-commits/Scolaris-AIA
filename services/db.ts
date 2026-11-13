@@ -402,6 +402,9 @@ export const DBService = {
         units: c.credits || 3,
         difficulty: (c.difficulty || 'Medium') as Difficulty,
         description: c.description || '',
+        topics: Array.isArray(c.topics) ? c.topics : [],
+        caScore: typeof c.ca_score === 'number' ? c.ca_score : undefined,
+        examWeight: typeof c.exam_weight === 'number' ? c.exam_weight : 70,
       }));
       writeCache('courses', userId, courses);
       return courses;
@@ -430,6 +433,9 @@ export const DBService = {
           difficulty: course.difficulty,
           credits: course.units,
           description: course.description || '',
+          topics: course.topics || [],
+          ca_score: course.caScore ?? null,
+          exam_weight: course.examWeight ?? 70,
         },
         { onConflict: 'id' }
       );
@@ -462,6 +468,9 @@ export const DBService = {
         difficulty: c.difficulty,
         credits: c.units,
         description: c.description || '',
+        topics: c.topics || [],
+        ca_score: c.caScore ?? null,
+        exam_weight: c.examWeight ?? 70,
       }));
       const { error } = await supabase.from('courses').upsert(rows, { onConflict: 'id' });
       if (error) throw error;
@@ -782,7 +791,6 @@ export const DBService = {
         body: JSON.stringify({
           ...groupData,
           inviteCode,
-          ownerId: userId,
           ownerName: userName
         })
       });
@@ -1069,8 +1077,10 @@ export const DBService = {
           .from(GROUP_MATERIALS_BUCKET)
           .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
 
-        if (uploadError) {
-          console.warn(`Upload to '${GROUP_MATERIALS_BUCKET}' warning: ${uploadError.message}. Retrying with '${FALLBACK_BUCKET}'...`);
+        // Only fall back when the bucket itself is missing. Any other failure (permissions, size, type) must
+        // surface its real message instead of being hidden by a second, unrelated error.
+        if (uploadError && /bucket not found|does not exist/i.test(uploadError.message || '')) {
+          console.warn(`Bucket '${GROUP_MATERIALS_BUCKET}' missing. Retrying with '${FALLBACK_BUCKET}'...`);
           const fbRes = await supabase.storage
             .from(FALLBACK_BUCKET)
             .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true });
@@ -1082,7 +1092,16 @@ export const DBService = {
           }
         }
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          const msg = uploadError.message || 'Upload failed.';
+          if (/row-level security|violates|not authorized|unauthorized/i.test(msg)) {
+            throw new Error('Only the circle owner or co-owner can upload materials here.');
+          }
+          if (/exceed|too large|payload/i.test(msg)) {
+            throw new Error('This file is too large to upload. Try a smaller file.');
+          }
+          throw uploadError;
+        }
       }
 
       // Extract plain text server-side so the group AI can use the material
@@ -1097,10 +1116,13 @@ export const DBService = {
         const resp = await fetch('/api/files/extract', {
           method: 'POST',
           headers,
+          // The file is already in storage: send only its path. Re-sending it as base64 breaks on
+          // Vercel for anything over about 3.3 MB (4.5 MB request body limit).
           body: JSON.stringify({
             fileName: file.name,
             fileType: file.type,
-            contentBase64: await fileToBase64(file),
+            storagePath,
+            bucket: usedBucket,
           }),
         });
         if (resp.ok) {
@@ -1421,7 +1443,10 @@ export const DBService = {
 
     // 1. Try Backend API lookup
     try {
-      const res = await fetch(`/api/circles/find?code=${encodeURIComponent(trimmed)}`);
+      const token = await getAccessToken();
+      const res = await fetch(`/api/circles/find?code=${encodeURIComponent(trimmed)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.group) {
@@ -1970,7 +1995,10 @@ export const DBService = {
   async searchCircles(query: string): Promise<StudyGroup[]> {
     const q = (query || '').trim();
     try {
-      const res = await fetch(`/api/circles/search?q=${encodeURIComponent(q)}`);
+      const token = await getAccessToken();
+      const res = await fetch(`/api/circles/search?q=${encodeURIComponent(q)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.groups)) {

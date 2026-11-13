@@ -408,31 +408,27 @@ export const GeminiService = {
     }
   },
 
-  async parseCourseOutline(payload: {
-    text?: string;
-    fileBase64?: string;
-    fileName?: string;
-    fileType?: string;
-    requestId?: string;
-    courseCode?: string;
-    units?: number;
-  }): Promise<{
+  async parseCourseOutline(text: string): Promise<{
     success: boolean;
-    parsed?: any;
+    courses?: Array<{
+      code: string;
+      title: string;
+      units: number | null;
+      topics: string[];
+      examDate?: string | null;
+    }>;
     error?: string;
-    code?: string;
-    creditsRemaining?: number;
   }> {
     try {
-      const response = await fetch('/api/ai/outline/parse', {
+      const response = await fetch('/api/ai/course-outline', {
         method: 'POST',
         headers: await getHeaders(),
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ text })
       });
       return await response.json();
     } catch (err: any) {
       console.warn('parseCourseOutline error:', err);
-      return { success: false, error: err?.message || 'Failed to analyze course syllabus.' };
+      return { success: false, error: err?.message || 'Failed to analyze course outline.' };
     }
   },
 
