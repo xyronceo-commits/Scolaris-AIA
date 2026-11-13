@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Course, StudyHubData, LibraryFile, Flashcard, QuizQuestion, StudyGroup, UserProfile, GroupMessage, AppNotification, AppState, UserFile } from '../types';
 import { ICONS } from '../constants';
-import { Sparkles, AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus, MessageSquare, Link as LinkIcon } from 'lucide-react';
+import { AudioWaveform, ChevronLeft, ChevronRight, RefreshCw, Layers, Grid, Check, X, HelpCircle, Trophy, Award, RotateCcw, Trash2, Folder, Download, Upload, Loader2, AlertCircle, FileText, File, ScanText, Camera, Image, FileSearch, CheckCircle2, ArrowUpRight, BookOpen, Plus, MessageSquare, Link as LinkIcon } from 'lucide-react';
 import { GeminiService } from '../services/gemini';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken } from '../lib/supabase';
@@ -769,12 +769,12 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
   const tools = [
     { id: 'summary', label: 'Summary', icon: ICONS.FileText, desc: '1 credit' },
-    { id: 'ai', label: 'AI', icon: <MessageSquare size={18} />, desc: 'Chat & History (Free)' },
+    { id: 'ai', label: 'Mentor', icon: <MessageSquare size={18} />, desc: 'Course Q&A' },
     { id: 'library', label: 'Library', icon: ICONS.Library, desc: 'Syllabus & Notes' },
     { id: 'flashcards', label: 'Flashcards', icon: ICONS.RotateCcw, desc: '2 credits' },
     { id: 'quiz', label: 'Practice Quiz', icon: ICONS.CheckCircle, desc: '2 credits' },
     { id: 'test', label: 'Practice Test', icon: <Award size={20} />, desc: '2 credits' },
-    { id: 'podcast', label: 'AI Podcast', icon: <AudioWaveform size={18} />, desc: '6 credits' },
+    { id: 'podcast', label: 'Podcast', icon: <AudioWaveform size={18} />, desc: '6 credits' },
   ];
 
   if (!activeCourseId || !currentCourse) {
@@ -917,10 +917,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
       {/* Dynamic Header Area */}
       <div className="flex flex-col xl:flex-row gap-6 justify-between items-start xl:items-end">
         <div className="space-y-2">
-          <div className="flex items-center gap-2 mb-1">
-             <div className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 border border-blue-100 dark:border-blue-900 rounded-full text-[8px] font-bold uppercase tracking-widest text-blue-700 dark:text-blue-300">Study Hub</div>
-             {activeHub.summary && <div className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950 border border-emerald-100 dark:border-emerald-900 rounded-full text-[8px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-300">Generated</div>}
-          </div>
           <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight">
             {currentCourse.code}: {currentCourse.title}
           </h1>
@@ -947,14 +943,14 @@ const StudyHub: React.FC<StudyHubProps> = ({
           {activeHub.summary && (
             <button 
               onClick={() => setShowShareModal(true)}
-              className="flex-1 xl:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold uppercase text-[10px] tracking-wide transition-all shadow-xs min-h-[44px]"
+              className="flex-1 xl:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-xs transition-all shadow-xs min-h-[44px]"
             >
               {ICONS.Share} Share Hub
             </button>
           )}
           <div className="relative flex-1 xl:min-w-[240px] group">
             <select 
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 font-bold text-[10px] uppercase tracking-widest shadow-2xs focus:ring-2 focus:ring-blue-500/20 outline-none appearance-none cursor-pointer transition-all pr-10 text-slate-700 dark:text-slate-200 min-h-[44px]"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 font-medium text-xs shadow-2xs focus:ring-2 focus:ring-blue-500/20 outline-none appearance-none cursor-pointer transition-all pr-10 text-slate-700 dark:text-slate-200 min-h-[44px]"
               value={activeCourseId}
               onChange={e => {
                 const val = e.target.value;
@@ -977,18 +973,18 @@ const StudyHub: React.FC<StudyHubProps> = ({
           <div className="bg-white p-5 rounded-xl space-y-4 relative overflow-hidden group border border-slate-200 shadow-2xs">
             <div className="absolute inset-0 bg-blue-50/50 opacity-0 group-hover:opacity-100 transition-all duration-700"></div>
             <div className="flex items-center justify-between relative z-10">
-              <h3 className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-500">
                  Source Material
               </h3>
-              {fileContent && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+              {fileContent && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
             </div>
             {isExtracting ? (
-              <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/20 flex flex-col items-center justify-center min-h-[140px] animate-pulse relative z-10">
+              <div className="border-2 border-dashed border-blue-200 rounded-2xl p-6 text-center bg-blue-50/20 flex flex-col items-center justify-center min-h-[140px] relative z-10">
                 <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-3" />
-                <p className="text-[10px] text-blue-700 font-bold uppercase tracking-widest leading-none">
-                  KorsIQ is Analyzing...
+                <p className="text-xs text-blue-700 font-semibold leading-none">
+                  Analyzing document...
                 </p>
-                <span className="text-[8px] text-slate-400 mt-1.5 uppercase tracking-wide">Extracting file knowledge</span>
+                <span className="text-[10px] text-slate-400 mt-1.5">Extracting file knowledge</span>
               </div>
             ) : (
               <>
@@ -1175,9 +1171,6 @@ const StudyHub: React.FC<StudyHubProps> = ({
                <div className="relative w-16 h-16 mb-6">
                  <div className="absolute inset-0 border-2 border-slate-100 rounded-full"></div>
                  <div className="absolute inset-0 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                 <div className="absolute inset-2 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
-                   {ICONS.Sparkles}
-                 </div>
                </div>
               <h2 className="text-base font-semibold mb-1 text-slate-900">Synthesizing Course Materials</h2>
               <p className="text-slate-500 max-w-sm text-xs">Transforming your syllabus into structured summaries, cards, and quizzes...</p>
@@ -1194,7 +1187,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
           ) : !isSessionFileActive && activeTool !== 'library' ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in fade-in duration-300 min-h-[380px]">
               <div className="p-4 bg-blue-50 rounded-xl mb-4 text-blue-600 border border-blue-100 shadow-2xs">
-                <Sparkles size={28} />
+                <FileText size={28} />
               </div>
               <h3 className="text-base font-semibold text-slate-900 mb-1">
                 Upload or Select Study Material
@@ -1217,8 +1210,8 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="space-y-12">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-10 gap-4">
                   <h3 className="text-3xl sm:text-4xl font-serif font-bold tracking-tight text-slate-900">Executive Summary</h3>
-                  <button onClick={() => generateTool('summary')} className="flex items-center gap-3 text-xs font-bold uppercase tracking-widest text-blue-700 hover:text-blue-800 transition-all p-3 bg-blue-50 rounded-xl border border-blue-100 cursor-pointer">
-                     <span className="group-hover:rotate-180 transition-transform duration-700">{ICONS.RotateCcw}</span> Regenerate — 1 credit
+                  <button onClick={() => generateTool('summary')} className="flex items-center gap-2 text-xs font-semibold text-blue-700 hover:text-blue-800 transition-all p-3 bg-blue-50 rounded-xl border border-blue-100 cursor-pointer">
+                     <span className="group-hover:rotate-180 transition-transform duration-700">{ICONS.RotateCcw}</span> Regenerate summary, 1 credit
                   </button>
                 </div>
                 <div className="prose max-w-none text-slate-700 text-lg sm:text-xl leading-[1.7] space-y-8 font-medium prose-slate prose-p:leading-relaxed prose-headings:font-serif">
@@ -1236,7 +1229,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     onClick={() => generateTool('summary')} 
                     className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Summary — 1 credit
+                    Generate summary, 1 credit
                   </button>
               </div>
             )}
@@ -1454,7 +1447,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                         </button>
                         <button 
                           onClick={() => setFlashcardViewMode('grid')}
-                          className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${flashcardViewMode === 'grid' ? 'bg-white text-blue-700 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
+                          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 ${flashcardViewMode === 'grid' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                         >
                           <Grid size={12} />
                           All Cards
@@ -1473,7 +1466,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                   {flashcardViewMode === 'deck' ? (
                     <div className="space-y-8 animate-in fade-in duration-500 max-w-xl mx-auto">
-                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">
+                      <div className="flex justify-between items-center text-xs font-medium text-slate-500 leading-none">
                         <span>Deck View</span>
                         <span>{safeIndex + 1} of {len} Cards</span>
                       </div>
@@ -1536,7 +1529,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           
                           <button 
                             onClick={() => setIsCardFlipped(!isCardFlipped)}
-                            className="px-8 py-3.5 bg-slate-950 hover:bg-black text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-md flex items-center gap-2"
+                            className="px-6 py-2.5 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-semibold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
                           >
                             {isCardFlipped ? "Show Question" : "Reveal Answer"}
                           </button>
@@ -1580,7 +1573,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right hidden sm:block">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Progress</p>
+                        <p className="text-xs font-semibold text-slate-500">Progress</p>
                         <p className="text-sm font-bold text-slate-800">{answeredCount} of {totalQuestions} Answered</p>
                       </div>
                       <button 
@@ -1588,7 +1581,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                           setSelectedAnswers({});
                           setQuizScore(null);
                         }} 
-                        className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-blue-700 transition-all bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-xl flex items-center gap-2"
+                        className="px-4 py-2 text-xs font-semibold text-blue-700 transition-all bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-lg flex items-center gap-2 cursor-pointer"
                       >
                         <RotateCcw size={12} />
                         Reset Progress
@@ -1598,13 +1591,13 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                   {/* Active overall linear stats progress bar */}
                   <div className="space-y-2">
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      <span>Completion Bar</span>
+                    <div className="flex justify-between text-xs font-medium text-slate-500">
+                      <span>Completion</span>
                       <span>{Math.round((answeredCount / totalQuestions) * 105) > 100 ? 100 : Math.round((answeredCount / totalQuestions) * 100)}% Complete</span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-emerald-500 duration-500 transition-all shadow-[0_0_8px_rgba(16,185,129,0.3)]" 
+                        className="h-full bg-emerald-500 duration-500 transition-all" 
                         style={{ width: `${(answeredCount / totalQuestions) * 100}%` }} 
                       />
                     </div>
@@ -1735,7 +1728,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                             setSelectedAnswers({});
                             setQuizScore(null);
                           }}
-                          className="w-full sm:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold uppercase text-[10px] tracking-wider transition-all duration-300 hover:scale-105"
+                          className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs transition-colors cursor-pointer"
                         >
                           Retake Assessment
                         </button>
@@ -1769,7 +1762,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     
                     {!isTestSubmitted && isTestActive && (
                       <div className="flex items-center gap-4 bg-rose-50 border border-rose-100 px-6 py-3 rounded-2xl shrink-0">
-                        <div className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-rose-600" />
                         <div className="font-mono font-bold text-rose-700 text-lg leading-none">
                           {formattedTime}
                         </div>
@@ -1824,9 +1817,9 @@ const StudyHub: React.FC<StudyHubProps> = ({
                               </span>
                               {isTestSubmitted && (
                                 selectedOption === q.answer ? (
-                                  <span className="px-4 py-1.5 bg-emerald-50 border border-emerald-100 rounded-xl text-[10px] font-black uppercase text-emerald-700 tracking-wider">Correct</span>
+                                  <span className="px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-xs font-semibold text-emerald-700">Correct</span>
                                 ) : (
-                                  <span className="px-4 py-1.5 bg-rose-50 border border-rose-100 rounded-xl text-[10px] font-black uppercase text-rose-700 tracking-wider">Incorrect</span>
+                                  <span className="px-3 py-1 bg-rose-50 border border-rose-100 rounded-lg text-xs font-semibold text-rose-700">Incorrect</span>
                                 )
                               )}
                             </div>
@@ -1880,7 +1873,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                             {isTestSubmitted && (
                               <div className="py-5 px-6 bg-slate-50 border border-slate-150 rounded-2xl space-y-2.5">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block font-sans">Concept Explanation</span>
+                                <span className="text-xs font-semibold text-slate-500 block">Concept Explanation</span>
                                 <p className="text-xs font-semibold text-slate-600 leading-relaxed italic">
                                   {q.explanation || "Correct response matching standard study resources."}
                                 </p>
@@ -1943,7 +1936,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                                 setIsTestSubmitted(false);
                                 setTestTimeRemaining(300);
                               }}
-                              className="w-full sm:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold uppercase text-[10px] tracking-wider transition-all duration-300 hover:scale-105"
+                              className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs transition-colors cursor-pointer"
                             >
                               Reset and Retake Test
                             </button>
@@ -1965,7 +1958,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     onClick={() => generateTool('test')} 
                     className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Generate Practice Test — 2 credits
+                    Generate practice test, 2 credits
                   </button>
               </div>
             )}
@@ -1979,7 +1972,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     onClick={() => generateTool('quiz')} 
                     className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Practice Quiz — 2 credits
+                    Generate quiz, 2 credits
                   </button>
               </div>
             )}
@@ -1993,7 +1986,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     onClick={() => generateTool('flashcards')} 
                     className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors text-xs cursor-pointer min-h-[44px]"
                   >
-                    Flashcards — 2 credits
+                    Generate flashcards, 2 credits
                   </button>
               </div>
             )}
@@ -2002,7 +1995,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
               <div className="space-y-8 animate-in fade-in duration-300">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-6 gap-4">
                   <div>
-                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">AI Podcast Overview</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Audio Overview</h3>
                     <p className="text-xs text-slate-500 mt-1">
                       Generate a two-host academic audio overview and transcript from your course material.
                     </p>
@@ -2012,7 +2005,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                     onClick={generatePodcastTool}
                     className="px-4 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg text-xs font-semibold min-h-[44px] cursor-pointer shrink-0"
                   >
-                    {activeHub.transcript ? 'Regenerate AI Podcast — 6 credits' : 'AI Podcast — 6 credits'}
+                    {activeHub.transcript ? 'Regenerate podcast, 6 credits' : 'Generate podcast, 6 credits'}
                   </button>
                 </div>
 
@@ -2168,7 +2161,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                         {/* Informative Callout Banner */}
                         <div className="p-3.5 bg-blue-50/50 border border-blue-100 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-blue-900">
                           <div className="flex items-center gap-2">
-                            <Sparkles size={14} className="text-blue-600 shrink-0" />
+                            <FileText size={14} className="text-blue-600 shrink-0" />
                             <span>
                               {libraryFilter === 'recent'
                                 ? 'Only recently uploaded documents appear in this view. Use the document library below to search across all courses.'
