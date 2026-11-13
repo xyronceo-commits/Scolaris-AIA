@@ -13,6 +13,7 @@ import { getCurrentUserId } from '../lib/supabase';
 import KorsIQLogo from './KorsIQLogo';
 import UniversitySelector from './UniversitySelector';
 import SubscriptionCheckoutModal from './SubscriptionCheckoutModal';
+import { KORSIQ_PLANS } from '../lib/plans';
 
 interface OnboardingProps {
   userEmail: string;
@@ -434,29 +435,19 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                 <div className="space-y-3">
                   <div>
                     <h3 className="font-bold text-base text-[#111827] dark:text-white">Free</h3>
-                    <p className="text-xs text-[#5B6472] mt-0.5">Get organized and start studying.</p>
+                    <p className="text-xs text-[#5B6472] mt-0.5">{KORSIQ_PLANS.free.description}</p>
                   </div>
                   <div>
-                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦0</span>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">{KORSIQ_PLANS.free.priceDisplay}</span>
                     <span className="text-xs text-[#5B6472]"> / month</span>
                   </div>
                   <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Up to 5 courses</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Basic CGPA calculator</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>100 MB file storage</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Public study circles</span>
-                    </li>
+                    {KORSIQ_PLANS.free.features.map((feat, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check size={14} className="text-[#2563EB] shrink-0" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
 
@@ -481,39 +472,25 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                     : 'border-[#E5E7EB] dark:border-slate-800'
                 }`}
               >
-                <div className="absolute -top-2.5 right-4 px-2 py-0.5 bg-[#2563EB] text-white text-[10px] font-bold uppercase rounded tracking-wider">
+                <div className="absolute -top-2.5 right-4 px-2 py-0.5 bg-[#2563EB] text-white text-xs font-semibold rounded">
                   Popular
                 </div>
                 <div className="space-y-3">
                   <div>
                     <h3 className="font-bold text-base text-[#111827] dark:text-white">Plus</h3>
-                    <p className="text-xs text-[#5B6472] mt-0.5">For students who want the AI edge.</p>
+                    <p className="text-xs text-[#5B6472] mt-0.5">{KORSIQ_PLANS.plus.description}</p>
                   </div>
                   <div>
-                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦7,500</span>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">{KORSIQ_PLANS.plus.priceDisplay}</span>
                     <span className="text-xs text-[#5B6472]"> / month</span>
                   </div>
                   <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Unlimited courses and timetable</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Scenario CGPA projection</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>2 GB file storage</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Private circles with invite codes</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>200 monthly AI study credits</span>
-                    </li>
+                    {KORSIQ_PLANS.plus.features.map((feat, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check size={14} className="text-[#2563EB] shrink-0" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
 
@@ -540,33 +517,19 @@ export const Onboarding: React.FC<OnboardingProps> = ({
                 <div className="space-y-3">
                   <div>
                     <h3 className="font-bold text-base text-[#111827] dark:text-white">KorsIQ Premium</h3>
-                    <p className="text-xs text-[#5B6472] mt-0.5">Research, write and produce. Full Studio.</p>
+                    <p className="text-xs text-[#5B6472] mt-0.5">{KORSIQ_PLANS.studio.description}</p>
                   </div>
                   <div>
-                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦15,000</span>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">{KORSIQ_PLANS.studio.priceDisplay}</span>
                     <span className="text-xs text-[#5B6472]"> / month</span>
                   </div>
                   <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Everything in Plus</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Academic Studio editor</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Real-source citation chips</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Word (.docx) &amp; PDF export</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>1,000 AI credits, 10 GB storage</span>
-                    </li>
+                    {KORSIQ_PLANS.studio.features.map((feat, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check size={14} className="text-[#2563EB] shrink-0" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
 

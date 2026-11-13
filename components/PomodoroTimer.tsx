@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Play, Pause, RotateCcw, Coffee, BookOpen, Volume2, Sparkles } from 'lucide-react';
+import { Play, Pause, RotateCcw, Coffee, BookOpen, Volume2 } from 'lucide-react';
 
 const PomodoroTimer: React.FC = () => {
   const [minutes, setMinutes] = useState(25);
@@ -89,10 +89,6 @@ const PomodoroTimer: React.FC = () => {
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-2xs">
         <div>
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md mb-2 border border-blue-100">
-            <Sparkles size={12} />
-            Focus Session
-          </div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight">Pomodoro Timer</h1>
           <p className="text-xs text-slate-500 mt-0.5">Structured study intervals designed to maximize retention.</p>
         </div>
@@ -148,7 +144,7 @@ const PomodoroTimer: React.FC = () => {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                <span className="text-xs font-semibold text-slate-400 mb-1">
                   {mode === 'work' ? 'Study Block' : 'Short Break'}
                 </span>
                 <span className="text-5xl sm:text-6xl font-bold text-slate-900 tracking-tight font-mono tabular-nums">
@@ -194,7 +190,7 @@ const PomodoroTimer: React.FC = () => {
         {/* Sidebar Info & Ambient Audio */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Session Progress</h3>
+            <h3 className="text-xs font-semibold text-slate-500">Session Progress</h3>
             
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
@@ -224,7 +220,7 @@ const PomodoroTimer: React.FC = () => {
 
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Study Soundscapes</h4>
+              <h4 className="text-xs font-semibold text-slate-500">Study Soundscapes</h4>
               <Volume2 size={14} className="text-slate-400" />
             </div>
             

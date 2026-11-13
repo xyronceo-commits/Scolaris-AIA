@@ -23,7 +23,6 @@ import {
   ArrowRight,
   TrendingUp,
   Target,
-  Sparkles,
   ChevronDown,
   ChevronUp,
   X,
@@ -1114,7 +1113,7 @@ Use clear markdown with bold headers and actionable bullet points.`;
                   </>
                 ) : (
                   <>
-                    <Sparkles size={16} />
+                    <Calendar size={16} />
                     <span>Build my study plan</span>
                   </>
                 )}
@@ -1249,8 +1248,8 @@ Use clear markdown with bold headers and actionable bullet points.`;
               </>
             ) : (
               <>
-                <Sparkles size={14} />
-                <span>Explain my plan (Free)</span>
+                <Info size={14} />
+                <span>Explain plan</span>
               </>
             )}
           </button>
@@ -1260,8 +1259,8 @@ Use clear markdown with bold headers and actionable bullet points.`;
         {planExplanation && (
           <div className="bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
-                <Sparkles size={14} />
+              <span className="text-xs font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                <Info size={14} />
                 Academic Strategy Breakdown
               </span>
               <button
@@ -1388,8 +1387,8 @@ Use clear markdown with bold headers and actionable bullet points.`;
         {/* Per-Course CA and Exam Marks Needed */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-              Per-Course Targets & Continuous Assessment
+            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Per-Course Targets &amp; Continuous Assessment
             </h3>
             <span className="text-[11px] text-slate-500">
               Default split: CA 30 / Exam 70

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Course, StudySession } from '../types';
-import { Calendar, Download, Sparkles, Clock } from 'lucide-react';
+import { Calendar, Download, Clock } from 'lucide-react';
 
 interface TimetableViewProps {
   schedule: StudySession[];
@@ -19,10 +19,6 @@ const TimetableView: React.FC<TimetableViewProps> = ({ schedule, courses }) => {
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-2xs">
         <div>
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md mb-2 border border-blue-100">
-            <Calendar size={12} />
-            Weekly Academic Grid
-          </div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight">Academic Timetable</h1>
           <p className="text-xs text-slate-500 mt-0.5">High-level visual grid of scheduled sessions and study commitments.</p>
         </div>
@@ -101,11 +97,11 @@ const TimetableView: React.FC<TimetableViewProps> = ({ schedule, courses }) => {
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-            <Sparkles size={16} />
+            <Clock size={16} />
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-slate-900">Dynamic Timetable Balancing</h4>
-            <p className="text-xs text-slate-500">Your timetable automatically weights heavy credit units and tough courses during peak focus hours.</p>
+            <h4 className="text-xs font-semibold text-slate-900">Timetable Balancing</h4>
+            <p className="text-xs text-slate-500">Your timetable automatically weights high-unit courses during focus hours.</p>
           </div>
         </div>
         <div className="text-xs font-medium text-slate-500 whitespace-nowrap">

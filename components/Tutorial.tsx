@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronRight, X, ArrowRight, Sparkles, BookOpen, Calendar, BrainCircuit, MessageSquare, GraduationCap } from 'lucide-react';
+import { ChevronRight, X, ArrowRight, BookOpen, Calendar, MessageSquare, GraduationCap } from 'lucide-react';
 
 interface TutorialProps {
   onComplete: () => void;
@@ -17,7 +17,7 @@ const Tutorial: React.FC<TutorialProps> = ({ onComplete }) => {
       feature: "Platform Overview"
     },
     {
-      title: "Smart Course & Syllabus Import",
+      title: "Course & Syllabus Import",
       description: "Add courses manually or paste your syllabus text. KorsIQ extracts credits, topics, and difficulties automatically.",
       icon: <BookOpen size={28} className="text-blue-600" />,
       feature: "Course Management"
@@ -31,7 +31,7 @@ const Tutorial: React.FC<TutorialProps> = ({ onComplete }) => {
     {
       title: "Multimodal Study Hub",
       description: "Upload PDFs and slides to generate executive summaries, active recall flashcards, practice quizzes, and audio overviews.",
-      icon: <BrainCircuit size={28} className="text-blue-600" />,
+      icon: <BookOpen size={28} className="text-blue-600" />,
       feature: "Study Hub & AI Tools"
     },
     {
@@ -63,7 +63,7 @@ const Tutorial: React.FC<TutorialProps> = ({ onComplete }) => {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-blue-600" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">Quick Guide: {current.feature}</span>
+            <span className="text-xs font-semibold text-slate-600">Guide: {current.feature}</span>
           </div>
           <button 
             onClick={onComplete}

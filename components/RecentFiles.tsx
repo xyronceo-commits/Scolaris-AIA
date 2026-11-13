@@ -12,8 +12,7 @@ import {
   FolderOpen,
   Search,
   Filter,
-  X,
-  Sparkles
+  X
 } from 'lucide-react';
 
 interface RecentFilesProps {
@@ -304,11 +303,6 @@ export const RecentFiles: React.FC<RecentFilesProps> = ({
                       {courseTitleDisplay && (
                         <span className="text-xs font-normal text-slate-500 truncate max-w-[200px]">
                           — {courseTitleDisplay}
-                        </span>
-                      )}
-                      {isRecentUpload && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200 flex items-center gap-1">
-                          <Sparkles size={10} /> Recent
                         </span>
                       )}
                     </div>

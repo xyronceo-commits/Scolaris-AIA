@@ -418,7 +418,7 @@ export const StudyHubAIChat: React.FC<StudyHubAIChatProps> = ({
           }`}
         >
           <div className="px-4 py-3 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-[#5B6472] dark:text-slate-400 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#5B6472] dark:text-slate-400">
               Saved Conversations
             </span>
             <span className="text-xs text-[#5B6472] dark:text-slate-400">

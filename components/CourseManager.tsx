@@ -7,7 +7,7 @@ import { getCurrentUserId } from '../lib/supabase';
 import { DBService } from '../services/db';
 import { 
   Plus, 
-  Sparkles, 
+  Upload, 
   Calendar, 
   Trash2, 
   Link as LinkIcon, 
@@ -226,7 +226,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({
         </div>
         
         <div className="flex flex-wrap items-center gap-2">
-          {/* Button 1: Magic Import */}
+          {/* Button 1: Import Syllabus */}
           <button
             onClick={() => {
               setError(null);
@@ -238,8 +238,8 @@ const CourseManager: React.FC<CourseManagerProps> = ({
                 : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
             }`}
           >
-            <Sparkles size={13.5} className={activeForm === 'import' ? 'animate-pulse text-blue-600' : 'text-slate-500'} />
-            <span>Magic Import</span>
+            <Upload size={13.5} className="text-slate-500" />
+            <span>Import syllabus</span>
           </button>
 
           {/* Button 2: Generate Schedule */}
@@ -330,7 +330,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({
                 placeholder="e.g. CS101"
                 value={manualCourse.code || ''}
                 onChange={e => setManualCourse({...manualCourse, code: e.target.value})}
-                className="w-full h-9 bg-white border border-slate-300 rounded-lg px-3 text-xs font-semibold uppercase tracking-wider outline-none text-slate-900 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all placeholder:text-slate-400 placeholder:normal-case"
+                className="w-full h-9 bg-white border border-slate-300 rounded-lg px-3 text-xs font-semibold uppercase outline-none text-slate-900 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all placeholder:text-slate-400 placeholder:normal-case"
               />
             </div>
 
@@ -416,8 +416,8 @@ const CourseManager: React.FC<CourseManagerProps> = ({
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <div>
               <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <Sparkles size={15} className="text-blue-600" />
-                AI Syllabus Importer
+                <Upload size={15} className="text-slate-700" />
+                Syllabus Importer
               </h3>
               <p className="text-xs text-slate-500">Extract courses, units, and descriptions from syllabus text or link.</p>
             </div>
@@ -496,10 +496,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({
                       <span>Parsing with AI...</span>
                     </>
                   ) : (
-                    <>
-                      <Sparkles size={14} />
-                      <span>Extract & Save</span>
-                    </>
+                    <span>Extract and Save</span>
                   )}
                 </button>
               </div>
@@ -573,7 +570,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({
       ) : (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <h3 className="text-xs font-semibold text-slate-500">
               Enrolled Courses ({courses.length})
             </h3>
             
