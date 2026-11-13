@@ -94,12 +94,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     }
   };
 
-  const categories: { id: TaskCategory; label: string; icon: string }[] = [
-    { id: 'assignment', label: 'Assignment', icon: '📝' },
-    { id: 'revision', label: 'Revision session', icon: '⏱️' },
-    { id: 'exam', label: 'Examination', icon: '🎓' },
-    { id: 'deadline', label: 'Academic deadline', icon: '📌' },
-    { id: 'general', label: 'Study task', icon: '✅' }
+  const categories: { id: TaskCategory; label: string }[] = [
+    { id: 'assignment', label: 'Assignment' },
+    { id: 'revision', label: 'Revision session' },
+    { id: 'exam', label: 'Examination' },
+    { id: 'deadline', label: 'Academic deadline' },
+    { id: 'general', label: 'Study task' }
   ];
 
   const priorities: { id: TaskPriority; label: string; color: string }[] = [
@@ -176,13 +176,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                   key={cat.id}
                   type="button"
                   onClick={() => setCategory(cat.id)}
-                  className={`px-2.5 py-2 rounded-lg text-xs font-medium text-left transition-colors border flex items-center gap-1.5 min-h-[44px] cursor-pointer ${
+                  className={`px-2.5 py-2 rounded-lg text-xs font-medium text-left transition-colors border flex items-center justify-center min-h-[44px] cursor-pointer ${
                     category === cat.id
                       ? 'bg-[#EFF6FF] dark:bg-blue-950/60 border-[#2563EB] text-[#2563EB] dark:text-blue-400 font-semibold'
                       : 'bg-white dark:bg-slate-800/80 border-[#E5E7EB] dark:border-slate-700 text-[#5B6472] dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
                 >
-                  <span className="text-sm">{cat.icon}</span>
                   <span className="truncate">{cat.label}</span>
                 </button>
               ))}

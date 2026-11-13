@@ -273,7 +273,7 @@ const App: React.FC = () => {
       return;
     }
     if (!authUser) {
-      document.title = 'KorsIQ — AI-Powered Study & Academic Workspace';
+      document.title = 'KorsIQ — Outsmart Your Syllabus.';
       robotsMeta.content = 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
       return;
     }
@@ -687,11 +687,11 @@ const App: React.FC = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="p-3 bg-slate-900 dark:bg-indigo-600 text-white rounded-2xl shadow-xl mb-4 animate-bounce">
+        <div className="p-3 bg-slate-900 dark:bg-indigo-600 text-white rounded-2xl shadow-xl mb-4">
           <KorsIQLogo variant="icon" size={32} onDark />
         </div>
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-          Resolving Academic Session...
+        <p className="text-xs font-medium text-slate-500">
+          Loading session...
         </p>
       </div>
     );
@@ -1138,7 +1138,7 @@ const App: React.FC = () => {
             <div className="absolute top-4 right-4 sm:right-8 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-[#E5E7EB] dark:border-slate-800 shadow-xl rounded-lg z-50 overflow-hidden">
               <div className="p-4 border-b border-[#E5E7EB] dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#111827] dark:text-slate-100">Notifications</h3>
+                  <h3 className="text-xs font-semibold text-[#111827] dark:text-slate-100">Notifications</h3>
                   {unreadCount > 0 && (
                     <span className="px-2 py-0.5 bg-[#EFF6FF] text-[#2563EB] text-[10px] font-bold rounded-full border border-blue-200">
                       {unreadCount} new
