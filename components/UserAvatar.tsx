@@ -3,14 +3,13 @@ import {
   GraduationCap, 
   User, 
   UserCircle, 
-  Brain, 
-  Sparkles, 
+  Target, 
+  Bookmark, 
   Trophy, 
   Crown, 
   Microscope, 
   BookOpen,
-  Award,
-  Zap
+  Award
 } from 'lucide-react';
 
 export interface AvatarOption {
@@ -37,16 +36,16 @@ export const AVATAR_OPTIONS: AvatarOption[] = [
     badgeClass: 'bg-blue-600'
   },
   {
-    id: 'brain',
-    name: 'Genius Mind',
-    icon: <Brain size={20} />,
+    id: 'target',
+    name: 'Goal Focus',
+    icon: <Target size={20} />,
     bgClass: 'bg-purple-600 text-white',
     badgeClass: 'bg-purple-600'
   },
   {
-    id: 'sparkles',
-    name: 'Visionary',
-    icon: <Sparkles size={20} />,
+    id: 'bookmark',
+    name: 'Reader',
+    icon: <Bookmark size={20} />,
     bgClass: 'bg-amber-500 text-white',
     badgeClass: 'bg-amber-500'
   },
@@ -148,10 +147,10 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
     switch (selected.id) {
       case 'user-circle':
         return <UserCircle size={currentSize.iconSize} />;
-      case 'brain':
-        return <Brain size={currentSize.iconSize} />;
-      case 'sparkles':
-        return <Sparkles size={currentSize.iconSize} />;
+      case 'target':
+        return <Target size={currentSize.iconSize} />;
+      case 'bookmark':
+        return <Bookmark size={currentSize.iconSize} />;
       case 'trophy':
         return <Trophy size={currentSize.iconSize} />;
       case 'crown':
