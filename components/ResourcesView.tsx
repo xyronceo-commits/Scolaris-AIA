@@ -9,7 +9,7 @@ import {
   FileText, 
   Download, 
   Trash2, 
-  BrainCircuit, 
+  BookOpen, 
   AlertCircle, 
   Loader2, 
   CheckCircle,
@@ -409,7 +409,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* Desktop Table View */}
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs text-[#111827] dark:text-slate-200 divide-y divide-[#E5E7EB] dark:divide-slate-800">
-              <thead className="bg-slate-50 dark:bg-slate-800/50 text-[#5B6472] dark:text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 text-[#5B6472] dark:text-slate-400 font-semibold text-xs">
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Owner</th>
@@ -470,11 +470,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => onOpenHub(file.courseId || courses[0]?.id || '')}
-                          title="Study with AI"
-                          aria-label={`Study ${file.fileName} with AI`}
+                          title="Open study tools"
+                          aria-label={`Open study tools for ${file.fileName}`}
                           className="p-2 text-[#2563EB] hover:bg-[#EFF6FF] rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
                         >
-                          <BrainCircuit size={16} />
+                          <BookOpen size={16} />
                         </button>
                         {file.downloadUrl && (
                           <a
@@ -549,10 +549,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60">
                   <button
                     onClick={() => onOpenHub(file.courseId || courses[0]?.id || '')}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-[#2563EB] hover:bg-[#EFF6FF] rounded-lg min-h-[44px] cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#2563EB] hover:bg-[#EFF6FF] rounded-lg min-h-[44px] cursor-pointer"
                   >
-                    <BrainCircuit size={14} />
-                    <span>Study Tools</span>
+                    <BookOpen size={14} />
+                    <span>Study tools</span>
                   </button>
                   <button
                     onClick={() => handleDelete(file)}
