@@ -784,7 +784,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[10px] font-bold uppercase tracking-widest border border-blue-100 dark:border-blue-900">
+              <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-xs font-medium border border-blue-100 dark:border-blue-900">
                 Study Hub
               </span>
             </div>
@@ -1440,7 +1440,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
                       <div className="bg-slate-100/80 p-1 rounded-xl flex items-center border border-slate-200">
                         <button 
                           onClick={() => setFlashcardViewMode('deck')}
-                          className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${flashcardViewMode === 'deck' ? 'bg-white text-blue-700 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
+                          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 ${flashcardViewMode === 'deck' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-800'}`}
                         >
                           <Layers size={12} />
                           Focus Deck
@@ -2034,7 +2034,7 @@ const StudyHub: React.FC<StudyHubProps> = ({
 
                 {activeHub.transcript ? (
                   <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 max-h-[420px] overflow-y-auto">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Podcast Script</p>
+                    <p className="text-xs font-semibold text-slate-500">Podcast script</p>
                     <div className="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
                       {activeHub.transcript}
                     </div>

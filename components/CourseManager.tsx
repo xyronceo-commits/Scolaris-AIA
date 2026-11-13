@@ -330,7 +330,7 @@ const CourseManager: React.FC<CourseManagerProps> = ({
                 placeholder="e.g. CS101"
                 value={manualCourse.code || ''}
                 onChange={e => setManualCourse({...manualCourse, code: e.target.value})}
-                className="w-full h-9 bg-white border border-slate-300 rounded-lg px-3 text-xs font-semibold uppercase tracking-wider outline-none text-slate-900 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all placeholder:text-slate-400 placeholder:normal-case"
+                className="w-full h-9 bg-white border border-slate-300 rounded-lg px-3 text-xs font-semibold uppercase outline-none text-slate-900 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all placeholder:text-slate-400 placeholder:normal-case"
               />
             </div>
 
