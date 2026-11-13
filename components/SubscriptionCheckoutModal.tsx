@@ -14,6 +14,7 @@ import {
 import { UserProfile, SubscriptionPlanType } from '../types';
 import { getAccessToken, getCurrentUserId } from '../lib/supabase';
 import { BETA_PLAN_LIMITS } from '../constants';
+import { KORSIQ_PLANS } from '../lib/plans';
 
 interface SubscriptionCheckoutModalProps {
   isOpen: boolean;
@@ -79,7 +80,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
 
   if (!isOpen) return null;
 
-  const planInfo = selectedPlan === 'studio' ? BETA_PLAN_LIMITS.studio : BETA_PLAN_LIMITS.plus;
+  const planInfo = KORSIQ_PLANS[selectedPlan];
 
   const getHeaders = async () => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -296,8 +297,8 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
 
             {/* Plan Highlights */}
             <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg space-y-2 border border-[#E5E7EB] dark:border-slate-800">
-              <span className="text-[11px] font-bold text-[#111827] dark:text-white uppercase tracking-wider block">
-                {selectedPlan === 'studio' ? 'KorsIQ Premium Package Includes' : 'Plus Package Includes'}
+              <span className="text-xs font-semibold text-[#111827] dark:text-white block">
+                {selectedPlan === 'studio' ? 'KorsIQ Premium package includes' : 'Plus package includes'}
               </span>
               <ul className="space-y-1.5 text-xs text-[#5B6472] dark:text-slate-300">
                 <li className="flex items-center gap-2">
@@ -306,7 +307,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={13} className="text-[#2563EB] shrink-0" />
-                  <span>{selectedPlan === 'studio' ? 'Word (.docx) & PDF manuscript direct export' : 'Scenario CGPA projections & unlimited courses'}</span>
+                  <span>{selectedPlan === 'studio' ? 'Word (.docx) & PDF manuscript direct export' : 'Scenario CGPA projections & all courses'}</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={13} className="text-[#2563EB] shrink-0" />
@@ -328,7 +329,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
               className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-xs min-h-[44px] transition-colors"
             >
               <Lock size={13} />
-              <span>{isProcessing ? 'Connecting...' : `Proceed to Pay ${planInfo.price}`}</span>
+              <span>{isProcessing ? 'Connecting...' : `Proceed to Pay ${planInfo.priceDisplay}`}</span>
               <ArrowRight size={13} />
             </button>
 
@@ -352,7 +353,7 @@ export const SubscriptionCheckoutModal: React.FC<SubscriptionCheckoutModalProps>
           <div className="space-y-4">
             <div className="p-3.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase text-[#2563EB] tracking-wider">
+                <span className="text-xs font-semibold text-[#2563EB]">
                   Payment Verification
                 </span>
                 <span className="text-[11px] font-bold text-[#111827] dark:text-white uppercase">

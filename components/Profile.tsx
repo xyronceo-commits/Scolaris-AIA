@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, UserFile } from '../types';
 import { ICONS, BETA_PLAN_LIMITS } from '../constants';
+import { KORSIQ_PLANS } from '../lib/plans';
 import { UserAvatar, AVATAR_OPTIONS } from './UserAvatar';
 import { DBService } from '../services/db';
 import { getCurrentUserId, getAccessToken, supabase } from '../lib/supabase';
@@ -302,7 +303,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
               <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-[#E5E7EB] dark:border-slate-800">
                   <div className="space-y-0.5">
-                    <span className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Current Plan</span>
+                    <span className="text-xs font-semibold text-[#5B6472]">Current plan</span>
                     <h3 className="text-lg font-bold text-[#111827] dark:text-white">{currentPlan.name}</h3>
                   </div>
                   <button
@@ -426,7 +427,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
             <div className="lg:col-span-4 space-y-4">
               <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between h-full">
                 <div className="space-y-2">
-                  <span className="text-[10px] font-bold text-[#2563EB] uppercase tracking-wider">
+                  <span className="text-xs font-semibold text-[#2563EB]">
                     Upgrade
                   </span>
                   <h3 className="font-bold text-base text-[#111827] dark:text-white">
@@ -499,8 +500,8 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
             {/* Avatar Icon Picker */}
             {isEditing && (
               <div className="pt-4 border-t border-[#E5E7EB] dark:border-slate-800 space-y-2.5">
-                <label className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider block">
-                  Profile Icon
+                <label className="text-xs font-semibold text-[#5B6472] block">
+                  Profile icon
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5">
                   {AVATAR_OPTIONS.map((opt) => {
@@ -530,11 +531,11 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
               <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Email Address</p>
+                <p className="text-xs font-semibold text-[#5B6472]">Email address</p>
                 <p className="text-xs font-semibold text-[#111827] dark:text-white truncate">{profile.email}</p>
               </div>
               <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Department</p>
+                <p className="text-xs font-semibold text-[#5B6472]">Department</p>
                 {isEditing ? (
                   <input
                     type="text"
@@ -548,7 +549,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 )}
               </div>
               <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Level of Study</p>
+                <p className="text-xs font-semibold text-[#5B6472]">Level of study</p>
                 {isEditing ? (
                   <select 
                     value={editedProfile.level}
@@ -567,7 +568,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 )}
               </div>
               <div className="space-y-1 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-[#E5E7EB] dark:border-slate-800">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#5B6472]">Target CGPA</p>
+                <p className="text-xs font-semibold text-[#5B6472]">Target CGPA</p>
                 {isEditing ? (
                   <input 
                     type="number"
@@ -633,7 +634,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
         <div className="space-y-6">
           {/* Notification Preferences */}
           <section className="space-y-2">
-            <h3 className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Preferences</h3>
+            <h3 className="text-xs font-semibold text-[#5B6472]">Preferences</h3>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-lg border border-[#E5E7EB] dark:border-slate-800 shadow-xs space-y-4">
               {[
                 { id: 'messages', label: 'Group Messages', desc: 'Alerts for new discussions in study circles', value: profile.notifications?.messages ?? true },
@@ -712,7 +713,7 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
 
           {/* Account Actions */}
           <section className="space-y-2">
-            <h3 className="text-[10px] font-bold text-[#5B6472] uppercase tracking-wider">Account Actions</h3>
+            <h3 className="text-xs font-semibold text-[#5B6472]">Account actions</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <button 
                 type="button"
@@ -797,26 +798,12 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                     <span className="text-xs text-[#5B6472]"> / month</span>
                   </div>
                   <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Up to 5 courses</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Basic CGPA calculator</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>100 MB file storage</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Public study circles</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>20 monthly AI credits</span>
-                    </li>
+                    {KORSIQ_PLANS.free.features.map((feat, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check size={14} className="text-[#2563EB] shrink-0" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
                 <button
@@ -830,39 +817,25 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
 
               {/* Plus Card */}
               <div className="border border-[#E5E7EB] dark:border-slate-800 bg-white dark:bg-slate-900 rounded-lg p-5 flex flex-col justify-between space-y-4 relative">
-                <div className="absolute -top-2.5 right-4 px-2 py-0.5 bg-[#2563EB] text-white text-[10px] font-bold uppercase rounded tracking-wider">
+                <div className="absolute -top-2.5 right-4 px-2 py-0.5 bg-[#2563EB] text-white text-xs font-semibold rounded">
                   Popular
                 </div>
                 <div className="space-y-3">
                   <div>
                     <h4 className="font-bold text-base text-[#111827] dark:text-white">Plus</h4>
-                    <p className="text-xs text-[#5B6472] mt-0.5">For students who want the AI edge.</p>
+                    <p className="text-xs text-[#5B6472] mt-0.5">{KORSIQ_PLANS.plus.description}</p>
                   </div>
                   <div>
-                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦7,500</span>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">{KORSIQ_PLANS.plus.priceDisplay}</span>
                     <span className="text-xs text-[#5B6472]"> / month</span>
                   </div>
                   <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Unlimited courses &amp; timetable</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Scenario CGPA projection</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>2 GB file storage</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Private circles with invite codes</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>150 monthly AI credits</span>
-                    </li>
+                    {KORSIQ_PLANS.plus.features.map((feat, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check size={14} className="text-[#2563EB] shrink-0" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
                 <button
@@ -884,33 +857,19 @@ export const Profile: React.FC<ProfileProps> = ({ profile, setProfile, onSignOut
                 <div className="space-y-3">
                   <div>
                     <h4 className="font-bold text-base text-[#111827] dark:text-white">KorsIQ Premium</h4>
-                    <p className="text-xs text-[#5B6472] mt-0.5">Full Studio workspace.</p>
+                    <p className="text-xs text-[#5B6472] mt-0.5">{KORSIQ_PLANS.studio.description}</p>
                   </div>
                   <div>
-                    <span className="text-2xl font-bold text-[#111827] dark:text-white">₦15,000</span>
+                    <span className="text-2xl font-bold text-[#111827] dark:text-white">{KORSIQ_PLANS.studio.priceDisplay}</span>
                     <span className="text-xs text-[#5B6472]"> / month</span>
                   </div>
                   <ul className="space-y-2 text-xs text-[#5B6472] pt-2 border-t border-[#E5E7EB] dark:border-slate-800">
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Everything in Plus</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Academic Studio editor</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Real-source citation chips</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>Word (.docx) &amp; PDF export</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check size={14} className="text-[#2563EB] shrink-0" />
-                      <span>200 monthly AI credits, 10 GB storage</span>
-                    </li>
+                    {KORSIQ_PLANS.studio.features.map((feat, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check size={14} className="text-[#2563EB] shrink-0" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
                 <button
